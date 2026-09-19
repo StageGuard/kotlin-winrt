@@ -78,8 +78,8 @@ internal data class WinRTProjectionCallSiteSlot(
             WinRTProjectionCallSiteSlotDirection.PASS_ARRAY,
             WinRTProjectionCallSiteSlotDirection.FILL_ARRAY -> recipe.abiCarriers
             WinRTProjectionCallSiteSlotDirection.REF,
-            WinRTProjectionCallSiteSlotDirection.OUT,
             WinRTProjectionCallSiteSlotDirection.CALLER_OUT -> listOf(WinRTProjectionCallSiteAbiCarrier.ADDRESS)
+            WinRTProjectionCallSiteSlotDirection.OUT,
             WinRTProjectionCallSiteSlotDirection.RECEIVE_ARRAY,
             WinRTProjectionCallSiteSlotDirection.RETURN ->
                 List(recipe.abiCarriers.size) { WinRTProjectionCallSiteAbiCarrier.ADDRESS }

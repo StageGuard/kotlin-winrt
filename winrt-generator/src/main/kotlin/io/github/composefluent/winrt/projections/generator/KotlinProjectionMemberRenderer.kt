@@ -624,21 +624,21 @@ internal fun KotlinProjectionRenderer.renderBoundProperty(
 }
 
 internal fun WinRTMethodDefinition.receiveArrayResultParameter(): WinRTParameterDefinition? {
-    if (returnTypeName != "Unit") {
-        return null
+    return liftedReceiveArrayParameter(parameters, returnTypeName == "Unit") {
+        metadataParameterCategoryFor(it) == WinRTMetadataParameterCategory.ReceiveArray
     }
-    val parameter = parameters.singleOrNull { candidate ->
-        candidate.type.normalized().kind == WinRTTypeRefKind.Array &&
-            candidate.typeIsByRef &&
-            candidate.isOutParameter
-    } ?: return null
-    return if (parameters.lastOrNull() == parameter) parameter else null
 }
+
+// CsWinRT code_writers.h write_projection_parameter_type preserves receive
+// arrays as out parameters. Kotlin's existing convenience lifts only a sole,
+// trailing receive array on a void method; all other outputs need WinRTOut.
+internal fun <T> liftedReceiveArrayParameter(parameters: List<T>, returnsUnit: Boolean, isReceiveArray: (T) -> Boolean): T? =
+    if (returnsUnit) parameters.singleOrNull(isReceiveArray)?.takeIf { it == parameters.lastOrNull() } else null
 
 internal fun WinRTMethodDefinition.projectedKotlinParameters(): List<WinRTParameterDefinition> =
     (receiveArrayResultParameter()?.let { receiveArray -> parameters.filterNot { it == receiveArray } } ?: parameters)
         .map { parameter ->
-            if (metadataParameterCategoryFor(parameter) == WinRTMetadataParameterCategory.Out) {
+            if (metadataParameterCategoryFor(parameter) in setOf(WinRTMetadataParameterCategory.Out, WinRTMetadataParameterCategory.ReceiveArray)) {
                 parameter.copy(typeName = "io.github.composefluent.winrt.runtime.WinRTOut<${parameter.typeName}>")
             } else {
                 parameter

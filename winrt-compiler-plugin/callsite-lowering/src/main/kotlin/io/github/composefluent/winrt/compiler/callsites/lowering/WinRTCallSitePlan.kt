@@ -178,11 +178,12 @@ internal data class WinRTProjectionCallSiteSlot(
                         recipe.callables?.copyFromAbi?.isNotBlank() == true,
                 )
             }
-            WinRTProjectionCallSiteSlotDirection.RECEIVE_ARRAY -> {
-                require(recipe.kind == WinRTProjectionCallSiteRecipeKind.ARRAY) {
+            WinRTProjectionCallSiteSlotDirection.RECEIVE_ARRAY,
+            WinRTProjectionCallSiteSlotDirection.OUT -> {
+                require(direction == WinRTProjectionCallSiteSlotDirection.OUT || recipe.kind == WinRTProjectionCallSiteRecipeKind.ARRAY) {
                     "$direction recipe '${recipe.typeSignature}' must expose array output storage directly."
                 }
-                require(recipe.hasExactOutputCodec || recipe.callables == null) {
+                require(storage.kind != WinRTProjectionCallSiteRecipeKind.ARRAY || recipe.hasExactOutputCodec || recipe.callables == null) {
                     "$direction recipe '${recipe.typeSignature}' has no exact typed output codec."
                 }
             }
@@ -217,8 +218,8 @@ internal data class WinRTProjectionCallSiteSlot(
             WinRTProjectionCallSiteSlotDirection.PASS_ARRAY,
             WinRTProjectionCallSiteSlotDirection.FILL_ARRAY -> recipe.abiCarriers
             WinRTProjectionCallSiteSlotDirection.REF,
-            WinRTProjectionCallSiteSlotDirection.OUT,
             WinRTProjectionCallSiteSlotDirection.CALLER_OUT -> listOf(WinRTProjectionCallSiteAbiCarrier.ADDRESS)
+            WinRTProjectionCallSiteSlotDirection.OUT,
             WinRTProjectionCallSiteSlotDirection.RECEIVE_ARRAY,
             WinRTProjectionCallSiteSlotDirection.RETURN ->
                 List(recipe.abiCarriers.size) { WinRTProjectionCallSiteAbiCarrier.ADDRESS }

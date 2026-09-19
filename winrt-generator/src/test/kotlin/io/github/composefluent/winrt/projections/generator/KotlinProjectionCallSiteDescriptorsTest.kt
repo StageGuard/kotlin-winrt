@@ -17,6 +17,34 @@ import org.junit.Test
 
 class KotlinProjectionCallSiteDescriptorsTest {
     @Test
+    fun receive_array_parameters_preserve_other_outputs_and_the_declared_return() {
+        // CsWinRT code_writers.h write_projection_parameter_type emits out T[].
+        // Only Kotlin's established sole trailing array on a void method is lifted.
+        val renderer = KotlinProjectionRenderer()
+        val integer = KotlinProjectionAbiTypeBinding(KotlinProjectionAbiValueKind.Int32, "Int")
+        val unit = KotlinProjectionAbiTypeBinding(KotlinProjectionAbiValueKind.Unit, "Unit")
+        val array = KotlinProjectionAbiTypeBinding(KotlinProjectionAbiValueKind.Array, "Array<Int>", typeArguments = listOf(integer))
+        fun output(name: String) = KotlinProjectionAbiParameterBinding(name, array, category = WinRTMetadataParameterCategory.ReceiveArray)
+        fun plan(result: KotlinProjectionAbiTypeBinding, parameters: List<KotlinProjectionAbiParameterBinding>) =
+            renderer.composeTypedProjectionCallSite(renderer.requireAbiCallPlan("sample.Read", result, parameters)).plan
+        val withReturn = plan(integer, listOf(output("values")))
+        assertEquals(listOf(WinRTProjectionCallSiteSlotDirection.OUT, WinRTProjectionCallSiteSlotDirection.RETURN), withReturn.descriptor.slots.map { it.direction })
+        assertEquals(2, withReturn.descriptor.slots.first().abiCarriers.size)
+        assertEquals(4, withReturn.platformShape.arguments.size) // this, length*, data**, result*
+        assertTrue(withReturn.parameters.single().type.toString().contains("WinRTOut<kotlin.Array<kotlin.Int>>"))
+        val twoArrays = plan(unit, listOf(output("first"), output("second")))
+        assertEquals(2, twoArrays.parameters.size)
+        assertEquals(5, twoArrays.platformShape.arguments.size)
+        assertNull(twoArrays.descriptor.returnSlot)
+        val nonTrailing = plan(unit, listOf(output("values"), KotlinProjectionAbiParameterBinding("limit", integer)))
+        assertEquals(2, nonTrailing.parameters.size)
+        assertNull(nonTrailing.descriptor.returnSlot)
+        val lifted = plan(unit, listOf(output("values")))
+        assertTrue(lifted.parameters.isEmpty())
+        assertEquals(WinRTProjectionCallSiteSlotDirection.RECEIVE_ARRAY, lifted.descriptor.returnSlot?.direction)
+    }
+
+    @Test
     fun runtime_class_inputs_preserve_the_declared_default_interface_contract() {
         // cswinrt/code_writers.h write_marshaler emits the declared class's default IID.
         // Grid.SetRow takes FrameworkElement even when the supplied value is NavigationView.

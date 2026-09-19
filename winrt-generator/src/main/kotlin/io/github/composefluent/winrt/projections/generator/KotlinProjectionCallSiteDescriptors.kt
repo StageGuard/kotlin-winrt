@@ -32,6 +32,9 @@ internal fun KotlinProjectionRenderer.composeTypedProjectionCallSite(
     val arguments = mutableListOf<CodeBlock>()
     var parameterResultType: TypeName? = null
     var parameterResultAbiType = ""
+    val liftedArray = liftedReceiveArrayParameter(callPlan.parameterSlots, callPlan.returnBinding.kind == KotlinProjectionAbiValueKind.Unit) {
+        it.binding.category == WinRTMetadataParameterCategory.ReceiveArray
+    }
 
     callPlan.parameterSlots.forEach { slotPlan ->
         val binding = slotPlan.binding
@@ -42,6 +45,8 @@ internal fun KotlinProjectionRenderer.composeTypedProjectionCallSite(
             sourceRecipe.storageRecipe.kind == WinRTProjectionCallSiteRecipeKind.ARRAY
         ) {
             WinRTProjectionCallSiteSlotDirection.PASS_ARRAY
+        } else if (binding.category == WinRTMetadataParameterCategory.ReceiveArray && slotPlan != liftedArray) {
+            WinRTProjectionCallSiteSlotDirection.OUT
         } else {
             binding.category.callSiteDirection()
         }

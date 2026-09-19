@@ -1338,10 +1338,9 @@ internal class WinRTCallSiteRecipeLowering private constructor(
                 clear = slot.ownership == WinRTProjectionCallSiteOwnership.OWNED,
                 pluginContext = pluginContext,
             ) { storage ->
-                if (storage.addresses.size != 1) return@emitOutputStorage null
                 continuation(
                     state.copy(
-                        abiArguments = state.abiArguments + storage.addresses.single(),
+                        abiArguments = state.abiArguments + storage.addresses,
                         directInputs = state.directInputs + standardDirectInputs(
                             slot.abiCarriers,
                             storage.addresses,

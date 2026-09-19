@@ -152,7 +152,7 @@ internal data class KotlinProjectionPlatformCallShape(
                         WinRTProjectionCallSiteSlotDirection.REF,
                         WinRTProjectionCallSiteSlotDirection.OUT,
                         WinRTProjectionCallSiteSlotDirection.CALLER_OUT,
-                        -> repeat(slot.functionParameterCount) {
+                        -> repeat(slot.abiCarriers.size) {
                             add(KotlinProjectionPlatformCallArgument.pointer())
                         }
 
