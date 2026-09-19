@@ -190,15 +190,8 @@ private fun KotlinProjectionRenderer.sharedCallSiteInput(
     binding: KotlinProjectionAbiTypeBinding,
     recipe: WinRTProjectionCallSiteRecipe,
 ): Pair<TypeName, WinRTProjectionCallSiteRecipe>? {
-    if (binding.kind == KotlinProjectionAbiValueKind.ProjectedRuntimeClass &&
-        isDirectMetadataProjection(binding, recipe)
-    ) {
-        val type = IWINRT_OBJECT_CLASS_NAME.copy(nullable = recipe.nullable)
-        return type to recipe.storageRecipe.copy(
-            referenceAccess = WinRTProjectionCallSiteReferenceAccess.PROJECTED_OBJECT,
-            typeSignature = "Projection(${IWINRT_OBJECT_CLASS_NAME.canonicalName}|typed)",
-        )
-    }
+    // Runtime-class inputs retain their declared type: a derived object's native
+    // reference need not implement the base class's default ABI interface.
     // Generated enum Metadata.toAbi is a static underlying-value conversion. Performing it
     // at the typed caller preserves signedness without making each enum a wrapper identity.
     if (recipe.kind == WinRTProjectionCallSiteRecipeKind.ENUM && !recipe.nullable &&

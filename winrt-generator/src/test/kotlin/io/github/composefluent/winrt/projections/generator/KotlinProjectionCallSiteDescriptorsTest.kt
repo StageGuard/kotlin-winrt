@@ -17,6 +17,27 @@ import org.junit.Test
 
 class KotlinProjectionCallSiteDescriptorsTest {
     @Test
+    fun runtime_class_inputs_preserve_the_declared_default_interface_contract() {
+        // cswinrt/code_writers.h write_marshaler emits the declared class's default IID.
+        // Grid.SetRow takes FrameworkElement even when the supplied value is NavigationView.
+        val renderer = KotlinProjectionRenderer()
+        fun plan(name: String) = renderer.composeTypedProjectionCallSite(
+            renderer.requireAbiCallPlan(
+                bindingName = "sample.accept",
+                returnBinding = KotlinProjectionAbiTypeBinding(KotlinProjectionAbiValueKind.Unit, "Unit"),
+                parameterBindings = listOf(KotlinProjectionAbiParameterBinding("value",
+                    KotlinProjectionAbiTypeBinding(KotlinProjectionAbiValueKind.ProjectedRuntimeClass, name))),
+            ),
+        ).plan
+        val base = plan("Microsoft.UI.Xaml.FrameworkElement")
+        val derived = plan("Microsoft.UI.Xaml.Controls.NavigationView")
+        assertEquals(base.platformShape, derived.platformShape)
+        assertNotEquals(base.functionName, derived.functionName)
+        assertEquals("microsoft.ui.xaml.FrameworkElement", base.descriptor.slots.single().recipe.projectedKotlinTypeName)
+        assertEquals("microsoft.ui.xaml.controls.NavigationView", derived.descriptor.slots.single().recipe.projectedKotlinTypeName)
+    }
+
+    @Test
     fun sharded_metadata_initializes_independently_of_other_values_in_the_same_shard() {
         // Mirrors CsWinRT's type-owned metadata initialization rather than eagerly
         // initializing every unrelated type that happens to hash into a Kotlin shard.
@@ -409,7 +430,7 @@ class KotlinProjectionCallSiteDescriptorsTest {
         val generatedFiles = support.renderFiles(KotlinProjectionGenerationLayout.SingleSourceSet)
         assertTrue(invocation.plan.descriptor.slots.single().recipe.callables?.toAbi.orEmpty().isBlank())
         assertEquals(
-            "io.github.composefluent.winrt.runtime.IWinRTObject?",
+            "windows.web.http.HttpRequestMessage?",
             invocation.plan.descriptor.slots.single().recipe.projectedKotlinTypeName,
         )
         assertTrue(generatedFiles.isEmpty())

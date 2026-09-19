@@ -447,12 +447,11 @@ internal class WinRTProjectionCallSitePlanner(
         val projection = directProjectionOutputRecipe(type, projectedName) ?: return null
         val outputStorage = projection.children.singleOrNull() ?: return null
         val (access, typeHandle) = when (outputStorage.referenceAccess) {
-            WinRTProjectionCallSiteReferenceAccess.UNKNOWN_REFERENCE -> {
+            WinRTProjectionCallSiteReferenceAccess.UNKNOWN_REFERENCE,
+            WinRTProjectionCallSiteReferenceAccess.INSPECTABLE_REFERENCE -> {
                 val getter = metadataClass(type)?.metadataPropertyGetter("TYPE_HANDLE") ?: return null
                 WinRTProjectionCallSiteReferenceAccess.PROJECTED_INTERFACE to getter.symbol
             }
-            WinRTProjectionCallSiteReferenceAccess.INSPECTABLE_REFERENCE ->
-                WinRTProjectionCallSiteReferenceAccess.PROJECTED_OBJECT to null
             else -> return null
         }
         val storage = referenceRecipe(
