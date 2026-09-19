@@ -493,7 +493,11 @@ internal abstract class GenerateWinRTProjectionsWorkAction : WorkAction<Generate
             exclude = parameters.excludeNamespaces.get().toSet() + effectiveExcludeTypes.toSet(),
             excludedTypes = effectiveExcludeTypes.toSet(),
             additionExclude = parameters.additionExcludeNamespaces.get().toSet(),
-            component = exportedAuthoringCandidates.isNotEmpty(),
+            // Application projections use baseModel (imported WinMD), while
+            // authored application types are emitted separately below. CsWinRT's
+            // component mode describes the component's own metadata, not its
+            // imported controls: enabling it here suppresses their RCW registrar.
+            component = parameters.projectModel.get() != "application" && exportedAuthoringCandidates.isNotEmpty(),
         )
         if (parameters.emitProjectionSources.get() && !(hasPreparedStaticSources && authoringCandidates.isEmpty())) {
             KotlinProjectionGenerator(
