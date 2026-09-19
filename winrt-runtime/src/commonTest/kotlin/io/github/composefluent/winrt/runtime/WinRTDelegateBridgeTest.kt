@@ -39,6 +39,43 @@ private fun invokeStaticLongDelegate(
 }
 
 class WinRTDelegateBridgeTest {
+    @Test
+    fun delegate_callback_projects_borrowed_pointer_using_its_declared_type() {
+        // CsWinRT ComWrappersSupport.GetRuntimeClassForTypeCreation uses the static
+        // parameter type when the native runtime class is unavailable or differs.
+        val type = WinRTTypeHandle("test.DelegateParameter", IID.IInspectable)
+        val projected = mutableListOf<IInspectableReference>()
+        val expected = DelegateObjectPayload("typed argument")
+        ComWrappersSupport.registerTypedRcwFactory(type) { reference ->
+            projected += reference
+            expected
+        }
+        val descriptor = createWinRTTypedDelegateDescriptor(
+            Guid("9de1c534-6ae1-11e0-84e1-18a905bcc53f"),
+            WinRTDelegateValueKind.UNIT,
+            arrayOf(WinRTDelegateValueKind.IINSPECTABLE),
+            type,
+        )
+        val host = WinRTInspectableComObject.inspectableBox("payload", "test.UnknownNativeClass")
+        val pointer = host.detachReference(IID.IInspectable)
+        try {
+            WinRTDelegateBridge.createDelegate(descriptor) { arguments ->
+                assertSame(expected, arguments.single())
+            }.use { delegate ->
+                delegate.invokeAbiForTesting(listOf(pointer))
+                delegate.createReference().use { reference ->
+                    assertEquals(KnownHResults.S_OK, reference.invokeAbi(listOf(pointer)))
+                }
+            }
+            assertTrue(projected.isNotEmpty())
+            assertEquals("test.UnknownNativeClass", projected.first().getRuntimeClassName())
+        } finally {
+            projected.forEach { it.close() }
+            WinRTPlatformApi.releaseRaw(pointer)
+            ComWrappersSupport.clearRegistriesForTests()
+        }
+    }
+
     private data class DelegateObjectPayload(val value: String)
 
     private data class TestPoint(val x: Float, val y: Float)

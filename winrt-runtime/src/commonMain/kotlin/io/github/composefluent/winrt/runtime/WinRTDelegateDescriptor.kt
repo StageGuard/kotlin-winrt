@@ -7,6 +7,7 @@ data class WinRTDelegateDescriptor(
     val parameterStructAdapters: List<NativeStructAdapter<*>?> = emptyList(),
     val returnStructAdapter: NativeStructAdapter<*>? = null,
     val runtimeClassName: String? = null,
+    val parameterTypeHandles: List<WinRTTypeHandle?> = emptyList(),
 ) {
     /** Closed ABI signature reused by the delegate vtable and every invocation of this type. */
     val functionSignature: ComMethodSignature =
@@ -23,6 +24,9 @@ data class WinRTDelegateDescriptor(
         )
 
     init {
+        require(parameterTypeHandles.isEmpty() || parameterTypeHandles.size == parameterKinds.size) {
+            "Delegate projected type count must match parameter kind count."
+        }
         require(returnKind.isSupportedDelegateReturnKind()) {
             "Unsupported delegate return kind: $returnKind."
         }

@@ -14,6 +14,10 @@ import org.jetbrains.kotlin.ir.builders.irGetField
 import org.jetbrains.kotlin.ir.builders.irString
 import org.jetbrains.kotlin.ir.builders.irVararg
 import org.jetbrains.kotlin.ir.declarations.IrClass
+import org.jetbrains.kotlin.ir.declarations.IrProperty
+import org.jetbrains.kotlin.ir.builders.irGetObject
+import org.jetbrains.kotlin.ir.builders.irNull
+import org.jetbrains.kotlin.ir.types.makeNullable
 import org.jetbrains.kotlin.ir.declarations.IrDeclaration
 import org.jetbrains.kotlin.ir.declarations.IrDeclarationOrigin
 import org.jetbrains.kotlin.ir.declarations.IrField
@@ -164,6 +168,7 @@ private fun lowerGenericDelegateSamValue(
         file = fromFile,
         interfaceId = closedInterfaceId,
         parameterKinds = parameterKinds,
+        parameterTypes = invokeParameters,
         returnKind = returnKind,
         descriptorFields = descriptorFields,
         startOffset = callback.startOffset,
@@ -190,6 +195,7 @@ private fun createDescriptorExpression(
     helper: IrSimpleFunctionSymbol,
     interfaceId: String,
     parameterKinds: List<DelegateValueKind>,
+    parameterTypes: List<IrType>,
     returnKind: DelegateValueKind,
 ): IrExpression? {
     val guidClass = pluginContext.findClassSymbol(ClassId.topLevel(FqName(WINRT_GUID_FQ_NAME)), fromFile) ?: return null
@@ -206,7 +212,7 @@ private fun createDescriptorExpression(
     val returnElement = enumValue(builder, enumClass, enumType, returnKind.name) ?: return null
     val call = builder.irCall(helper)
     val regularParameters = helper.owner.parameters.filter { parameter -> parameter.kind == IrParameterKind.Regular }
-    if (regularParameters.size != 3) return null
+    if (regularParameters.size != 4) return null
     val interfaceIndex = helper.owner.parameters.indexOf(regularParameters[0])
     val returnIndex = helper.owner.parameters.indexOf(regularParameters[1])
     val varargIndex = helper.owner.parameters.indexOf(regularParameters[2])
@@ -216,6 +222,18 @@ private fun createDescriptorExpression(
     // here would make the backend allocate WinRTDelegateValueKind[][] while
     // the runtime helper expects WinRTDelegateValueKind[].
     call.arguments[varargIndex] = builder.irVararg(enumType, parameterElements)
+    val handleType = regularParameters[3].varargElementType ?: return null
+    val handles = parameterTypes.map { type ->
+        val metadata = type.classOrNull?.owner?.declarations?.filterIsInstance<IrClass>()
+            ?.singleOrNull { it.name.asString() == "Metadata" }
+        val getter = metadata?.declarations?.filterIsInstance<IrProperty>()
+            ?.singleOrNull { it.name.asString() == "TYPE_HANDLE" }?.getter
+        if (getter == null) builder.irNull(handleType.makeNullable()) else builder.irCall(getter.symbol).apply {
+            val receiver = getter.parameters.indexOfFirst { it.kind == IrParameterKind.DispatchReceiver }
+            if (receiver >= 0) arguments[receiver] = builder.irGetObject(metadata.symbol)
+        }
+    }
+    call.arguments[helper.owner.parameters.indexOf(regularParameters[3])] = builder.irVararg(handleType, handles)
     return call
 }
 
@@ -232,6 +250,7 @@ private fun descriptorFieldExpression(
     file: IrFile,
     interfaceId: String,
     parameterKinds: List<DelegateValueKind>,
+    parameterTypes: List<IrType>,
     returnKind: DelegateValueKind,
     descriptorFields: MutableMap<Pair<IrFile, WinRTDelegateDescriptorShape>, IrField>,
     startOffset: Int,
@@ -277,6 +296,7 @@ private fun descriptorFieldExpression(
                 helper = helper,
                 interfaceId = interfaceId,
                 parameterKinds = parameterKinds,
+                parameterTypes = parameterTypes,
                 returnKind = returnKind,
             ) ?: return null
             created.initializer = pluginContext.irFactory.createExpressionBody(
@@ -509,7 +529,7 @@ private enum class DelegateValueKind {
 }
 
 private const val WINRT_DELEGATE_TYPE_ANNOTATION_FQ_NAME = "io.github.composefluent.winrt.runtime.WinRTDelegateType"
-private const val WINRT_CREATE_DESCRIPTOR_FQ_NAME = "io.github.composefluent.winrt.runtime.createWinRTDelegateDescriptor"
+private const val WINRT_CREATE_DESCRIPTOR_FQ_NAME = "io.github.composefluent.winrt.runtime.createWinRTTypedDelegateDescriptor"
 private const val WINRT_DELEGATE_VALUE_KIND_FQ_NAME = "io.github.composefluent.winrt.runtime.WinRTDelegateValueKind"
 private const val WINRT_GUID_FQ_NAME = "io.github.composefluent.winrt.runtime.Guid"
 private const val KOTLIN_UNIT_FQ_NAME = "kotlin.Unit"

@@ -35,7 +35,11 @@ internal object WinRTDelegateAbiMarshaller {
             "ABI argument count ${abiArguments.size} must match delegate ABI parameter count ${expectedAbiArgumentCount(descriptor.parameterKinds)}."
         }
 
-        return decodeArgumentList(descriptor.parameterKinds, abiArguments) { index, _ -> descriptor.parameterStructAdapter(index) }
+        return decodeArgumentList(
+            descriptor.parameterKinds,
+            abiArguments,
+            typeHandleAt = { descriptor.parameterTypeHandles.getOrNull(it) },
+        ) { index, _ -> descriptor.parameterStructAdapter(index) }
     }
 
     internal fun decodeRawWordArgument(
@@ -708,6 +712,7 @@ internal object WinRTDelegateAbiMarshaller {
     private inline fun decodeArgumentList(
         parameterKinds: List<WinRTDelegateValueKind>,
         abiArguments: List<Any?>,
+        typeHandleAt: (Int) -> WinRTTypeHandle? = { null },
         adapterAt: (Int, WinRTDelegateValueKind) -> NativeStructAdapter<*>?,
     ): List<Any?> {
         val decoded = ArrayList<Any?>(parameterKinds.size)
@@ -717,7 +722,22 @@ internal object WinRTDelegateAbiMarshaller {
                 decoded.add(decodeUInt8Array(abiArguments[abiIndex], abiArguments[abiIndex + 1]))
                 abiIndex += 2
             } else {
-                decoded.add(decodeArgument(kind, abiArguments[abiIndex], adapterAt(parameterIndex, kind)))
+                val typeHandle = typeHandleAt(parameterIndex)
+                decoded.add(if (typeHandle == null) {
+                    decodeArgument(kind, abiArguments[abiIndex], adapterAt(parameterIndex, kind))
+                } else {
+                    // CsWinRT ComWrappersSupport.GetRuntimeClassForTypeCreation retains the
+                    // declared type when selecting the RCW for a borrowed callback argument.
+                    val value = abiArguments[abiIndex]
+                    val pointer = when (value) {
+                        null -> PlatformAbi.nullPointer
+                        is RawAddress -> value
+                        is RawComPtr -> value.asRawAddress()
+                        is ComObjectReference -> value.pointer.asRawAddress()
+                        else -> error("Expected a projected delegate parameter pointer.")
+                    }
+                    ComWrappersSupport.createRcwForComObject(pointer, typeHandle)
+                })
                 abiIndex += 1
             }
         }

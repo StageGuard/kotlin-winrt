@@ -25,7 +25,7 @@ class WinRTDelegateHandle internal constructor(
         check(closed.load() == 0) { "Delegate handle is already closed." }
         return callback(
             WinRTDelegateAbiMarshaller.decodeArguments(
-                parameterKinds = descriptor.parameterKinds,
+                descriptor = descriptor,
                 abiArguments = arguments,
             ),
         )

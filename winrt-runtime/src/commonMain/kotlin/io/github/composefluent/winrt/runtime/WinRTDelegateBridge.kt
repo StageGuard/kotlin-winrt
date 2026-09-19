@@ -252,6 +252,19 @@ fun createWinRTDelegateDescriptor(
         returnKind = returnKind,
     )
 
+/** Preserves CsWinRT's statically determined parameter types at the callback boundary. */
+fun createWinRTTypedDelegateDescriptor(
+    interfaceId: Guid,
+    returnKind: WinRTDelegateValueKind,
+    parameterKinds: Array<WinRTDelegateValueKind>,
+    vararg parameterTypeHandles: WinRTTypeHandle?,
+): WinRTDelegateDescriptor = WinRTDelegateDescriptor(
+    interfaceId = interfaceId,
+    parameterKinds = parameterKinds.asList(),
+    returnKind = returnKind,
+    parameterTypeHandles = parameterTypeHandles.asList(),
+)
+
 class WinRTDelegateArgumentMarshaler internal constructor(
     private val handle: WinRTDelegateHandle?,
     private val reference: ComObjectReference?,

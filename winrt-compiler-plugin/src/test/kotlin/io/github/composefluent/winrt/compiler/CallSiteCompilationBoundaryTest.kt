@@ -20,9 +20,13 @@ class CallSiteCompilationBoundaryTest {
         // A consumer must retain this contract without the producer's registrar sidecar.
         val library = compile(root, "signature-library", """
             package boundary.library
-            import io.github.composefluent.winrt.runtime.WindowsRuntimeType
+            import io.github.composefluent.winrt.runtime.*
             @WindowsRuntimeType(guidSignature = "rc(Sample.Widget;{11111111-2222-3333-4444-555555555555})")
-            class Widget
+            class Widget {
+                object Metadata {
+                    val TYPE_HANDLE = WinRTTypeHandle("Sample.Widget", Guid("11111111-2222-3333-4444-555555555555"))
+                }
+            }
         """.trimIndent())
         val consumer = compile(root, "signature-consumer", """
             package boundary.consumer
@@ -36,6 +40,8 @@ class CallSiteCompilationBoundaryTest {
         }.toList()
         assertEquals("The standalone K2 plugin must adapt the closed generic event SAM", 1,
             calls.count { it.name == "adaptWinRTTypedEventHandler" })
+        assertEquals("Both projected callback parameters must retain their declared type", 2,
+            calls.count { it.owner == "boundary/library/Widget\$Metadata" && it.name == "getTYPE_HANDLE" })
     }
 
     @Test
