@@ -1210,7 +1210,7 @@ internal fun KotlinProjectionRenderer.collectionReferenceAdapterCode(
         val projectedType = mappedCollectionProjectedType(typeBinding)
         val typeSignature = abiTypeSignature(typeBinding, hoistMetadata) ?: return null
         return hoistAdapter(projectedType, CodeBlock.of(
-            "%T<%T>(projectedTypeName = %S, typeSignature = %L, projector = { reference -> if (reference == null) emptyList() else %T.fromAbi(%T.fromRawComPtr(reference.pointer), %L) ?: emptyList() }, marshaller = { value -> %T(%T.toRawComPtr(%T.fromManaged(value, %L)), %T.createFromSignature(%L)) })",
+            "%T<%T>(projectedTypeName = %S, typeSignature = %L, projector = { reference -> if (reference == null) emptyList() else %T.fromAbi(%T.fromRawComPtr(reference.getRefPointer()), %L) ?: emptyList() }, marshaller = { value -> %T(%T.toRawComPtr(%T.fromManaged(value, %L)), %T.createFromSignature(%L)) })",
             WINRT_REFERENCE_VALUE_ADAPTER_CLASS_NAME,
             projectedType,
             typeBinding.typeName.trim().removeSuffix("?"),
@@ -1231,7 +1231,7 @@ internal fun KotlinProjectionRenderer.collectionReferenceAdapterCode(
         val projectedType = mappedCollectionProjectedType(typeBinding)
         val typeSignature = abiTypeSignature(typeBinding, hoistMetadata) ?: return null
         return hoistAdapter(projectedType, CodeBlock.of(
-            "%T<%T>(projectedTypeName = %S, typeSignature = %L, projector = { reference -> if (reference == null) emptyList() else %T.fromAbi(%T.fromRawComPtr(reference.pointer), %L) ?: emptyList() }, marshaller = { value -> %T(%T.toRawComPtr(%T.fromManaged(value, %L)), %T.createFromSignature(%L)) })",
+            "%T<%T>(projectedTypeName = %S, typeSignature = %L, projector = { reference -> if (reference == null) emptyList() else %T.fromAbi(%T.fromRawComPtr(reference.getRefPointer()), %L) ?: emptyList() }, marshaller = { value -> %T(%T.toRawComPtr(%T.fromManaged(value, %L)), %T.createFromSignature(%L)) })",
             WINRT_REFERENCE_VALUE_ADAPTER_CLASS_NAME,
             projectedType,
             typeBinding.typeName.trim().removeSuffix("?"),
@@ -1252,7 +1252,7 @@ internal fun KotlinProjectionRenderer.collectionReferenceAdapterCode(
         val projectedType = mappedCollectionProjectedType(typeBinding)
         val typeSignature = abiTypeSignature(typeBinding, hoistMetadata) ?: return null
         return hoistAdapter(projectedType, CodeBlock.of(
-            "%T<%T>(projectedTypeName = %S, typeSignature = %L, projector = { reference -> if (reference == null) mutableListOf() else %T.fromAbi(%T.fromRawComPtr(reference.pointer), %L) ?: mutableListOf() }, marshaller = { value -> %T(%T.toRawComPtr(%T.fromManaged(value, %L)), %T.createFromSignature(%L)) })",
+            "%T<%T>(projectedTypeName = %S, typeSignature = %L, projector = { reference -> if (reference == null) mutableListOf() else %T.fromAbi(%T.fromRawComPtr(reference.getRefPointer()), %L) ?: mutableListOf() }, marshaller = { value -> %T(%T.toRawComPtr(%T.fromManaged(value, %L)), %T.createFromSignature(%L)) })",
             WINRT_REFERENCE_VALUE_ADAPTER_CLASS_NAME,
             projectedType,
             typeBinding.typeName.trim().removeSuffix("?"),
@@ -1275,7 +1275,7 @@ internal fun KotlinProjectionRenderer.collectionReferenceAdapterCode(
         val typeSignature = abiTypeSignature(typeBinding, hoistMetadata) ?: return null
         val interfaceId = collectionInterfaceIdCode(typeBinding, hoistMetadata) ?: return null
         return hoistAdapter(projectedType, CodeBlock.of(
-            "%T<%T>(projectedTypeName = %S, typeSignature = %L, projector = { reference -> if (reference == null) emptyMap() else %T.fromAbi(%T.fromRawComPtr(reference.pointer), %L, %L, %L) ?: emptyMap() }, marshaller = { value -> %T(%T.toRawComPtr(%T.fromManaged(value, %L, %L, %L)), %T.createFromSignature(%L)) })",
+            "%T<%T>(projectedTypeName = %S, typeSignature = %L, projector = { reference -> if (reference == null) emptyMap() else %T.fromAbi(%T.fromRawComPtr(reference.getRefPointer()), %L, %L, %L) ?: emptyMap() }, marshaller = { value -> %T(%T.toRawComPtr(%T.fromManaged(value, %L, %L, %L)), %T.createFromSignature(%L)) })",
             WINRT_REFERENCE_VALUE_ADAPTER_CLASS_NAME,
             projectedType,
             typeBinding.typeName.trim().removeSuffix("?"),
@@ -1302,7 +1302,7 @@ internal fun KotlinProjectionRenderer.collectionReferenceAdapterCode(
         val typeSignature = abiTypeSignature(typeBinding, hoistMetadata) ?: return null
         val interfaceId = collectionInterfaceIdCode(typeBinding, hoistMetadata) ?: return null
         return hoistAdapter(projectedType, CodeBlock.of(
-            "%T<%T>(projectedTypeName = %S, typeSignature = %L, projector = { reference -> if (reference == null) linkedMapOf() else %T.fromAbi(%T.fromRawComPtr(reference.pointer), %L, %L, %L) ?: linkedMapOf() }, marshaller = { value -> %T(%T.toRawComPtr(%T.fromManaged(value, %L, %L, %L)), %T.createFromSignature(%L)) })",
+            "%T<%T>(projectedTypeName = %S, typeSignature = %L, projector = { reference -> if (reference == null) linkedMapOf() else %T.fromAbi(%T.fromRawComPtr(reference.getRefPointer()), %L, %L, %L) ?: linkedMapOf() }, marshaller = { value -> %T(%T.toRawComPtr(%T.fromManaged(value, %L, %L, %L)), %T.createFromSignature(%L)) })",
             WINRT_REFERENCE_VALUE_ADAPTER_CLASS_NAME,
             projectedType,
             typeBinding.typeName.trim().removeSuffix("?"),

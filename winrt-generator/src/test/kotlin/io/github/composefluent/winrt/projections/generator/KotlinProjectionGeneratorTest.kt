@@ -21169,8 +21169,8 @@ class KotlinProjectionGeneratorTest {
             .contents
 
         assertTrue(contents, contents.contains("private val _iVector: IUnknownReference"))
-        assertTrue(contents, contents.contains("WinRTListProjection.fromAbi(PlatformAbi.fromRawComPtr(_iVector.pointer)"))
-        assertFalse(contents, contents.contains("WinRTListProjection.fromAbi(PlatformAbi.fromRawComPtr(_defaultInterface.pointer)"))
+        assertTrue(contents, contents.contains("WinRTListProjection.fromAbi(PlatformAbi.fromRawComPtr(_iVector.getRefPointer())"))
+        assertFalse(contents, contents.contains("WinRTListProjection.fromAbi(PlatformAbi.fromRawComPtr(_defaultInterface.getRefPointer())"))
         assertTrue(contents, contents.contains("override val vectorChanged: WinRTEvent<VectorChangedEventHandler<Any?>>"))
         assertTrue(contents, contents.contains("override fun addVectorChanged(handler: VectorChangedEventHandler<Any?>): EventRegistrationToken"))
         assertTrue(contents, contents.contains("override fun removeVectorChanged(token: EventRegistrationToken)"))
