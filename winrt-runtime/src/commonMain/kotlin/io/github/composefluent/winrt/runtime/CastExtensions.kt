@@ -15,9 +15,6 @@ inline fun <reified T : Any> Any.asWinRT(): T {
         return this
     }
     val typeHandle = requireRegisteredWinRTInterfaceTypeHandle(T::class)
-    if (this is IWinRTObject && primaryTypeHandle == typeHandle) {
-        return this as T
-    }
     return winRTCast(this, typeHandle, T::class)
 }
 
@@ -43,7 +40,13 @@ fun <T : Any> winRTCast(
         )
 
     objRef.use {
-        val wrapper = ComWrappersSupport.createRcwForComObject(it.getRefPointer().asRawAddress(), typeHandle)
+        // CsWinRT CastExtensions.As<T> uses ObjectReference.AsInterface<T> once
+        // the managed type check fails. Kotlin has no IDynamicInterfaceCastable:
+        // a cached wrapper supporting the IID is not necessarily a T. Create
+        // the requested projection without replacing the canonical identity RCW.
+        val wrapper = ComWrappersSupport.createRcwForComObject(
+            it.pointer.asRawAddress(), typeHandle, tryUseCache = false,
+        )
         if (targetType.isInstance(wrapper)) {
             @Suppress("UNCHECKED_CAST")
             return wrapper as T
@@ -66,7 +69,7 @@ fun Any.winrtAs(typeHandle: WinRTTypeHandle): Any {
         )
 
     objRef.use {
-        return ComWrappersSupport.createRcwForComObject(it.getRefPointer().asRawAddress(), typeHandle)
+        return ComWrappersSupport.createRcwForComObject(it.pointer.asRawAddress(), typeHandle)
             ?: throw IllegalArgumentException(
                 "Unable to create a WinRT wrapper for '${typeHandle.projectedTypeName}'.",
             )

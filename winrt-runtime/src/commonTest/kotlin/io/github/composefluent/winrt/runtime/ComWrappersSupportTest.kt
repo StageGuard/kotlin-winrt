@@ -1358,6 +1358,36 @@ class ComWrappersSupportTest {
     }
 
     @Test
+    fun cast_extension_rehydrates_a_cached_iid_compatible_but_kotlin_incompatible_wrapper() {
+        // CsWinRT CastExtensions.As<T> -> ObjectReference.AsInterface<T> creates
+        // a castable view; native IID compatibility alone cannot implement a Kotlin interface.
+        ComWrappersSupport.clearRegistriesForTests()
+        val type = WinRTTypeHandle("test.ITarget", IID.IInspectable)
+        WinRTTypeRegistry.register<TargetProjectedInterface>(
+            projectedTypeName = type.projectedTypeName, iid = type.interfaceId, isWindowsRuntimeType = true,
+        )
+        ComWrappersSupport.registerRuntimeClassFactory("test.RuntimeClass") { TestTypedWrapper(type, it) }
+        ComWrappersSupport.registerTypedRcwFactory(type) { TestTargetWrapper(type, it) }
+        val pointer = WinRTInspectableComObject.inspectableBox("payload", "test.RuntimeClass")
+            .detachReference(IID.IInspectable)
+        val cached = ComWrappersSupport.createRcwForComObject(pointer) as TestTypedWrapper
+        try {
+            assertTrue(cached.isInterfaceImplemented(type))
+            val target = cached.asWinRT<TargetProjectedInterface>() as TestTargetWrapper
+            try {
+                assertTrue(target.nativeObject.sameIdentity(cached.nativeObject))
+                assertSame(cached, ComWrappersSupport.createRcwForComObject(pointer))
+                assertSame(target, target.asWinRT<TargetProjectedInterface>())
+            } finally {
+                target.nativeObject.close()
+            }
+        } finally {
+            cached.nativeObject.close()
+            WinRTPlatformApi.releaseRaw(pointer)
+        }
+    }
+
+    @Test
     fun generic_cast_rejects_targets_without_registered_winrt_interface_iid() {
         ComWrappersSupport.clearRegistriesForTests()
         val projected = ProjectedInspectableObject(
