@@ -59,14 +59,18 @@ internal fun createSyntheticInspectableCcwDefinition(
     declaredReferenceArrayElementType: KClass<*>? = null,
 ): WinRTCcwDefinition? {
     createSyntheticValueCcwDefinition(value, declaredReferenceArrayElementType)?.let { return it }
-    if (value is AutoCloseable) {
-        return WinRTCcwDefinition(
-            interfaceDefinitions = listOf(createClosableInspectableInterfaceDefinition(value)),
-            defaultInterfaceId = IID.IDisposable,
-            runtimeClassName = defaultInspectableRuntimeClassNameFor(value),
-        )
+    val interfaces = buildList {
+        // CsWinRT Projections/Bindable.net5.cs exposes IEnumerable as IBindableIterable
+        // even when the caller's declared ABI type is only IInspectable (ItemsSource).
+        if (value is Iterable<*>) add(bindableIterableDefinition())
+        if (value is AutoCloseable) add(createClosableInspectableInterfaceDefinition(value))
     }
-    return null
+    if (interfaces.isEmpty()) return null
+    return WinRTCcwDefinition(
+        interfaceDefinitions = interfaces,
+        defaultInterfaceId = interfaces.first().interfaceId,
+        runtimeClassName = defaultInspectableRuntimeClassNameFor(value),
+    )
 }
 
 internal fun defaultInspectableRuntimeClassNameFor(value: Any): String? {

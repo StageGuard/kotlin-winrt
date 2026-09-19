@@ -142,18 +142,7 @@ object WinRTBindableIterableProjection {
             managedValue = managed,
             defaultInterfaceId = WinRTBindableInterfaceIds.IBindableIterable,
             interfaceDefinitions = listOf(
-                WinRTInspectableInterfaceDefinition(
-                    interfaceId = WinRTBindableInterfaceIds.IBindableIterable,
-                    methods = listOf(
-                        WinRTInspectableMethodDefinition(
-                            signature = ComMethodSignature.of(ComAbiValueKind.Pointer),
-                        ) { rawArgs ->
-                            val resultOut = rawArgs[0] as RawAddress
-                            resultOut.writeReturnedPointer(WinRTBindableIteratorProjection.detachReference(managed.iterator()))
-                            KnownHResults.S_OK.value
-                        },
-                    ),
-                ),
+                bindableIterableDefinition(),
             ),
         )
 
@@ -338,7 +327,7 @@ object WinRTBindableVectorViewProjection {
             managedValue = managed,
             defaultInterfaceId = WinRTBindableInterfaceIds.IBindableVectorView,
             interfaceDefinitions = listOf(
-                bindableIterableDefinition { managed.iterator() },
+                bindableIterableDefinition(),
                 WinRTInspectableInterfaceDefinition(
                     interfaceId = WinRTBindableInterfaceIds.IBindableVectorView,
                     methods = listOf(
@@ -469,7 +458,7 @@ object WinRTBindableVectorProjection {
             managedValue = managed,
             defaultInterfaceId = WinRTBindableInterfaceIds.IBindableVector,
             interfaceDefinitions = listOf(
-                bindableIterableDefinition { managed.iterator() },
+                bindableIterableDefinition(),
                 WinRTInspectableInterfaceDefinition(
                     interfaceId = WinRTBindableInterfaceIds.IBindableVector,
                     methods = listOf(
@@ -635,17 +624,17 @@ private fun createBindableHost(
     )
 }
 
-private fun bindableIterableDefinition(
-    iteratorFactory: () -> Iterator<Any?>,
-): WinRTInspectableInterfaceDefinition =
+internal fun bindableIterableDefinition(): WinRTInspectableInterfaceDefinition = managedBindableIterableDefinition
+
+private val managedBindableIterableDefinition =
     WinRTInspectableInterfaceDefinition(
         interfaceId = WinRTBindableInterfaceIds.IBindableIterable,
         methods = listOf(
             WinRTInspectableMethodDefinition(
                 signature = ComMethodSignature.of(ComAbiValueKind.Pointer),
-            ) { rawArgs ->
+            ) { managed: Any?, rawArgs: List<Any?> ->
                 val resultOut = rawArgs[0] as RawAddress
-                resultOut.writeReturnedPointer(WinRTBindableIteratorProjection.detachReference(iteratorFactory()))
+                resultOut.writeReturnedPointer(WinRTBindableIteratorProjection.detachReference((managed as Iterable<*>).iterator()))
                 KnownHResults.S_OK.value
             },
         ),

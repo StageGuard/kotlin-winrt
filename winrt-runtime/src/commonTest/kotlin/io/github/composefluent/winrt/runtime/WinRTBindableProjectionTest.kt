@@ -3,8 +3,25 @@ package io.github.composefluent.winrt.runtime
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import kotlin.test.assertSame
 
 class WinRTBindableProjectionTest {
+    @Test
+    fun object_marshaling_exposes_bindable_enumeration_and_preserves_managed_identity() {
+        // CsWinRT Bindable.net5.cs IEnumerable.Do_Abi_First_0 operates on the original CCW.
+        val sources: List<Any> = listOf(listOf("ComboBox", 2, null), setOf("NumberBox", 3))
+        sources.forEach { values ->
+            WinRTObjectMarshaller.createMarshaler(values).use { marshaler ->
+                IUnknownReference(marshaler.abi.asRawComPtr(), preventReleaseOnDispose = true).use { borrowed ->
+                    WinRTBindableIterableProjection.fromAbi(borrowed).use { projected ->
+                        assertEquals((values as Iterable<*>).toList(), projected.toList())
+                    }
+                    assertSame(values, WinRTObjectMarshaller.fromAbi(marshaler.abi))
+                }
+            }
+        }
+    }
+
     @Test
     fun bindable_iterable_helpers_round_trip_non_generic_values() {
         val values = listOf("one", 2, null)
