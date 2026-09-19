@@ -42,4 +42,6 @@ include(
     ":winrt-samples:winui-kmp-base-library",
     ":winrt-samples:winui-kmp-library",
     ":winrt-samples:winui-kmp-app",
+    ":winui-gallery",
+    ":winui-gallery:processor",
 )
