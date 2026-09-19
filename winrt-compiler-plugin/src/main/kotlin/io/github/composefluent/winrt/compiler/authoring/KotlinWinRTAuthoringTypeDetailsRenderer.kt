@@ -414,12 +414,16 @@ object KotlinWinRTAuthoringTypeDetailsRenderer {
     private fun renderRegisterOnce(candidate: KotlinWinRTAuthoredTypeCandidate): FunSpec =
         FunSpec.builder("registerOnce")
             .addModifiers(KModifier.PRIVATE)
-            .addStatement(
-                "%T.registerAuthoredRuntimeClassType(%T::class, %S)",
-                projectionsType,
-                sourceClassName(candidate),
-                candidate.sourceTypeName,
-            )
+            .apply {
+                val baseName = candidate.winRTBaseClassName
+                if (baseName == null) {
+                    addStatement("%T.registerAuthoredRuntimeClassType(%T::class, %S)",
+                        projectionsType, sourceClassName(candidate), candidate.sourceTypeName)
+                } else {
+                    addStatement("%T.registerAuthoredRuntimeClassType(%T::class, %S, %S)",
+                        projectionsType, sourceClassName(candidate), candidate.sourceTypeName, baseName)
+                }
+            }
             .addStatement(
                 "%T.registerAuthoringMetadataTypeMappings(mapOf(%S to %S))",
                 comWrappersSupportType,

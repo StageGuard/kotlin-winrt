@@ -291,6 +291,9 @@ class KotlinWinRTCompilerPluginTest {
         KotlinWinRTAuthoringTypeDetailsRenderer.renderTo(listOf(candidate), model, output)
 
         val contents = output.resolve("sample/WinRT_App_TypeDetails.kt").toFile().readText()
+        assertTrue(contents, contents.replace(Regex("\\s+"), " ").contains(
+            "registerAuthoredRuntimeClassType(App::class, \"sample.App\", \"Microsoft.UI.Xaml.Application\")",
+        ))
         assertTrue(contents, contents.contains("(value as Application).__winrtAuthoringInvokeOnLaunched(__arg0)"))
         assertFalse(contents, contents.contains("value.winrtAs("))
         assertTrue(contents, contents.contains("private val ccwDefinition: WinRTCcwDefinition = createCcwDefinition()"))

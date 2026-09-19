@@ -67,6 +67,7 @@ object Projections {
     fun registerAuthoredRuntimeClassType(
         publicType: KClass<*>,
         runtimeClassName: String,
+        baseRuntimeClassName: String? = null,
     ): Boolean {
         require(runtimeClassName.isNotBlank()) { "Runtime class name must not be blank." }
         ensureProjectionMappingsRegistered()
@@ -81,6 +82,9 @@ object Projections {
             isRuntimeClass = true,
             isWindowsRuntimeType = true,
         )
+        if (baseRuntimeClassName != null) {
+            WinUiAuthoredTypeMetadata.register(publicType, runtimeClassName, baseRuntimeClassName)
+        }
         return existing == null || existing.runtimeClassName != runtimeClassName || !existing.isRuntimeClass
     }
 
@@ -267,6 +271,7 @@ object Projections {
     }
 
     internal fun clearRegistriesForTests() {
+        WinUiAuthoredTypeMetadata.clearForTests()
         customTypeToHelperTypeMappings.clear()
         runtimeClassToDefaultInterfaceMappings.clear()
         isTypeWindowsRuntimeTypeCache.clear()

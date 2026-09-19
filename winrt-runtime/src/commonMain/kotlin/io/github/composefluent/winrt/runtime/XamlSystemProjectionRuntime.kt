@@ -196,6 +196,17 @@ internal object XamlSystemProjectionRuntimeHooks {
         arg0: RawAddress,
         arg1: RawAddress,
     ): Int {
+        if (slot != WinUiXamlMetadataProviderSlots.GetXmlnsDefinitions) {
+            val nameHandle = if (slot == WinUiXamlMetadataProviderSlots.GetXamlType) {
+                PlatformAbi.readPointer(arg0)
+            } else arg0
+            val name = HString.fromHandle(nameHandle, owner = false).use { it.toKString() }
+            val authored = WinUiAuthoredTypeMetadata.tryCreate(name, ::resolveWinUiXamlType)
+            if (!PlatformAbi.isNull(authored)) {
+                PlatformAbi.writePointer(arg1, authored)
+                return KnownHResults.S_OK.value
+            }
+        }
         if (FeatureSwitches.traceCcw) {
             println("winrt-xaml-metadata: forward slot=$slot")
         }
@@ -232,6 +243,22 @@ internal object XamlSystemProjectionRuntimeHooks {
         }
         return lastHr
     }
+
+    private fun resolveWinUiXamlType(name: String): RawAddress =
+        HString.create(name).use { nameString ->
+            PlatformAbi.confinedScope().use { scope ->
+                val result = PlatformAbi.allocatePointerSlot(scope)
+                PlatformAbi.writePointer(result, PlatformAbi.nullPointer)
+                val hr = forwardWinUiXamlMetadataProviderCall(
+                    WinUiXamlMetadataProviderSlots.GetXamlTypeByFullName, nameString.handle, result,
+                )
+                val pointer = PlatformAbi.readPointer(result)
+                if (HResult(hr).isSuccess) pointer else {
+                    if (!PlatformAbi.isNull(pointer)) WinRTPlatformApi.releaseRaw(pointer)
+                    PlatformAbi.nullPointer
+                }
+            }
+        }
 
     private fun forwardXmlnsDefinitions(
         providers: List<WinUiXamlMetadataProviderReference>,
