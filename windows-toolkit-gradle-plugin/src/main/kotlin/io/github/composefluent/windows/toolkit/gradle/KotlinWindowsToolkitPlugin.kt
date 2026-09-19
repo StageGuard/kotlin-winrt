@@ -5085,11 +5085,13 @@ private fun Test.kotlinWinRTProjectionTaskName(): String {
 }
 
 
-private fun generatedWinRTProjectionSourceFiles(project: Project, directory: Directory): Set<File> =
-    project.fileTree(directory) { spec -> spec.include("**/*.kt") }
-        .files
-        .filter(::isGeneratedWinRTProjectionSource)
-        .toSet()
+internal fun generatedWinRTProjectionSourceFiles(project: Project, directory: Directory): org.gradle.api.file.FileTree =
+    // Generation can change shard names and ownership after Gradle configures
+    // the compiler. Keep a live tree instead of freezing the previous output's
+    // file set into the task inputs/configuration cache.
+    project.fileTree(directory) { spec ->
+        spec.include { element -> element.isDirectory || isGeneratedWinRTProjectionSource(element.file) }
+    }
 
 private fun configureWinAppRestoreInputFiles(
     project: Project,
