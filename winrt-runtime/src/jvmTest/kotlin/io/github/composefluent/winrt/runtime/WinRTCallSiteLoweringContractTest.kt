@@ -252,6 +252,8 @@ private class DirectInspectableProjection private constructor(
         fun wrap(reference: IUnknownReference): DirectInspectableProjection =
             error("The IUnknown overload must not be selected: $reference")
 
+        val TYPE_HANDLE = WinRTTypeHandle("io.github.composefluent.winrt.runtime.DirectInspectableProjection", IID.IInspectable)
+
         fun wrap(reference: InspectableReference): DirectInspectableProjection =
             DirectInspectableProjection(reference)
     }
@@ -615,7 +617,7 @@ class WinRTCallSiteLoweringContractTest {
         assertFalse(nonNull.contains("codec_toAbi_"), nonNull)
 
         val nullable = bytecode.methodBytecode("consumeNullableRuntimeClass")
-        assertTrue(nullable.contains("IWinRTObject.getNativeObject"), nullable)
+        assertTrue(nullable.contains("Metadata.getTYPE_HANDLE"), nullable)
         assertTrue(nullable.contains("ComObjectReference.getComPtr"), nullable)
         assertTrue(nullable.contains("ComPtr.getSupport"), nullable)
         assertTrue(nullable.contains("RawComObjectReferenceSupport.isDisposed"), nullable)

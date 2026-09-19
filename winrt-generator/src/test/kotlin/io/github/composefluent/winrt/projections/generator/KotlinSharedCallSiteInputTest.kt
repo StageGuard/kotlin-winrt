@@ -25,16 +25,16 @@ class KotlinSharedCallSiteInputTest {
         listOf(KotlinProjectionAbiParameterBinding("value", input, category = category)))
 
     @Test
-    fun only_plain_runtime_class_inputs_lose_their_projection_identity() {
-        // CsWinRT code_writers.h: object-reference marshaling is shared; interface selection
-        // and output construction remain typed. Kotlin uses the existing IWinRTObject contract.
+    fun runtime_class_inputs_keep_their_declared_interface_identity() {
+        // CsWinRT code_writers.h selects the declared runtime class's default interface.
+        // Only the final physical ABI call is shared across distinct projected classes.
         val first = objectType("SharedInputOne")
         val second = objectType("SharedInputTwo")
         val one = renderer.composeTypedProjectionCallSite(call(first)).plan
         val two = renderer.composeTypedProjectionCallSite(call(second)).plan
-        assertEquals(one, two)
-        assertEquals(IWINRT_OBJECT_CLASS_NAME, one.parameters.single().type)
-        assertEquals(WinRTProjectionCallSiteReferenceAccess.PROJECTED_OBJECT, one.descriptor.slots.single().recipe.referenceAccess)
+        assertNotEquals(one, two)
+        assertEquals("$RUNTIME.SharedInputOne", one.parameters.single().type.toString())
+        assertEquals("$RUNTIME.SharedInputTwo", two.parameters.single().type.toString())
         assertNotEquals(one.functionName,
             renderer.composeTypedProjectionCallSite(call(objectType("SharedInputOne", true))).plan.functionName)
         assertNotEquals(renderer.composeTypedProjectionCallSite(call(first, first)).plan.functionName,
@@ -79,7 +79,7 @@ class KotlinSharedCallSiteInputTest {
             invocation.plan
         }
         assertEquals(enumPlans[0], enumPlans[1])
-        assertEquals(3, support.observedTypedCallSitePlans().size)
+        assertEquals(5, support.observedTypedCallSitePlans().size)
 
         val output = System.getProperty("winrt.callsite.integration.output") ?: return
         support.renderFiles(KotlinProjectionGenerationLayout.SingleSourceSet).forEach { file ->
@@ -89,8 +89,18 @@ class KotlinSharedCallSiteInputTest {
             package $RUNTIME
             import kotlin.test.*
             import kotlin.jvm.JvmInline
-            private class SharedInputOne(reference: ComObjectReference) : WinRTObjectBase<ComObjectReference>(reference, null)
-            private class SharedInputTwo(reference: ComObjectReference) : WinRTObjectBase<ComObjectReference>(reference, null)
+            class SharedInputOne(reference: ComObjectReference) : WinRTObjectBase<ComObjectReference>(reference, Metadata.TYPE_HANDLE) {
+                companion object Metadata {
+                    val TYPE_HANDLE = WinRTTypeHandle("$RUNTIME.SharedInputOne", Guid("515724c1-22d3-43db-89fa-973c9351b717"))
+                    fun wrap(reference: InspectableReference): SharedInputOne = SharedInputOne(reference)
+                }
+            }
+            class SharedInputTwo(reference: ComObjectReference) : WinRTObjectBase<ComObjectReference>(reference, Metadata.TYPE_HANDLE) {
+                companion object Metadata {
+                    val TYPE_HANDLE = WinRTTypeHandle("$RUNTIME.SharedInputTwo", Guid("515724c1-22d3-43db-89fa-973c9351b717"))
+                    fun wrap(reference: InspectableReference): SharedInputTwo = SharedInputTwo(reference)
+                }
+            }
             @JvmInline private value class SharedEnumOne(val raw: UInt) {
                 companion object Metadata { fun toAbi(value: SharedEnumOne): UInt = value.raw }
             }
