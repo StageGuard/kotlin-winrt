@@ -36,6 +36,47 @@ import java.net.URLClassLoader
 @OptIn(ExperimentalCompilerApi::class, CompilerConfiguration.Internals::class)
 class KotlinWinRTCompilerPluginTest {
     @Test
+    fun authoring_marshals_out_storage_and_runtime_mapped_arguments() {
+        // cswinrt/code_writers.h managed_marshaler::{write_out_initialize,
+        // write_marshal_to_managed,write_marshal_from_managed}; runtime mapping:
+        // WinRT.Runtime/Projections/NotifyCollectionChangedEventArgs.cs.
+        val output = Files.createTempDirectory("kotlin-winrt-authoring-out-")
+        val mappedName = "Microsoft.UI.Xaml.Interop.NotifyCollectionChangedEventArgs"
+        val model = WinRTMetadataModel(namespaces = listOf(
+            WinRTNamespace("Sample", listOf(WinRTTypeDefinition(
+                namespace = "Sample", name = "ISource", kind = WinRTTypeKind.Interface,
+                iid = Guid("a33e81ef-c665-503b-8827-d27ef1720a06"),
+                methods = listOf(WinRTMethodDefinition(
+                    name = "Read", returnTypeName = "Object", methodRowId = 6,
+                    parameters = listOf(
+                        WinRTParameterDefinition("changes", mappedName),
+                        WinRTParameterDefinition("diagnostics", "Object", direction = io.github.composefluent.winrt.metadata.WinRTParameterDirection.Out, isOutParameter = true),
+                        WinRTParameterDefinition("count", "Int32", direction = io.github.composefluent.winrt.metadata.WinRTParameterDirection.Out, isOutParameter = true),
+                    ),
+                )),
+            ))),
+            WinRTNamespace("Microsoft.UI.Xaml.Interop", listOf(WinRTTypeDefinition(
+                namespace = "Microsoft.UI.Xaml.Interop", name = "NotifyCollectionChangedEventArgs", kind = WinRTTypeKind.RuntimeClass,
+            ))),
+        ))
+        val candidate = KotlinWinRTAuthoredTypeCandidate(
+            packageName = "sample", className = "Source", sourceTypeName = "sample.Source",
+            winRTBaseClassName = null, winRTInterfaceNames = listOf("Sample.ISource"), overridableInterfaceNames = emptyList(),
+        )
+        KotlinWinRTAuthoringTypeDetailsRenderer.renderTo(listOf(candidate), model, output)
+        val code = output.resolve("sample/WinRT_Source_TypeDetails.kt").toFile().readText().replace(Regex("\\s+"), " ")
+        assertTrue(code, code.contains("WinRTOut<Any?>()"))
+        assertTrue(code, code.contains("WinRTOut<Int>()"))
+        assertTrue(code, code.contains("ComMethodSignature.of(ComAbiValueKind.Pointer, ComAbiValueKind.Pointer, ComAbiValueKind.Pointer, ComAbiValueKind.Pointer)"))
+        assertTrue(code, code.contains("PlatformAbi.zeroBytes(rawArgs[1] as RawAddress, (8).toLong())"))
+        assertTrue(code, code.contains("PlatformAbi.zeroBytes(rawArgs[2] as RawAddress, (4).toLong())"))
+        assertTrue(code, code.contains("WinRTObjectMarshaller.fromAbi(rawArgs[0] as RawAddress) as NotifyCollectionChangedEventArgs"))
+        assertFalse(code, code.contains("NotifyCollectionChangedEventArgs.Metadata"))
+        assertTrue(code, code.contains("WinRTObjectMarshaller.fromManaged(__arg1.value)"))
+        assertTrue(code, code.contains("PlatformAbi.writeInt32(rawArgs[2] as RawAddress, __arg2.value as Int)"))
+    }
+
+    @Test
     fun command_line_processor_stores_metadata_index_option() {
         val configuration = CompilerConfiguration()
         val processor = KotlinWinRTCommandLineProcessor()

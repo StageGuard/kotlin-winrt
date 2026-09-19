@@ -15,6 +15,8 @@ import com.squareup.kotlinpoet.TypeSpec
 import com.squareup.kotlinpoet.TypeName
 import com.squareup.kotlinpoet.asClassName
 import io.github.composefluent.winrt.metadata.WinRTMetadataModel
+import io.github.composefluent.winrt.metadata.WinRTMetadataParameterCategory
+import io.github.composefluent.winrt.metadata.metadataParameterCategoryFor
 import io.github.composefluent.winrt.metadata.WinRTMetadataSemanticHelpers
 import io.github.composefluent.winrt.metadata.WinRTDirectInboundShapeDescriptor
 import io.github.composefluent.winrt.metadata.WinRTDirectInboundShapeKind
@@ -81,6 +83,7 @@ object KotlinWinRTAuthoringTypeDetailsRenderer {
     private val winRTIteratorProjectionType = ClassName("io.github.composefluent.winrt.runtime", "WinRTIteratorProjection")
     private val winRTListProjectionType = ClassName("io.github.composefluent.winrt.runtime", "WinRTListProjection")
     private val winRTObjectMarshallerType = ClassName("io.github.composefluent.winrt.runtime", "WinRTObjectMarshaller")
+    private val winRTOutType = ClassName("io.github.composefluent.winrt.runtime", "WinRTOut")
     private val winRTReadOnlyDictionaryProjectionType = ClassName("io.github.composefluent.winrt.runtime", "WinRTReadOnlyDictionaryProjection")
     private val winRTReadOnlyListProjectionType = ClassName("io.github.composefluent.winrt.runtime", "WinRTReadOnlyListProjection")
     private val winRTReferenceProjectionType = ClassName("io.github.composefluent.winrt.runtime", "WinRTReferenceProjection")
@@ -591,6 +594,18 @@ object KotlinWinRTAuthoringTypeDetailsRenderer {
             .add("try {\n")
             .indent()
             .apply {
+                // cswinrt/code_writers.h managed_marshaler::write_out_initialize:
+                // out storage is initialized before projecting any input arguments.
+                method.parameters.filter { metadataParameterCategoryFor(it) == WinRTMetadataParameterCategory.Out }
+                    .forEach { parameter ->
+                        val size = checkNotNull(arrayElementLayout(parameter.type.normalized(), typesByName, semanticHelpers)) {
+                            "Unsupported authored out storage: ${parameter.typeName}"
+                        }.first
+                        addStatement("%T.zeroBytes(rawArgs[%L] as %T, (%L).toLong())", platformAbiType,
+                            rawArgumentIndex(method.parameters, parameter), rawAddressType, size)
+                    }
+            }
+            .apply {
                 var rawIndex = 0
                 method.parameters.forEachIndexed { index, parameter ->
                     if (parameter != receiveArrayParameter) {
@@ -658,6 +673,13 @@ object KotlinWinRTAuthoringTypeDetailsRenderer {
             }
             .apply {
                 method.parameters.forEachIndexed { index, parameter ->
+                    if (metadataParameterCategoryFor(parameter) == WinRTMetadataParameterCategory.Out) {
+                        add("%L\n", renderReturnProjection(
+                            method.copy(returnTypeName = parameter.typeName, returnTypeSignature = parameter.type.normalized(), returnTypeIsByRef = false),
+                            CodeBlock.of("rawArgs[%L] as %T", rawArgumentIndex(method.parameters, parameter), rawAddressType),
+                            "__arg$index.value", typesByName, semanticHelpers,
+                        ))
+                    }
                     if (parameter != receiveArrayParameter && parameter.isFillArrayParameter()) {
                         val rawIndex = rawArgumentIndex(method.parameters, parameter)
                         add(
@@ -1123,7 +1145,10 @@ object KotlinWinRTAuthoringTypeDetailsRenderer {
         semanticHelpers: WinRTMetadataSemanticHelpers,
         authoredRuntimeClassNames: Set<String>,
     ): CodeBlock =
-        if (parameter.type.normalized().kind == WinRTTypeRefKind.Array) {
+        if (metadataParameterCategoryFor(parameter) == WinRTMetadataParameterCategory.Out) {
+            CodeBlock.of("val __arg%L = %T<%T>()\n", index, winRTOutType,
+                authoringProjectedTypeName(parameter.type.normalized(), typesByName, semanticHelpers))
+        } else if (parameter.type.normalized().kind == WinRTTypeRefKind.Array) {
             CodeBlock.of(
                 "val __arg%L = %L\n",
                 index,
@@ -1215,7 +1240,13 @@ object KotlinWinRTAuthoringTypeDetailsRenderer {
             WinRTTypeKind.Struct -> CodeBlock.of("%T.Metadata.fromAbi(%L as %T)", projectionClassName(parameter.typeName, semanticHelpers), rawArg, rawAddressType)
             WinRTTypeKind.RuntimeClass,
             -> {
-                if (parameter.typeName in authoredRuntimeClassNames) {
+                // CsWinRT uses the custom projection marshaler for mapped runtime
+                // classes (e.g. NotifyCollectionChangedEventArgs), not generated
+                // runtime-class metadata. Runtime-owned Kotlin types likewise
+                // register their conversion with the shared object marshaler.
+                if (parameter.typeName in authoredRuntimeClassNames ||
+                    semanticHelpers.getMappedType(parameter.type, "") != null
+                ) {
                     return CodeBlock.of(
                         "%T.fromAbi(%L as %T) as %T",
                         winRTObjectMarshallerType,
@@ -1319,6 +1350,11 @@ object KotlinWinRTAuthoringTypeDetailsRenderer {
         parameter: WinRTParameterDefinition,
         typesByName: Map<String, WinRTTypeDefinition>,
     ): List<String> {
+        when (metadataParameterCategoryFor(parameter)) {
+            WinRTMetadataParameterCategory.Out, WinRTMetadataParameterCategory.Ref -> return listOf("Pointer")
+            WinRTMetadataParameterCategory.ReceiveArray -> return listOf("Pointer", "Pointer")
+            else -> Unit
+        }
         if (parameter.type.normalized().kind == WinRTTypeRefKind.Array) {
             return listOf("Int32", "Pointer")
         }
@@ -1814,7 +1850,9 @@ object KotlinWinRTAuthoringTypeDetailsRenderer {
         typesByName: Map<String, WinRTTypeDefinition>,
         semanticHelpers: WinRTMetadataSemanticHelpers,
     ): Pair<CodeBlock, CodeBlock>? =
-        fundamentalType(type.typeName)?.let { fundamental ->
+        if (isWinRTObjectTypeName(type.typeName)) CodeBlock.of("8") to CodeBlock.of("8")
+        else if (isWinRTGuidTypeName(type.typeName)) CodeBlock.of("16") to CodeBlock.of("4")
+        else fundamentalType(type.typeName)?.let { fundamental ->
             when (fundamental) {
                 WinRTFundamentalType.Boolean,
                 WinRTFundamentalType.Int8,
@@ -1831,6 +1869,10 @@ object KotlinWinRTAuthoringTypeDetailsRenderer {
                 WinRTFundamentalType.String -> CodeBlock.of("8") to CodeBlock.of("8")
             }
         } ?: when (typesByName[type.qualifiedName]?.kind) {
+            WinRTTypeKind.Enum -> arrayElementLayout(
+                WinRTTypeRef.fromDisplayName(enumIntegralAbiDescriptor(checkNotNull(typesByName[type.qualifiedName])).integralType.name),
+                typesByName, semanticHelpers,
+            )
             WinRTTypeKind.Interface,
             WinRTTypeKind.RuntimeClass,
             -> CodeBlock.of("8") to CodeBlock.of("8")
