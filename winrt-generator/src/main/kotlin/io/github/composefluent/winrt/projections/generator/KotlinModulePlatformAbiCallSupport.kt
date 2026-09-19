@@ -183,7 +183,10 @@ class KotlinModulePlatformAbiCallSupport internal constructor(
             owner = owner,
             type = type,
             initializer = initializer,
-            deferredInitialization = deferredInitialization,
+            // CsWinRT keeps closed-type metadata in type-owned static holders. Hash shards
+            // combine unrelated types: even an acyclic value graph can then form a cycle
+            // between object initializers. Keep each value's initialization independent.
+            deferredInitialization = deferredInitialization || abiSupportShardCount > 1,
         )
         metadata[name]?.let { existing ->
             require(existing.hasSameImplementation(value)) {

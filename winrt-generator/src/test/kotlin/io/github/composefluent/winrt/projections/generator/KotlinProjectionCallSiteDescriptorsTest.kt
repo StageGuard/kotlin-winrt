@@ -17,6 +17,27 @@ import org.junit.Test
 
 class KotlinProjectionCallSiteDescriptorsTest {
     @Test
+    fun sharded_metadata_initializes_independently_of_other_values_in_the_same_shard() {
+        // Mirrors CsWinRT's type-owned metadata initialization rather than eagerly
+        // initializing every unrelated type that happens to hash into a Kotlin shard.
+        val support = KotlinModulePlatformAbiCallSupport(
+            className = ClassName("sample", "MetadataAbi"),
+            abiSupportShardCount = 4,
+        )
+        var expression = support.registerMetadataExpression("leaf", INT, CodeBlock.of("1"))
+        repeat(32) { index ->
+            expression = support.registerMetadataExpression("parent$index", INT, CodeBlock.of("%L + 1", expression))
+        }
+        support.retainMetadataReference(expression)
+        val files = support.renderFiles(KotlinProjectionGenerationLayout.SingleSourceSet)
+        assertTrue(files.size > 1)
+        val text = files.joinToString("\n") { it.contents }
+        assertEquals(33, Regex("internal val metadata_").findAll(text).count())
+        assertEquals(33, Regex("get\\(\\) =|get\\(\\) \\{").findAll(text).count())
+        assertEquals(33, Regex("private object ").findAll(text).count())
+    }
+
+    @Test
     fun scalar_result_pointee_types_share_only_the_physical_output_pointer_shape() {
         val renderer = KotlinProjectionRenderer()
         fun plan(kind: KotlinProjectionAbiValueKind, name: String) = renderer.composeTypedProjectionCallSite(
