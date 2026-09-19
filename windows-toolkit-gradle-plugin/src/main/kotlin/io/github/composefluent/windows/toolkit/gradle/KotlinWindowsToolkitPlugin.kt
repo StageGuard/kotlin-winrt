@@ -965,8 +965,11 @@ private fun configureWinAppTasks(
             }
         },
     )
-    project.gradle.projectsEvaluated {
-        if (selectedVariant.get().kind != WinAppVariantKind.Jvm) return@projectsEvaluated
+    // With configure-on-demand Gradle can traverse this project's task graph
+    // before the build-wide projectsEvaluated event. Wire the producer when
+    // this project finishes evaluation, before its materializer is scheduled.
+    project.afterEvaluate {
+        if (selectedVariant.get().kind != WinAppVariantKind.Jvm) return@afterEvaluate
         val variantHostTask = buildAuthoringHostTask.get()
         val sharedProducer = registerSharedAuthoringHostProducer(
             project = project,

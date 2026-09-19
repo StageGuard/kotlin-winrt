@@ -408,6 +408,29 @@ class NamedWinAppsTest {
     }
 
     @Test
+    fun subproject_authoring_host_schedules_shared_producer_with_configure_on_demand() {
+        val root = fixture("on-demand-authoring-host")
+        writeGradleFile(root.resolve("settings.gradle"), "rootProject.name = 'on-demand-authoring-host'\ninclude 'app'")
+        writeGradleFile(root.resolve("build.gradle"), "")
+        writeGradleFile(root.resolve("app/build.gradle"), """
+            plugins { id 'java'; id 'io.github.compose-fluent.windows-toolkit' }
+            windows { application {
+                mainClass = 'sample.Main'
+                variants { create('first') { variantName = 'jvm:main' } }
+            } }
+        """.trimIndent())
+        val arguments = arrayOf(":app:buildWinRTAuthoringHostFirst", "--configure-on-demand", "--configuration-cache")
+        val first = runner(root, *arguments).build()
+        val producer = first.tasks.single { it.path.startsWith(":app:buildWinRTAuthoringHostShared") }
+        assertEquals(TaskOutcome.SUCCESS, producer.outcome)
+        assertEquals(TaskOutcome.SUCCESS, first.task(":app:buildWinRTAuthoringHostFirst")?.outcome)
+        val second = runner(root, *arguments).build()
+        assertTrue(second.output, second.output.contains("Reusing configuration cache"))
+        assertEquals(TaskOutcome.UP_TO_DATE, second.task(producer.path)?.outcome)
+        assertEquals(TaskOutcome.UP_TO_DATE, second.task(":app:buildWinRTAuthoringHostFirst")?.outcome)
+    }
+
+    @Test
     fun incompatible_jvm_runtime_modules_keep_separate_runtime_producers() {
         val root = fixture("incompatible-jvm-runtime-producers")
         writeGradleFile(root.resolve("build.gradle"), """
