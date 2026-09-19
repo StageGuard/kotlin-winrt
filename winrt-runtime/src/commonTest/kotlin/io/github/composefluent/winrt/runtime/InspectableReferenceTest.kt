@@ -4,8 +4,43 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import kotlin.test.assertSame
+import kotlin.test.assertFailsWith
 
 class InspectableReferenceTest {
+    @Test
+    fun owned_inspectable_cast_queries_the_declared_vtable_and_transfers_ownership() {
+        // CsWinRT write_class initializes _inner through objRef.As(default IID).
+        if (!PlatformRuntime.isWindows) return
+        RuntimeScope.initializeSingleThreaded().use {
+            ActivationFactory.get("Windows.Data.Json.JsonObject").use { factory ->
+                val original = factory.activateInstance().use { it.asInspectable() }
+                val typed = castOwnedInspectableReference(original, IID.IStringable)
+                typed.use {
+                    assertTrue(original.isDisposed)
+                    assertEquals(IID.IStringable, typed.interfaceId)
+                    assertEquals("{}", WinRTProjectionIntrinsic.getString(typed, 6))
+                    assertSame(typed, castOwnedInspectableReference(typed, IID.IStringable))
+                    assertFalse(typed.isDisposed)
+                }
+            }
+        }
+    }
+
+    @Test
+    fun owned_inspectable_cast_releases_input_when_query_fails() {
+        if (!PlatformRuntime.isWindows) return
+        RuntimeScope.initializeSingleThreaded().use {
+            ActivationFactory.get("Windows.Data.Json.JsonObject").use { factory ->
+                val original = factory.activateInstance()
+                assertFailsWith<WinRTUnsupportedOperationException> {
+                    castOwnedInspectableReference(original, Guid("00000000-0000-0000-0000-00000000DEAD"))
+                }
+                assertTrue(original.isDisposed)
+            }
+        }
+    }
+
     @Test
     fun can_read_runtime_class_name_from_activation_factory_result() {
         if (!PlatformRuntime.isWindows) {

@@ -1,5 +1,7 @@
 package io.github.composefluent.winrt.projections.generator
 
+import com.squareup.kotlinpoet.MemberName
+
 import io.github.composefluent.winrt.metadata.WinRTMetadataModel
 import io.github.composefluent.winrt.metadata.WinRTAbiMarshalerPlanDescriptor
 import io.github.composefluent.winrt.metadata.WinRTAbiMarshalerSlotDescriptor
@@ -1425,6 +1427,15 @@ class KotlinProjectionRenderer(
             CodeBlock.of("null")
         }
         val runtimeClassBaseTypeName = plan.runtimeClassBaseTypeName
+        val usesInnerForDefaultInterface = plan.objectReferenceSurfaceDescriptor?.objectReferencePlans
+            ?.any { it.interfaceName.substringBefore('<') == plan.defaultInterfaceName?.substringBefore('<') && it.usesInner } == true
+        val wrapperInner = if (usesInnerForDefaultInterface) {
+            CodeBlock.of("%M(_inner, Metadata.DEFAULT_INTERFACE_IID)", MemberName(
+                "io.github.composefluent.winrt.runtime", "castOwnedInspectableReference",
+            ))
+        } else {
+            CodeBlock.of("_inner")
+        }
         applyCommonTypeShape(builder, plan, emitKotlinSealed = false)
         if (plan.requiresOpenRuntimeClassShell()) {
             builder.addModifiers(KModifier.OPEN)
@@ -1445,7 +1456,7 @@ class KotlinProjectionRenderer(
         if (runtimeClassBaseTypeName != null) {
             builder.superclass(resolveTypeName(runtimeClassBaseTypeName))
             if (!supportsDerivedComposableConstruction) {
-                builder.addSuperclassConstructorParameter("_inner")
+                builder.addSuperclassConstructorParameter(wrapperInner)
                 builder.addSuperclassConstructorParameter("kotlin.Unit")
             }
             if (hasPrimaryTypeHandle) {
@@ -1454,7 +1465,7 @@ class KotlinProjectionRenderer(
         } else {
             builder.superclass(WINRT_OBJECT_BASE_CLASS_NAME.parameterizedBy(IINSPECTABLE_REFERENCE_CLASS_NAME))
             if (!supportsDerivedComposableConstruction) {
-                builder.addSuperclassConstructorParameter("_inner")
+                builder.addSuperclassConstructorParameter(wrapperInner)
                 builder.addSuperclassConstructorParameter(primaryTypeHandleExpression)
             }
         }
@@ -1480,8 +1491,8 @@ class KotlinProjectionRenderer(
                 constructorBuilder
                     .apply {
                         runtimeClassBaseTypeName?.let {
-                            callSuperConstructor("_inner", "kotlin.Unit")
-                        } ?: callSuperConstructor(CodeBlock.of("_inner"), primaryTypeHandleExpression)
+                            callSuperConstructor(wrapperInner, CodeBlock.of("kotlin.Unit"))
+                        } ?: callSuperConstructor(wrapperInner, primaryTypeHandleExpression)
                     }
                     .addCode("if (this::class == %T::class) {\n", projectionClassName(plan.type.qualifiedName))
                     .addStatement("    %T.registerRuntimeClassWrapper(this, nativeObject)", COM_WRAPPERS_SUPPORT_CLASS_NAME)

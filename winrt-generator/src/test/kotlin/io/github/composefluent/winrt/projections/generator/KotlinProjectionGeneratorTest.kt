@@ -4536,6 +4536,7 @@ class KotlinProjectionGeneratorTest {
         assertFalse(jsonObject.contains("val _inner: IInspectableReference"))
         assertTrue(jsonObject.contains("private val _defaultInterface: ComObjectReference"))
         assertTrue(jsonObject.contains("get() = nativeObject"))
+        assertTrue(jsonObject, jsonObject.replace(Regex("\\s+"), " ").contains("castOwnedInspectableReference(_inner, Metadata.DEFAULT_INTERFACE_IID)"))
         assertFalse(jsonObject.contains("private val _defaultInterfaceCache:"))
         assertFalse(jsonObject.contains("private fun _defaultInterfaceMake()"))
         assertFalse(jsonObject.contains("publishWinRTObjectReference(_defaultInterfaceCache, candidate)"))

@@ -136,6 +136,20 @@ open class IUnknownReference internal constructor(
 fun acquireInterfaceReference(instance: ComObjectReference, iid: Guid): IUnknownReference =
     IUnknownReference(instance.comPtr.queryInterface(iid).getOrThrow())
 
+/**
+ * Transfers a wrapper constructor's owned reference to its declared WinRT interface.
+ * CsWinRT code_writers.h write_class uses objRef.As(defaultInterface.IID)
+ * before storing _inner; IInspectable identity need not have that interface's vtable.
+ */
+fun castOwnedInspectableReference(instance: IInspectableReference, iid: Guid): IInspectableReference {
+    if (instance.interfaceId == iid) return instance
+    return try {
+        InspectableReference(instance.comPtr.queryInterface(iid).getOrThrow())
+    } finally {
+        instance.close()
+    }
+}
+
 class ActivationFactoryReference internal constructor(
     comPtr: ComPtr,
 ) : IUnknownReference(comPtr) {
