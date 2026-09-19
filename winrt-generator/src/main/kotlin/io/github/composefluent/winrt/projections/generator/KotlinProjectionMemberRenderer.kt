@@ -116,6 +116,16 @@ internal fun KotlinProjectionRenderer.applyCommonTypeShape(
     emitKotlinSealed: Boolean = true,
 ) {
     builder.addModifiers(renderVisibility(plan.visibility))
+    // Keep closed WinMD signatures available across separate projection compilations.
+    // Generic delegate IID construction needs the signature even for types that do not
+    // participate in this module's projection-registration table.
+    plan.guidSignatureDescriptor?.signatureFragment?.takeIf(String::isNotBlank)?.let { signature ->
+        builder.addAnnotation(
+            AnnotationSpec.builder(ClassName("io.github.composefluent.winrt.runtime", "WindowsRuntimeType"))
+                .addMember("guidSignature = %S", signature)
+                .build(),
+        )
+    }
     if (plan.declarationKind == KotlinProjectionDeclarationKind.Interface) {
         builder.addAnnotation(WINRT_PROJECTED_INTERFACE_CLASS_NAME)
     }

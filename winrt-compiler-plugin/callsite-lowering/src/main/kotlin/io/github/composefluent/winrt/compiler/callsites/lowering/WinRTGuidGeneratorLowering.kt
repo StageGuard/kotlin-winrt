@@ -222,10 +222,17 @@ private fun IrExpression.classGuidSignature(
     ?.symbol
     ?.let { it as? IrClassSymbol }
     ?.owner
-    ?.fqNameWhenAvailable
-    ?.asString()
-    ?.let(guidSignaturesByKotlinClass::get)
-    ?.takeIf(String::isNotBlank)
+    ?.winRTGuidSignature(guidSignaturesByKotlinClass)
+
+internal fun org.jetbrains.kotlin.ir.declarations.IrClass.winRTGuidSignature(
+    signatures: Map<String, String>,
+): String? {
+    val annotation = annotations.singleOrNull {
+        it.type.classFqName?.asString() == "io.github.composefluent.winrt.runtime.WindowsRuntimeType"
+    }
+    val declared = annotation?.regularArguments()?.singleOrNull()?.stringConstant()?.takeIf(String::isNotBlank)
+    return declared ?: fqNameWhenAvailable?.asString()?.let(signatures::get)?.takeIf(String::isNotBlank)
+}
 
 private fun IrExpression.constantGuid(): String? = when (this) {
     is IrConstructorCall -> {

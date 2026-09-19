@@ -387,7 +387,7 @@ private fun typeSignatureForType(
     val fqName = simple.classFqName?.asString() ?: return null
     primitiveSignature(fqName)?.let { return it }
     if (fqName == KOTLIN_ANY_FQ_NAME) return "cinterface(IInspectable)"
-    val base = guidSignaturesByKotlinClass[fqName]
+    val base = simple.classOrNull?.owner?.winRTGuidSignature(guidSignaturesByKotlinClass)
     if (simple.arguments.isEmpty()) return base
     val genericBase = base?.let(::genericDefinitionGuid)
         ?: base?.takeIf { it.startsWith("{") }

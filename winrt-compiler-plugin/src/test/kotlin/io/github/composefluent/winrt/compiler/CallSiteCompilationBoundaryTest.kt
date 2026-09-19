@@ -4,6 +4,9 @@ import io.github.composefluent.winrt.runtime.Guid
 import org.jetbrains.kotlin.cli.common.ExitCode
 import org.jetbrains.kotlin.cli.jvm.K2JVMCompiler
 import org.junit.Assert.assertEquals
+import org.jetbrains.org.objectweb.asm.ClassReader
+import org.jetbrains.org.objectweb.asm.tree.ClassNode
+import org.jetbrains.org.objectweb.asm.tree.MethodInsnNode
 import org.junit.Test
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -11,6 +14,30 @@ import java.io.PrintStream
 import java.nio.file.Files
 
 class CallSiteCompilationBoundaryTest {
+    @Test
+    fun generic_event_sam_reads_runtime_class_signatures_from_dependency_annotations() = inDirectory { root ->
+        // CsWinRT GuidGenerator.GetSignature includes the declared runtime class's default IID.
+        // A consumer must retain this contract without the producer's registrar sidecar.
+        val library = compile(root, "signature-library", """
+            package boundary.library
+            import io.github.composefluent.winrt.runtime.WindowsRuntimeType
+            @WindowsRuntimeType(guidSignature = "rc(Sample.Widget;{11111111-2222-3333-4444-555555555555})")
+            class Widget
+        """.trimIndent())
+        val consumer = compile(root, "signature-consumer", """
+            package boundary.consumer
+            import boundary.library.Widget
+            import windows.foundation.TypedEventHandler
+            fun handler(): TypedEventHandler<Widget, Widget> = TypedEventHandler { _, _ -> }
+        """.trimIndent(), library)
+        val calls = consumer.walkTopDown().filter { it.extension == "class" }.flatMap { file ->
+            val node = ClassNode().apply { ClassReader(file.readBytes()).accept(this, 0) }
+            node.methods.flatMap { it.instructions.toArray().filterIsInstance<MethodInsnNode>() }
+        }.toList()
+        assertEquals("The standalone K2 plugin must adapt the closed generic event SAM", 1,
+            calls.count { it.name == "adaptWinRTTypedEventHandler" })
+    }
+
     @Test
     fun dependency_codecs_respect_public_friend_and_private_boundaries() = inDirectory { root ->
         // CsWinRT resolves a projected type's marshaler from its owning assembly. The Kotlin
