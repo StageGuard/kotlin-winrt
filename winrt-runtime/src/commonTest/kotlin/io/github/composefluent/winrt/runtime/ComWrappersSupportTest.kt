@@ -885,6 +885,27 @@ class ComWrappersSupportTest {
     }
 
     @Test
+    fun marshaling_unwraps_projected_native_wrapper_before_creating_ccw() {
+        ComWrappersSupport.clearRegistriesForTests()
+        val pointer = WinRTInspectableComObject.inspectableBox(
+            value = "native-wrapper",
+            runtimeClassName = "test.NativeWrapper",
+        ).detachReference(IID.IInspectable)
+        val projected = ProjectedInspectableObject(pointer)
+        try {
+            ComWrappersSupport.createCCWForObjectForMarshaling(projected, IID.IInspectable).use { marshaler ->
+                assertEquals(
+                    PlatformAbi.pointerKey(pointer),
+                    PlatformAbi.pointerKey(marshaler.abi),
+                )
+            }
+        } finally {
+            projected.nativeObject.close()
+            ComWrappersSupport.clearRegistriesForTests()
+        }
+    }
+
+    @Test
     fun failed_projection_marshaling_does_not_pin_managed_ccw_target() {
         val value = failProjectionMarshalingWithMissingInterface()
 

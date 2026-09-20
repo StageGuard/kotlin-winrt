@@ -806,6 +806,21 @@ object ComWrappersSupport {
             return WinRTProjectionMarshaler.owned(reference)
         }
 
+        // Projected wrappers with a native identity must cross the ABI as that identity.  This is
+        // the same unwrap-first rule used by createCCWForObject; skipping it here creates a new
+        // managed CCW for native controls such as ItemContainer, so WinUI receives an object with
+        // the wrong runtime identity when a projected callback returns it.
+        tryUnwrapObject(value)?.let { unwrapped ->
+            if (interfaceId == unwrapped.interfaceId) {
+                return WinRTProjectionMarshaler.owned(unwrapped)
+            }
+            return try {
+                WinRTProjectionMarshaler.owned(unwrapped.queryInterface(interfaceId).getOrThrow())
+            } finally {
+                unwrapped.close()
+            }
+        }
+
         (value as? WinRTComposableObject)
             ?.winRTComposableObjectReference
             ?.tryCreateStaticCallLease(interfaceId, value)
