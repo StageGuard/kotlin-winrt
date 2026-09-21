@@ -141,6 +141,8 @@ internal object ValueBoxingMetadata {
             descriptor.referenceArrayInterfaceId?.let { interfaceId ->
                 boxedReferenceArrayRuntimeClassName(interfaceId, descriptor)
             }
+        } ?: descriptorForValue(value)?.let { descriptor ->
+            descriptor.nullableInterfaceId?.let { boxedReferenceRuntimeClassName(it, descriptor) }
         } ?: boxedRuntimeClassNameForType(value::class)
 
     fun boxedRuntimeClassNameForReferenceArrayInterface(interfaceId: Guid): String? =
@@ -287,10 +289,13 @@ internal object ValueBoxingMetadata {
     }
 
     private fun descriptorForValue(value: Any): WinRTValueTypeMetadata? =
-        if (value is Exception) {
-            exceptionMetadata
-        } else {
-            descriptorForClass(value::class)
+        // CsWinRT TypeExtensions.IsTypeOfType includes concrete reflection
+        // implementations. Use a value check so both Kotlin targets normalize
+        // KClass implementations without depending on JVM reflection.
+        when (value) {
+            is KClass<*> -> builtInDescriptorsByClass[KClass::class]
+            is Exception -> exceptionMetadata
+            else -> descriptorForClass(value::class)
         }
 
     private fun classifyPropertyValue(value: Any): WinRTValueTypeMetadata? =

@@ -7,6 +7,22 @@ import kotlin.test.assertTrue
 
 class ValueBoxingJvmTest {
     @Test
+    fun reflection_implementation_boxes_as_winrt_type_name() {
+        // CsWinRT ComWrappersSupport.GetIReferenceEntry uses IsTypeOfType,
+        // not exact equality with System.Type, for resource dictionary keys.
+        val value = String::class
+        assertEquals(IID.NullableType, ValueBoxingMetadata.referenceInterfaceIdForValue(value))
+        WinRTObjectMarshaller.createMarshaler(value).use { marshaler ->
+            IInspectableReference(marshaler.abi.asRawComPtr(), IID.IInspectable, preventReleaseOnDispose = true).use { reference ->
+                assertEquals("Windows.Foundation.IReference`1<Windows.UI.Xaml.Interop.TypeName>", reference.getRuntimeClassName())
+                reference.queryInterface(IID.NullableType).getOrThrow().use { boxed ->
+                    assertEquals(value, WinRTReferenceProjection.fromAbi(boxed.pointer.asRawAddress(), IID.NullableType))
+                }
+            }
+        }
+    }
+
+    @Test
     fun outbound_nullable_boolean_exposes_property_value_to_native_validation() {
         // .cswinrt/src/WinRT.Runtime/ComWrappersSupport.cs adds IPropertyValue
         // beside IReference<T>; WinUI queries it when validating IsChecked.
