@@ -18,7 +18,9 @@ class WinRTMetadataModelTest {
                 "FileSavePicker" to "PickSaveFileAsync",
                 "FolderPicker" to "PickSingleFolderAsync",
             ).forEach { (owner, method) ->
-                listOf(owner, "I$owner").forEach { typeName ->
+                val owners = listOf(owner, "I$owner") +
+                    if (owner == "FileOpenPicker" && namespace == "Windows.Storage.Pickers") listOf("IFileOpenPickerWithOperationId") else emptyList()
+                owners.forEach { typeName ->
                     val signature = "Windows.Foundation.IAsyncOperation<Sample.Result>"
                     val type = WinRTTypeDefinition(
                         namespace = namespace, name = typeName, kind = WinRTTypeKind.Interface,

@@ -7,14 +7,14 @@ internal fun WinRTMethodDefinition.withNullableReturnContract(ownerTypeName: Str
     val pickerOwner = ownerTypeName.substringAfterLast('.')
     val nullablePickerResult = pickerNamespace in setOf("Windows.Storage.Pickers", "Microsoft.Windows.Storage.Pickers") &&
         when (name) {
-            "PickSingleFileAsync" -> pickerOwner in setOf("FileOpenPicker", "IFileOpenPicker", "IFileOpenPicker2")
+            "PickSingleFileAsync" -> pickerOwner in setOf("FileOpenPicker", "IFileOpenPicker", "IFileOpenPickerWithOperationId")
             "PickSaveFileAsync" -> pickerOwner in setOf("FileSavePicker", "IFileSavePicker")
             "PickSingleFolderAsync" -> pickerOwner in setOf("FolderPicker", "IFolderPicker")
             else -> false
         }
     if (nullablePickerResult && returnType.qualifiedName == "Windows.Foundation.IAsyncOperation") {
         val result = returnType.typeArguments.single()
-        return copy(returnTypeName = "Windows.Foundation.IAsyncOperation<${result.typeName.removeSuffix("?") }?>")
+        return copy(returnTypeName = "Windows.Foundation.IAsyncOperation<${result.typeName.removeSuffix("?")}?>")
     }
     // WinUI controls/dev/Repeater/Layout.h returns nullptr from this virtual's
     // default implementation. CsWinRT MarshalInterface<T>.FromAbi preserves it.
