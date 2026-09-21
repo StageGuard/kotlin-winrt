@@ -18,14 +18,26 @@ object WinRTReferenceProjection {
         }
         if (WinRTValueBoxing.isDirectReferenceValue(value, interfaceId)) {
             return WinRTProjectionMarshaler.hosted(
-                host = createReferenceMarshalerHost(interfaceId, value),
+                // CsWinRT exposes IPropertyValue alongside every IReference<T> CCW.  WinUI
+                // dependency-property validation uses that sibling interface for nullable
+                // scalar inputs such as Boolean; omitting it makes the native setter reject the
+                // otherwise valid IReference pointer.
+                host = createReferenceMarshalerHost(
+                    interfaceId = interfaceId,
+                    value = value,
+                    includePropertyValueInterface = true,
+                ),
                 interfaceId = interfaceId,
             )
         }
         val typeHandle = ValueBoxingInterop.referenceTypeHandle(value, interfaceId)
         borrowedProjectionMarshaler(value, typeHandle)?.let { return it }
         return WinRTProjectionMarshaler.hosted(
-            host = createReferenceMarshalerHost(interfaceId, value),
+            host = createReferenceMarshalerHost(
+                interfaceId = interfaceId,
+                value = value,
+                includePropertyValueInterface = true,
+            ),
             interfaceId = interfaceId,
         )
     }

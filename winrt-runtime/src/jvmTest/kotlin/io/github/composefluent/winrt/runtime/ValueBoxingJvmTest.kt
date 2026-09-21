@@ -7,6 +7,22 @@ import kotlin.test.assertTrue
 
 class ValueBoxingJvmTest {
     @Test
+    fun outbound_nullable_boolean_exposes_property_value_to_native_validation() {
+        // .cswinrt/src/WinRT.Runtime/ComWrappersSupport.cs adds IPropertyValue
+        // beside IReference<T>; WinUI queries it when validating IsChecked.
+        listOf(false, true).forEach { value ->
+            requireNotNull(WinRTReferenceProjection.createMarshaler(value, IID.NullableBool)).use { marshaler ->
+                assertEquals(value, WinRTReferenceProjection.fromAbi(marshaler.abi, IID.NullableBool))
+                IInspectableReference(marshaler.abi.asRawComPtr(), IID.NullableBool, preventReleaseOnDispose = true).use { reference ->
+                    reference.queryInterface(IID.IPropertyValue).getOrThrow().use { propertyValue ->
+                        assertEquals(value, WinRTPropertyValueProjection.tryFromBorrowedAbi(propertyValue.pointer.asRawAddress()))
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
     fun concrete_reference_array_registration_retains_type_only_metadata() {
         TypeNameSupport.clearRegistriesForTests()
         try {

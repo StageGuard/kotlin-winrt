@@ -144,8 +144,11 @@ internal fun createReferenceArrayMarshalerHost(
     createReferenceArrayHost(
         interfaceId = interfaceId,
         value = value,
-        includePropertyValueInterface = false,
-        augmentRuntimeInterfaces = false,
+        // CsWinRT adds IPropertyValue to IReferenceArray<T> CCWs as well.  Keep the outbound
+        // marshaler shape identical so WinUI collection/dependency-property validation can QI
+        // the boxed value before consuming the pointer.
+        includePropertyValueInterface = true,
+        augmentRuntimeInterfaces = true,
     )
 
 private fun createReferenceArrayHost(
