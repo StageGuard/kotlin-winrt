@@ -727,13 +727,15 @@ object KotlinWinRTAuthoringTypeDetailsRenderer {
         val arguments = method.parameters.indices.joinToString(", ") { index -> "__arg$index" }
         val returnsUnit = plan.returnShape.kind == WinRTDirectInboundShapeKind.Unit
         val returnType = directInboundProjectedTypeName(plan.returnShape, typesByName, semanticHelpers)
+            .let { if (plan.returnIsNullable) it.copy(nullable = true) else it }
         return FunSpec.builder(directInboundCallSiteFunctionName(interfaceType, vtableMethod))
             .addModifiers(KModifier.PRIVATE)
             .addAnnotation(
                 AnnotationSpec.builder(winRTProjectionInboundCallSiteType)
                     .addMember(
                         "returnAbiType = %S",
-                        directInboundCallSiteAbiType(plan.returnShape, typesByName, semanticHelpers),
+                        directInboundCallSiteAbiType(plan.returnShape, typesByName, semanticHelpers)
+                            .let { if (plan.returnIsNullable) "$it?" else it },
                     )
                     .build(),
             )
@@ -812,7 +814,7 @@ object KotlinWinRTAuthoringTypeDetailsRenderer {
             )?.takeUnless { shape -> shape.referencesAuthoredRuntimeClass(authoredRuntimeClassNames) }
                 ?: return null
         }
-        return DirectInboundCallSitePlan(returnShape, parameterShapes)
+        return DirectInboundCallSitePlan(returnShape, parameterShapes, method.returnTypeName.endsWith("?"))
     }
 
     private fun WinRTDirectInboundShapeDescriptor.referencesAuthoredRuntimeClass(
@@ -826,6 +828,9 @@ object KotlinWinRTAuthoringTypeDetailsRenderer {
     private data class DirectInboundCallSitePlan(
         val returnShape: WinRTDirectInboundShapeDescriptor,
         val parameterShapes: List<WinRTDirectInboundShapeDescriptor>,
+        // CsWinRT preserves null interface returns. WinMD shape descriptors
+        // intentionally omit Kotlin nullability, so retain the projected contract.
+        val returnIsNullable: Boolean,
     )
 
     private fun directInboundProjectedTypeName(

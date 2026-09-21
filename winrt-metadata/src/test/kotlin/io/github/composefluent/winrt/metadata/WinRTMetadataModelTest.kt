@@ -10,6 +10,26 @@ import org.junit.Test
 
 class WinRTMetadataModelTest {
     @Test
+    fun layout_default_transition_provider_preserves_native_null_return() {
+        // WinUI Layout.h returns nullptr; CsWinRT MarshalInterface<T>.FromAbi
+        // preserves that value for both calls and inherited virtual callbacks.
+        listOf("Layout", "ILayoutOverrides").forEach { owner ->
+            val type = WinRTTypeDefinition(
+                namespace = "Microsoft.UI.Xaml.Controls",
+                name = owner,
+                kind = WinRTTypeKind.Interface,
+                methods = listOf(WinRTMethodDefinition(
+                    "CreateDefaultItemTransitionProvider",
+                    "Microsoft.UI.Xaml.Controls.ItemCollectionTransitionProvider",
+                )),
+            ).normalized()
+            assertEquals("Microsoft.UI.Xaml.Controls.ItemCollectionTransitionProvider?", type.methods.single().returnTypeName)
+            assertEquals(type, type.normalized())
+            assertEquals("Microsoft.UI.Xaml.Controls.ItemCollectionTransitionProvider", type.methods.single().returnType.typeName)
+        }
+    }
+
+    @Test
     fun normalization_composes_nested_struct_abi_layouts() {
         val rational = WinRTTypeDefinition(
             namespace = "Sample.Foundation",

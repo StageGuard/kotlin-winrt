@@ -1,5 +1,18 @@
 package io.github.composefluent.winrt.metadata
 
+internal fun WinRTMethodDefinition.withNullableReturnContract(ownerTypeName: String): WinRTMethodDefinition {
+    // WinUI controls/dev/Repeater/Layout.h returns nullptr from this virtual's
+    // default implementation. CsWinRT MarshalInterface<T>.FromAbi preserves it.
+    // Apply the contract before planning so outgoing calls and authored overrides
+    // share the same Kotlin return type, including inherited base-call bridges.
+    if (ownerTypeName !in setOf(
+            "Microsoft.UI.Xaml.Controls.Layout",
+            "Microsoft.UI.Xaml.Controls.ILayoutOverrides",
+        ) || name != "CreateDefaultItemTransitionProvider") return this
+    // Nullability is a projection contract, not part of a WinMD type signature.
+    return copy(returnTypeName = returnTypeName.removeSuffix("?") + "?")
+}
+
 fun WinRTPropertyDefinition.projectedPropertyTypeName(
     ownerTypeName: String,
     typesByQualifiedName: Map<String, WinRTTypeDefinition> = emptyMap(),
