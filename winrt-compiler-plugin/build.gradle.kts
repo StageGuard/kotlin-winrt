@@ -15,10 +15,11 @@ val callSiteTestPluginClasspath by configurations.creating {
 dependencies.add(callSiteTestPluginClasspath.name, project.childProjects.getValue("callsite-lowering"))
 tasks.withType<Test>().configureEach {
     val fullPluginJar = tasks.named<Jar>("jar").flatMap { it.archiveFile }
+    val pluginClasspath = files(callSiteTestPluginClasspath)
     inputs.file(fullPluginJar).withPropertyName("fullPluginJar")
-    inputs.files(callSiteTestPluginClasspath).withPropertyName("callSiteTestPluginClasspath")
+    inputs.files(pluginClasspath).withPropertyName("callSiteTestPluginClasspath")
     doFirst {
-        systemProperty("winrt.test.callsitePluginClasspath", callSiteTestPluginClasspath.asPath)
+        systemProperty("winrt.test.callsitePluginClasspath", pluginClasspath.asPath)
         systemProperty("winrt.test.fullPluginJar", fullPluginJar.get().asFile.absolutePath)
     }
 }
