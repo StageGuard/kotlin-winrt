@@ -10,6 +10,29 @@ import org.junit.Test
 
 class WinRTMetadataModelTest {
     @Test
+    fun picker_cancellation_preserves_nullable_async_result_without_changing_abi_signature() {
+        // CsWinRT MarshalInterface<T>.FromAbi(null) and the picker cancellation contract.
+        listOf("Windows.Storage.Pickers", "Microsoft.Windows.Storage.Pickers").forEach { namespace ->
+            listOf(
+                "FileOpenPicker" to "PickSingleFileAsync",
+                "FileSavePicker" to "PickSaveFileAsync",
+                "FolderPicker" to "PickSingleFolderAsync",
+            ).forEach { (owner, method) ->
+                listOf(owner, "I$owner").forEach { typeName ->
+                    val signature = "Windows.Foundation.IAsyncOperation<Sample.Result>"
+                    val type = WinRTTypeDefinition(
+                        namespace = namespace, name = typeName, kind = WinRTTypeKind.Interface,
+                        methods = listOf(WinRTMethodDefinition(method, signature)),
+                    ).normalized()
+                    assertEquals("Windows.Foundation.IAsyncOperation<Sample.Result?>", type.methods.single().returnTypeName)
+                    assertEquals(signature, type.methods.single().returnType.typeName)
+                    assertEquals(type, type.normalized())
+                }
+            }
+        }
+    }
+
+    @Test
     fun layout_default_transition_provider_preserves_native_null_return() {
         // WinUI Layout.h returns nullptr; CsWinRT MarshalInterface<T>.FromAbi
         // preserves that value for both calls and inherited virtual callbacks.

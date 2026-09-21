@@ -1480,19 +1480,25 @@ class KotlinProjectionPlanner(
         typesByQualifiedName: Map<String, WinRTTypeDefinition>,
         includeDelegateInvokeShape: Boolean = true,
     ): KotlinProjectionAbiTypeBinding {
-        val normalizedType = WinRTTypeRef
-            .fromDisplayName(redirectedWinAppSdkAbiTypeExpression(typeName, useWinAppSdkTypeRedirects, typesByQualifiedName))
-            .normalized()
+        val projectedTypeName = redirectedWinAppSdkAbiTypeExpression(typeName, useWinAppSdkTypeRedirects, typesByQualifiedName)
+        val normalizedType = WinRTTypeRef.fromDisplayName(projectedTypeName).normalized()
         val trimmedTypeName = normalizedType.typeName
         val rawTypeName = when (normalizedType.kind) {
             WinRTTypeRefKind.Named -> (normalizedType.qualifiedName ?: trimmedTypeName.substringBefore('<')).removeSuffix("?")
             WinRTTypeRefKind.Array -> "Array"
             else -> trimmedTypeName
         }
+        // WinMD signatures omit nullability. Keep the projected generic argument
+        // spelling for marshaling, while normalizedType still owns ABI identity.
+        val projectedArguments = projectedTypeName.removeSuffix("?").let { displayName ->
+            if ('<' in displayName && displayName.endsWith('>'))
+                splitGenericArguments(displayName.substringAfter('<').substringBeforeLast('>'))
+            else emptyList()
+        }
         val typeArguments = when (normalizedType.kind) {
-            WinRTTypeRefKind.Named -> normalizedType.typeArguments.map { argument ->
+            WinRTTypeRefKind.Named -> normalizedType.typeArguments.mapIndexed { index, argument ->
                     classifyAbiTypeBinding(
-                        typeName = argument.typeName,
+                        typeName = projectedArguments.getOrElse(index) { argument.typeName },
                         currentNamespace = currentNamespace,
                         typesByQualifiedName = typesByQualifiedName,
                         includeDelegateInvokeShape = false,
@@ -1500,7 +1506,7 @@ class KotlinProjectionPlanner(
                 }
             WinRTTypeRefKind.Array -> listOf(
                 classifyAbiTypeBinding(
-                    typeName = (normalizedType.elementType ?: WinRTTypeRef.unknown()).typeName,
+                    typeName = projectedArguments.singleOrNull() ?: (normalizedType.elementType ?: WinRTTypeRef.unknown()).typeName,
                     currentNamespace = currentNamespace,
                     typesByQualifiedName = typesByQualifiedName,
                     includeDelegateInvokeShape = false,
@@ -1632,7 +1638,11 @@ class KotlinProjectionPlanner(
         val isNullableDisplayName = typeName.trim().endsWith("?")
         return KotlinProjectionAbiTypeBinding(
             kind = kind,
-            typeName = if (isNullableDisplayName) trimmedTypeName.withNullableSuffix() else trimmedTypeName,
+            typeName = if (typeArguments.isNotEmpty()) {
+                "$rawTypeName<${typeArguments.joinToString(", ") { it.typeName }}>".let {
+                    if (isNullableDisplayName) it.withNullableSuffix() else it
+                }
+            } else if (isNullableDisplayName) trimmedTypeName.withNullableSuffix() else trimmedTypeName,
             resolvedTypeName = if (isNullableDisplayName) resolvedTypeName.withNullableSuffix() else resolvedTypeName,
             sourceTypeKind = resolvedType?.kind,
             abiSize = resolvedType?.abiSize,

@@ -16831,6 +16831,26 @@ class KotlinProjectionGeneratorTest {
     }
 
     @Test
+    fun planner_preserves_nullable_async_runtime_class_result_for_picker_cancellation() {
+        // CsWinRT MarshalInterface<T>.FromAbi returns null for a cancelled picker.
+        val result = WinRTTypeDefinition(namespace = "Sample.Foundation", name = "WidgetResult", kind = WinRTTypeKind.RuntimeClass)
+        val planner = KotlinProjectionPlanner()
+        val types = mapOf(result.qualifiedName to result)
+        val nullable = planner.classifyAbiTypeBinding(
+            "Windows.Foundation.IAsyncOperation<Sample.Foundation.WidgetResult?>", "Sample.Foundation", types,
+        )
+        val nonnull = planner.classifyAbiTypeBinding(
+            "Windows.Foundation.IAsyncOperation<Sample.Foundation.WidgetResult>", "Sample.Foundation", types,
+        )
+        assertEquals("Sample.Foundation.WidgetResult?", nullable.typeArguments.single().typeName)
+        assertEquals(nullable.typeArguments.single().interfaceId, nonnull.typeArguments.single().interfaceId)
+        val expression = KotlinProjectionRenderer().asyncReferenceExpression(nullable, CodeBlock.of("__pointer")).toString()
+        assertTrue(expression, expression.contains("operation<sample.foundation.WidgetResult?>"))
+        assertTrue(expression, expression.contains("isNull(__operationResultPointer)) null else"))
+        assertFalse(expression, expression.contains("WINRT_E_NULL_ABI_RETURN"))
+    }
+
+    @Test
     fun generator_fails_closed_for_null_nonnullable_async_projected_runtime_class_result() {
         val renderer = KotlinProjectionRenderer()
         val returnBinding = KotlinProjectionAbiTypeBinding(
