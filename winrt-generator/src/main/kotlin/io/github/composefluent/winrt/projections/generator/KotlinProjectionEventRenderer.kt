@@ -1216,6 +1216,19 @@ internal fun KotlinProjectionRenderer.appendMetadataCompanionMembers(
         )
     }
     if (plan.declarationKind == KotlinProjectionDeclarationKind.Interface && canRenderInterfaceWrapper(plan)) {
+        // Generic interface projections need their type arguments at the call site, so they
+        // cannot be registered as an erased RCW factory. Closed/non-generic interface wrappers
+        // can be projected from an untyped object callback through the same factory used by
+        // Metadata.wrap(). This keeps CastExtensions.asWinRT aligned with the generated wrapper
+        // surface instead of falling back to SingleInterfaceOptimizedObject.
+        if (plan.type.genericParameterCount == 0) {
+            builder.addInitializerBlock(
+                CodeBlock.of(
+                    "%T.registerInterfaceProjectionFactory(TYPE_HANDLE) { instance -> wrap(instance) }\n",
+                    COM_WRAPPERS_SUPPORT_CLASS_NAME,
+                ),
+            )
+        }
         builder.addFunction(
             FunSpec.builder("wrap")
                 .apply {

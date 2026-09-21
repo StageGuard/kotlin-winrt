@@ -4415,7 +4415,8 @@ ${invocation.toString().prependIndent("                        ")}
                 type.genericParameterCount == 0 &&
                     mappedTypeByAbiName(type.qualifiedName)?.runtimeOwnedPublicDeclaration != true &&
                     delegateInvokeShape?.isSupportedProjectedDelegateShape() == true
-            KotlinProjectionDeclarationKind.Interface -> false
+            KotlinProjectionDeclarationKind.Interface ->
+                type.genericParameterCount == 0 && typeRenderer.canRenderInterfaceWrapper(this)
         }
 
     private fun dataClass(

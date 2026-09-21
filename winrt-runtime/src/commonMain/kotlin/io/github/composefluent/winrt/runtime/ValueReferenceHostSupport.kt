@@ -17,25 +17,6 @@ internal data class ValueHostShapeKey(
 
 private val valueHostShapeCache = ConcurrentCacheMap<ValueHostShapeKey, WinRTCcwDefinition>()
 
-/**
- * Shape cache for the short-lived outbound IReference marshaler host.
- *
- * Unlike a public boxed-value host, this path never exposes IPropertyValue or the runtime
- * compatibility suffix.  Its shape therefore depends only on the closed interface IID; looking
- * up property metadata and constructing a [ValueHostShapeKey] for every setter was both redundant
- * and particularly expensive on Native, where the generic cache is lock based.
- */
-private val referenceMarshalerDefinitionCache = ConcurrentCacheMap<Guid, WinRTCcwDefinition>()
-
-@kotlin.concurrent.Volatile
-private var lastReferenceMarshalerDefinition: WinRTCcwDefinition? = null
-
-@kotlin.concurrent.Volatile
-private var lastReferenceMarshalerInterfaceLowBits: Long = 0L
-
-@kotlin.concurrent.Volatile
-private var lastReferenceMarshalerInterfaceHighBits: Long = 0L
-
 internal fun cachedValueHostDefinition(
     key: ValueHostShapeKey,
     interfaceDefinitions: () -> List<WinRTInspectableInterfaceDefinition>,
@@ -88,46 +69,24 @@ internal fun createReferenceHost(
 /**
  * Creates the short-lived host used by an outbound IReference marshaler.
  *
- * The public boxed-value path still exposes the complete CsWinRT-compatible interface table.
- * A typed setter already carries the closed IReference ABI, however, so constructing the public
- * IPropertyValue/suffix interfaces for a host that lives only until the setter returns is wasted
- * work. The shape remains metadata-composed and cached; only the managed value and COM lifetime
- * stay per instance.
+ * The host is short lived, but it still exposes the complete CsWinRT-compatible boxed-value
+ * interface table because WinUI dependency-property code queries IPropertyValue while validating
+ * the value passed to an IReference<T> setter.
  */
 internal fun createReferenceMarshalerHost(
     interfaceId: Guid,
     value: Any,
-): WinRTInspectableComObject =
-    createValueHost(
+    includePropertyValueInterface: Boolean = false,
+): WinRTInspectableComObject {
+    // Ordinary IReference<T> calls only need the closed reference interface.  A
+    // dependency-property setter opts into the complete boxed-value shape because
+    // WinUI validates that argument through IPropertyValue before consuming it.
+    return createReferenceHost(
+        interfaceId = interfaceId,
         value = value,
-        baseDefinition = cachedReferenceMarshalerDefinition(interfaceId),
-        augmentRuntimeInterfaces = false,
+        includePropertyValueInterface = includePropertyValueInterface,
+        augmentRuntimeInterfaces = includePropertyValueInterface,
     )
-
-private fun cachedReferenceMarshalerDefinition(interfaceId: Guid): WinRTCcwDefinition {
-    val cached = lastReferenceMarshalerDefinition
-    if (
-        cached != null &&
-        lastReferenceMarshalerInterfaceLowBits == interfaceId.abiLowBits &&
-        lastReferenceMarshalerInterfaceHighBits == interfaceId.abiHighBits
-    ) {
-        return cached
-    }
-
-    val definition = referenceMarshalerDefinitionCache.computeIfAbsent(interfaceId) {
-        WinRTCcwDefinition(
-            interfaceDefinitions = listOf(
-                ValueBoxingInterop.createHostReferenceInterfaceDefinition(interfaceId),
-            ),
-            defaultInterfaceId = interfaceId,
-        )
-    }
-    // Publish the key before the definition.  A racing reader may miss and fall back to the
-    // locked cache, but it can never observe a matching key with a partially initialized shape.
-    lastReferenceMarshalerInterfaceLowBits = interfaceId.abiLowBits
-    lastReferenceMarshalerInterfaceHighBits = interfaceId.abiHighBits
-    lastReferenceMarshalerDefinition = definition
-    return definition
 }
 
 private fun createReferenceHost(

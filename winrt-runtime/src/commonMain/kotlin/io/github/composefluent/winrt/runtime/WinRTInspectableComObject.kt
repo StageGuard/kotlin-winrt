@@ -598,6 +598,10 @@ internal class WinRTInspectableComObject(
         trace { "Invoke interface=$interfaceId methodIndex=$methodIndex runtimeClassName=$runtimeClassName" }
         if (interfaceId == IID.IReferenceTrackerTarget) {
             when (methodIndex) {
+                // The reference-tracker target ABI returns the current tracker
+                // reference count for AddRefFromReferenceTracker and
+                // ReleaseFromReferenceTracker.  CsWinRT uses the count to keep
+                // event sources alive while a tracker reference is held.
                 0 -> return@runCatching addTrackerReference()
                 1 -> return@runCatching releaseTrackerReference()
             }

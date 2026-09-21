@@ -8,6 +8,14 @@ internal object RcwProjectionFactoryRegistry {
     private val typedRcwFactories = ConcurrentCacheMap<WinRTTypeHandle, (IInspectableReference) -> Any>()
     private val runtimeClassFactories = ConcurrentCacheMap<String, (IInspectableReference) -> Any>()
     private val interfaceProjectionFactoriesByHandle = ConcurrentCacheMap<WinRTTypeHandle, (IUnknownReference) -> Any>()
+    /**
+     * Generated metadata and the Kotlin projection use different casing for
+     * the same WinRT name (for example `Microsoft.UI.Xaml.Data...` versus the
+     * lowercase Kotlin package form).  IID is the stable identity of an
+     * interface, so keep a direct index to avoid making RCW creation depend on
+     * that spelling detail.
+     */
+    private val interfaceProjectionFactoriesByIid = ConcurrentCacheMap<Guid, (IUnknownReference) -> Any>()
     private val interfaceProjectionFactoriesByTypeName = ConcurrentCacheMap<String, (IUnknownReference) -> Any>()
     private val helperTypeRegistry = ConcurrentCacheMap<WinRTTypeHandle, WinRTTypeHandle>()
 
@@ -27,6 +35,7 @@ internal object RcwProjectionFactoryRegistry {
     ): Boolean {
         require(typeHandle.projectedTypeName.isNotBlank()) { "Projected interface type name must not be blank." }
         interfaceProjectionFactoriesByTypeName.putIfAbsent(typeHandle.projectedTypeName, factory)
+        interfaceProjectionFactoriesByIid.putIfAbsent(typeHandle.interfaceId, factory)
         return interfaceProjectionFactoriesByHandle.putIfAbsent(typeHandle, factory) == null
     }
 
@@ -52,6 +61,15 @@ internal object RcwProjectionFactoryRegistry {
             helperTypeRegistry[staticallyDeterminedType]?.let { helper ->
                 typedRcwFactories[helper]?.let { return it }
             }
+            // A statically requested interface must be projected through its
+            // interface factory below.  Falling back to the runtime-class
+            // factory discovered from the pointer would return (for example)
+            // DependencyObject when the caller requested ICollectionViewGroup.
+            // Runtime-class handles are allowed to use that fallback because
+            // WinMD and generated Kotlin names can differ in casing.
+            if (!WinRTTypeRegistry.isRuntimeClassHandle(staticallyDeterminedType)) {
+                return null
+            }
         }
         if (!runtimeClassName.isNullOrBlank()) {
             runtimeClassFactories[runtimeClassName]?.let { return it }
@@ -65,6 +83,7 @@ internal object RcwProjectionFactoryRegistry {
     ): ((IUnknownReference) -> Any)? {
         if (staticallyDeterminedType != null) {
             interfaceProjectionFactoriesByHandle[staticallyDeterminedType]?.let { return it }
+            interfaceProjectionFactoriesByIid[staticallyDeterminedType.interfaceId]?.let { return it }
         }
         if (!projectedTypeName.isNullOrBlank()) {
             interfaceProjectionFactoriesByTypeName[projectedTypeName]?.let { return it }
@@ -76,6 +95,7 @@ internal object RcwProjectionFactoryRegistry {
         typedRcwFactories.clear()
         runtimeClassFactories.clear()
         interfaceProjectionFactoriesByHandle.clear()
+        interfaceProjectionFactoriesByIid.clear()
         interfaceProjectionFactoriesByTypeName.clear()
         helperTypeRegistry.clear()
     }

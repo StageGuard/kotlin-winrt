@@ -823,7 +823,13 @@ object ComWrappersSupport {
 
         (value as? WinRTComposableObject)
             ?.winRTComposableObjectReference
-            ?.tryCreateStaticCallLease(interfaceId, value)
+            ?.let { composable ->
+                // Public inherited interfaces are implemented by the composed
+                // native identity.  Keep the managed outer lease as a fallback
+                // for authored override interfaces only.
+                composable.tryCreateNativeCallMarshaler(interfaceId)
+                    ?: composable.tryCreateStaticCallLease(interfaceId, value)
+            }
             ?.let { return it }
 
         cachedCcwHostOrNull(value, effectiveElementType)?.let { cachedHost ->
@@ -1049,12 +1055,16 @@ object ComWrappersSupport {
         return if (interfaceId == null || interfaceId == outerReference.interfaceId) {
             traceCcw { "create composable CCW using outer" }
             cloneComReference(outerReference)
-        } else if (interfaceId == IID.IUnknown || interfaceId == IID.IInspectable) {
-            traceCcw { "create composable CCW querying outer for $interfaceId" }
-            outerReference.queryInterface(interfaceId).getOrThrow()
         } else {
-            traceCcw { "create composable CCW querying outer custom QI for $interfaceId" }
-            outerReference.queryInterface(interfaceId).getOrThrow()
+            // A derived WinRT class is aggregated over the native composed
+            // identity.  Public base interfaces (including IUnknown and
+            // IInspectable) must therefore be queried from that identity;
+            // the managed outer host only carries authored override interfaces.
+            composableReference.tryCreateNativeCallReference(interfaceId)
+                ?: throw WinRTUnsupportedOperationException(
+                    "Composable CCW does not implement interface '$interfaceId'.",
+                    KnownHResults.E_NOINTERFACE,
+                )
         }
     }
 

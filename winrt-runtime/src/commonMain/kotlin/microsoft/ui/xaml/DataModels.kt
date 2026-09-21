@@ -1,5 +1,7 @@
 package microsoft.ui.xaml.data
 
+import io.github.composefluent.winrt.runtime.Guid
+import io.github.composefluent.winrt.runtime.WinRTTypeHandle
 import kotlin.reflect.KClass
 import windows.foundation.EventHandler
 
@@ -44,6 +46,19 @@ interface ICustomProperty {
     fun getIndexedValue(target: Any?, index: Any?): Any?
 
     fun setIndexedValue(target: Any?, value: Any?, index: Any?)
+
+    /**
+     * Compatibility metadata for the source-level XAML model that predates
+     * generated WinRT projections.  The generated gallery projection has the
+     * same nested metadata object; keeping this shape here prevents a duplicate
+     * runtime class from failing when the generated support registrar touches
+     * the metadata initializer.
+     */
+    companion object Metadata {
+        const val TYPE_NAME: String = "Microsoft.UI.Xaml.Data.ICustomProperty"
+        val IID: Guid = Guid("30DA92C0-23E8-42A0-AE7C-734A0E5D2782")
+        val TYPE_HANDLE: WinRTTypeHandle = WinRTTypeHandle("microsoft.ui.xaml.data.ICustomProperty", IID)
+    }
 }
 
 interface ICustomPropertyProvider {
@@ -57,4 +72,11 @@ interface ICustomPropertyProvider {
     fun getStringRepresentation(): String
 
     val type: KClass<*>
+
+    /** See [ICustomProperty.Metadata]. */
+    companion object Metadata {
+        const val TYPE_NAME: String = "Microsoft.UI.Xaml.Data.ICustomPropertyProvider"
+        val IID: Guid = Guid("7C925755-3E48-42B4-8677-76372267033F")
+        val TYPE_HANDLE: WinRTTypeHandle = WinRTTypeHandle("microsoft.ui.xaml.data.ICustomPropertyProvider", IID)
+    }
 }

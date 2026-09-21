@@ -65,6 +65,20 @@ object WinRTTypeRegistry {
 
     fun findByProjectedName(projectedTypeName: String): WinRTTypeId<*>? = findByName(projectedTypeName)
 
+    /**
+     * Resolves the kind of a statically supplied type handle without relying on
+     * the Kotlin package spelling. Generated handles use lowercase names while
+     * WinMD metadata keeps the original casing; the IID disambiguates aliases.
+     */
+    internal fun isRuntimeClassHandle(typeHandle: WinRTTypeHandle): Boolean {
+        val typeId = byName[typeHandle.projectedTypeName]
+            ?: byName.entries.firstOrNull { (name, candidate) ->
+                name.equals(typeHandle.projectedTypeName, ignoreCase = true) &&
+                    candidate.iid == typeHandle.interfaceId
+            }?.value
+        return typeId?.isRuntimeClass == true
+    }
+
     fun findByHelperClass(helperType: KClass<*>): WinRTTypeId<*>? = byHelperClass[helperType]
 
     fun registerRuntimeClassInfo(

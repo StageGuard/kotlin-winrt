@@ -180,6 +180,11 @@ public inline fun tryAcquireWinRTManagedProjectionCallLease(
 ): WinRTProjectionMarshaler? {
     if (value == null) return null
 
+    // Derived composable wrappers carry the native base identity in their
+    // composable reference.  A managed CCW lease would expose the outer host
+    // instead, which is only valid for authored override interfaces.
+    if (value is WinRTComposableObject) return null
+
     val stateOwner = value as? WinRTManagedProjectionStateOwner
     if (stateOwner != null) {
         stateOwner.winRTManagedProjectionState()?.let { state ->
@@ -196,6 +201,8 @@ public inline fun tryAcquireWinRTManagedProjectionCallLease(
     managedState: WinRTManagedProjectionState?,
     typeHandle: WinRTTypeHandle,
 ): WinRTProjectionMarshaler? {
+    if (knownManagedValue is WinRTComposableObject) return null
+
     if (managedState != null) {
         return managedState.tryAcquireCallLease(knownManagedValue, typeHandle.interfaceId)
     }
@@ -224,16 +231,22 @@ public inline fun tryBorrowWinRTManagedProjectionAbi(
     value: Any?,
     typeHandle: WinRTTypeHandle,
 ): RawAddress {
-    if (value == null || (value as? IWinRTObject)?.hasUnwrappableNativeObject == true) {
+    if (value == null) {
         return PlatformAbi.nullPointer
     }
 
-    val composableAbi = (value as? WinRTComposableObject)
-        ?.winRTComposableObjectReference
-        ?.tryBorrowStaticCallAbi(typeHandle.interfaceId)
-        ?: PlatformAbi.nullPointer
-    if (!PlatformAbi.isNull(composableAbi)) {
-        return composableAbi
+    // A composable wrapper's managed state belongs to the outer authored CCW.
+    // Use it only when the call explicitly targets that authored interface; for
+    // public base interfaces fall through to an owned QI on the composed native
+    // identity instead of borrowing the outer host pointer.
+    if (value is WinRTComposableObject) {
+        return value.winRTComposableObjectReference
+            ?.tryBorrowStaticCallAbi(typeHandle.interfaceId)
+            ?: PlatformAbi.nullPointer
+    }
+
+    if ((value as? IWinRTObject)?.hasUnwrappableNativeObject == true) {
+        return PlatformAbi.nullPointer
     }
 
     val stateOwner = value as? WinRTManagedProjectionStateOwner
@@ -252,16 +265,14 @@ public inline fun tryBorrowWinRTManagedProjectionAbi(
     managedState: WinRTManagedProjectionState?,
     typeHandle: WinRTTypeHandle,
 ): RawAddress {
-    if ((knownManagedValue as? IWinRTObject)?.hasUnwrappableNativeObject == true) {
-        return PlatformAbi.nullPointer
+    if (knownManagedValue is WinRTComposableObject) {
+        return knownManagedValue.winRTComposableObjectReference
+            ?.tryBorrowStaticCallAbi(typeHandle.interfaceId)
+            ?: PlatformAbi.nullPointer
     }
 
-    val composableAbi = (knownManagedValue as? WinRTComposableObject)
-        ?.winRTComposableObjectReference
-        ?.tryBorrowStaticCallAbi(typeHandle.interfaceId)
-        ?: PlatformAbi.nullPointer
-    if (!PlatformAbi.isNull(composableAbi)) {
-        return composableAbi
+    if ((knownManagedValue as? IWinRTObject)?.hasUnwrappableNativeObject == true) {
+        return PlatformAbi.nullPointer
     }
 
     if (managedState != null) {

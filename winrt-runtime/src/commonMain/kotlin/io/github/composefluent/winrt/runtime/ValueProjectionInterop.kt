@@ -113,7 +113,13 @@ object WinRTReferenceProjectionInterop {
             }
         }
 
-        val host = createReferenceMarshalerHost(interfaceId, value)
+        // WinUI dependency-property setters validate boxed values through
+        // IPropertyValue, so use the full CsWinRT-compatible host shape here.
+        val host = createReferenceMarshalerHost(
+            interfaceId = interfaceId,
+            value = value,
+            includePropertyValueInterface = true,
+        )
         try {
             val hr = ComVtableInvoker.invokeArgs(
                 instance = reference.pointer,
