@@ -4771,7 +4771,7 @@ ${invocation.toString().prependIndent("                        ")}
         delegateDescriptorPropertyName: String? = null,
     ): CodeBlock? {
         val typeBinding = planner.classifyAbiTypeBinding(
-            typeName = descriptor.eventTypeName,
+            typeName = descriptor.projectedEventTypeName,
             currentNamespace = descriptor.ownerTypeName.substringBeforeLast('.', missingDelimiterValue = ""),
             typesByQualifiedName = typesByQualifiedName,
         )

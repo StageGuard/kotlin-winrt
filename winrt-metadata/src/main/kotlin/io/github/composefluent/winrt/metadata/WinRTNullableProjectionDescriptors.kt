@@ -1,5 +1,16 @@
 package io.github.composefluent.winrt.metadata
 
+internal fun WinRTEventDefinition.withNullableEventContract(ownerTypeName: String): WinRTEventDefinition {
+    // WinUI Expander.cpp raises Expanding/Collapsed with nullptr event arguments.
+    // CsWinRT Marshaler<T>.FromAbi preserves null. Keep the WinMD signature intact
+    // while exposing this native contract in the Kotlin delegate type.
+    if (ownerTypeName !in setOf("Microsoft.UI.Xaml.Controls.Expander", "Microsoft.UI.Xaml.Controls.IExpander") ||
+        name !in setOf("Expanding", "Collapsed")) return this
+    val arguments = delegateType.typeArguments
+    if (arguments.size != 2) return this
+    return copy(delegateTypeName = "${delegateType.qualifiedName}<${arguments[0].typeName}, ${arguments[1].typeName}?>")
+}
+
 internal fun WinRTMethodDefinition.withNullableReturnContract(ownerTypeName: String): WinRTMethodDefinition {
     // Picker cancellation completes successfully with a null result. CsWinRT's
     // MarshalInterface<T>.FromAbi preserves null; the operation itself is nonnull.

@@ -589,6 +589,21 @@ internal fun KotlinProjectionRenderer.delegateCallbackArgumentCodeList(
 internal fun KotlinProjectionRenderer.delegateCallbackArgumentCode(
     index: Int,
     typeBinding: KotlinProjectionAbiTypeBinding,
+): CodeBlock {
+    // CsWinRT Marshaler<T>.FromAbi preserves a null reference before wrapping it.
+    if (typeBinding.typeName.endsWith('?')) {
+        return CodeBlock.of("if (__args[%L] == null) null else %L", index,
+            delegateCallbackArgumentCode(index, typeBinding.copy(
+                typeName = typeBinding.typeName.removeSuffix("?"),
+                resolvedTypeName = typeBinding.resolvedTypeName.removeSuffix("?"),
+            )))
+    }
+    return delegateNonNullCallbackArgumentCode(index, typeBinding)
+}
+
+private fun KotlinProjectionRenderer.delegateNonNullCallbackArgumentCode(
+    index: Int,
+    typeBinding: KotlinProjectionAbiTypeBinding,
 ): CodeBlock = when (typeBinding.kind) {
     KotlinProjectionAbiValueKind.String -> CodeBlock.of("__args[%L] as String", index)
     KotlinProjectionAbiValueKind.Boolean -> CodeBlock.of("__args[%L] as Boolean", index)

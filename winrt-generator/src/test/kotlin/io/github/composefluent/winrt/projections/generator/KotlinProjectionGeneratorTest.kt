@@ -15448,6 +15448,103 @@ class KotlinProjectionGeneratorTest {
     }
 
     @Test
+    fun generator_preserves_null_expander_event_arguments() {
+        val model = WinRTMetadataModel(
+            namespaces = listOf(
+                WinRTNamespace(
+                    name = "Windows.Foundation",
+                    types = listOf(
+                        WinRTTypeDefinition(
+                            namespace = "Windows.Foundation",
+                            name = "TypedEventHandler",
+                            kind = WinRTTypeKind.Delegate,
+                            iid = Guid("9de1c535-6ae1-11e0-84e1-18a905bcc53f"),
+                            genericParameterCount = 2,
+                            methods = listOf(
+                                WinRTMethodDefinition(
+                                    name = "Invoke",
+                                    returnTypeName = "System.Void",
+                                    parameters = listOf(
+                                        WinRTParameterDefinition("sender", "T0"),
+                                        WinRTParameterDefinition("args", "T1"),
+                                    ),
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+                WinRTNamespace(
+                    name = "Microsoft.UI.Xaml.Controls",
+                    types = listOf(
+                        WinRTTypeDefinition(namespace = "Microsoft.UI.Xaml.Controls", name = "ExpanderExpandingEventArgs", kind = WinRTTypeKind.RuntimeClass,
+                            defaultInterfaceName = "Microsoft.UI.Xaml.Controls.IExpanderExpandingEventArgs"),
+                        WinRTTypeDefinition(namespace = "Microsoft.UI.Xaml.Controls", name = "IExpanderExpandingEventArgs", kind = WinRTTypeKind.Interface,
+                            iid = Guid("11111111-2222-3333-4444-555555555554")),
+                        WinRTTypeDefinition(
+                            namespace = "Microsoft.UI.Xaml.Controls",
+                            name = "IExpander",
+                            kind = WinRTTypeKind.Interface,
+                            iid = Guid("11111111-2222-3333-4444-555555555553"),
+                            methods = listOf(
+                                WinRTMethodDefinition(
+                                    name = "add_Expanding",
+                                    returnTypeName = "Windows.Foundation.EventRegistrationToken",
+                                    parameters = listOf(
+                                        WinRTParameterDefinition("handler", "Windows.Foundation.TypedEventHandler<Microsoft.UI.Xaml.Controls.IExpander, Microsoft.UI.Xaml.Controls.ExpanderExpandingEventArgs>"),
+                                    ),
+                                    isSpecialName = true,
+                                    methodRowId = 6,
+                                ),
+                                WinRTMethodDefinition(
+                                    name = "remove_Expanding",
+                                    returnTypeName = "System.Void",
+                                    parameters = listOf(
+                                        WinRTParameterDefinition("token", "Windows.Foundation.EventRegistrationToken"),
+                                    ),
+                                    isSpecialName = true,
+                                    methodRowId = 7,
+                                ),
+                            ),
+                            events = listOf(
+                                WinRTEventDefinition(
+                                    name = "Expanding",
+                                    delegateTypeName = "Windows.Foundation.TypedEventHandler<Microsoft.UI.Xaml.Controls.IExpander, Microsoft.UI.Xaml.Controls.ExpanderExpandingEventArgs>",
+                                    addMethodName = "add_Expanding",
+                                    removeMethodName = "remove_Expanding",
+                                    addMethodRowId = 6,
+                                    removeMethodRowId = 7,
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        val filesByName = KotlinProjectionGenerator(
+            emitSupportFiles = true,
+            projectionContext = WinRTMetadataProjectionContext(sources = emptyList(), component = true),
+        ).generate(model).associateBy { it.relativePath.substringAfterLast('/') }
+        val widgetContents = filesByName.getValue("IExpander.kt").contents
+        val eventProjectionHelpers = filesByName
+            .filterKeys { it.startsWith("WinRTEventProjectionHelper_") || it.startsWith("_EventSource_") }
+            .values
+            .joinToString("\n") { it.contents }
+
+        // Expander.cpp sends nullptr; CsWinRT Marshaler<T>.FromAbi preserves it.
+        val expander = model.namespaces.last().types.single { it.name == "IExpander" }.normalized()
+        val event = expander.events.single()
+        assertEquals(event.delegateTypeName, io.github.composefluent.winrt.metadata.WinRTMetadataSemanticHelpers(model).eventInvokeDescriptor(expander, event).delegateTypeName)
+        assertEquals(expander, expander.normalized())
+        assertFalse(event.delegateType.typeName.contains('?'))
+        assertTrue(eventProjectionHelpers, eventProjectionHelpers.contains("TypedEventHandler<IExpander, ExpanderExpandingEventArgs?>"))
+        assertTrue(eventProjectionHelpers, eventProjectionHelpers.replace(Regex("\\s+"), " ").contains("if (__args[1] == null) null else ExpanderExpandingEventArgs.Metadata.wrap"))
+        assertTrue(widgetContents, widgetContents.contains("import windows.foundation.TypedEventHandler"))
+        assertTrue(widgetContents, widgetContents.replace(Regex("\\s+"), " ").contains("fun addExpanding(handler: TypedEventHandler<IExpander, ExpanderExpandingEventArgs?>): EventRegistrationToken"))
+        assertTrue(eventProjectionHelpers, eventProjectionHelpers.contains("internal class _EventSource_"))
+    }
+
+    @Test
     fun generator_uses_runtime_backed_reference_system_mapped_type_names() {
         val model = WinRTMetadataModel(
             namespaces = listOf(

@@ -728,6 +728,7 @@ data class WinRTTypeDefinition(
             .values
             .map { duplicates -> duplicates.reduce(WinRTEventDefinition::merge) }
             .sortedWith(compareBy<WinRTEventDefinition>({ it.addMethodRowId ?: it.removeMethodRowId ?: Int.MAX_VALUE }, { it.signatureKey() }))
+            .map { it.withNullableEventContract(qualifiedName.trim()) }
         return copy(
             namespace = namespace.trim(),
             name = name.trim(),

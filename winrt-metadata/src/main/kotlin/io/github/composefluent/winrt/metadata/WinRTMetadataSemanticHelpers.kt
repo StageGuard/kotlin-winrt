@@ -1538,7 +1538,7 @@ class WinRTMetadataSemanticHelpers(private val model: WinRTMetadataModel) {
             val instantiatedEvent = event.copy(
                 delegateTypeName = eventType.typeName,
                 delegateTypeSignature = eventType,
-            )
+            ).withNullableEventContract(type.qualifiedName)
             val eventHandlerDescriptor =
                 typeClassifier.classify(eventType, type.namespace).specialType as? WinRTEventHandlerTypeDescriptor
             val usesSharedEventHandlerSource =
@@ -1546,8 +1546,8 @@ class WinRTMetadataSemanticHelpers(private val model: WinRTMetadataModel) {
                     eventHandlerDescriptor.kind in SHARED_EVENT_HANDLER_SOURCE_KINDS &&
                     instantiatedEvent.supportsSharedEventHandlerSource(type.namespace, eventHandlerDescriptor)
             WinRTEventHelperSubclassDescriptor(
-                eventTypeName = eventType.typeName,
-                projectedEventTypeName = eventType.typeName,
+                eventTypeName = instantiatedEvent.delegateTypeName,
+                projectedEventTypeName = instantiatedEvent.delegateTypeName,
                 abiEventTypeName = renderAbiTypeName(eventType),
                 ownerTypeName = ownerTypeName,
                 sourceClassName = if (usesSharedEventHandlerSource) {
@@ -1633,7 +1633,7 @@ class WinRTMetadataSemanticHelpers(private val model: WinRTMetadataModel) {
         val invokeSignature = invoke?.let(::signatureWriterDescriptor)
         return WinRTEventInvokeDescriptor(
             eventName = event.name,
-            delegateTypeName = event.delegateType.normalized().typeName,
+            delegateTypeName = event.withNullableEventContract(type.qualifiedName).delegateTypeName,
             invokeMethodName = invoke?.name,
             returnTypeName = invoke?.returnType?.normalized()?.typeName
                 ?.let { returnTypeName -> if (isWinRTVoidTypeName(returnTypeName)) "Unit" else returnTypeName }
