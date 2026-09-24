@@ -17,6 +17,25 @@ import org.junit.Test
 
 class KotlinProjectionCallSiteDescriptorsTest {
     @Test
+    fun runtime_class_signature_uses_metadata_iid_without_initializing_projection_companion() {
+        // CsWinRT GuidGenerator.GetSignature derives runtime-class signatures from the
+        // metadata type/default-interface shape; generated signatures must not initialize
+        // a second projection companion while the module projection registrar is running.
+        val binding = KotlinProjectionAbiTypeBinding(
+            kind = KotlinProjectionAbiValueKind.ProjectedRuntimeClass,
+            typeName = "Microsoft.UI.Xaml.UIElement",
+            resolvedTypeName = "Microsoft.UI.Xaml.UIElement",
+            interfaceId = Guid("C3C01020-320C-5CF6-9D24-D396BBFA4D8B"),
+        )
+
+        val signature = KotlinProjectionRenderer().abiTypeSignature(binding).toString()
+
+        assertTrue(signature, signature.contains("runtimeClass(\"Microsoft.UI.Xaml.UIElement\""))
+        assertTrue(signature, signature.contains("Guid(\"C3C01020-320C-5CF6-9D24-D396BBFA4D8B\")"))
+        assertFalse(signature, signature.contains("Metadata.DEFAULT_INTERFACE_IID"))
+    }
+
+    @Test
     fun receive_array_parameters_preserve_other_outputs_and_the_declared_return() {
         // CsWinRT code_writers.h write_projection_parameter_type emits out T[].
         // Only Kotlin's established sole trailing array on a void method is lifted.

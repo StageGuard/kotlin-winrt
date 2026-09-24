@@ -513,13 +513,17 @@ internal fun KotlinProjectionRenderer.abiTypeSignature(
                 GUID_CLASS_NAME,
                 customAbi.interfaceId.toString(),
             )
-        } ?: resolvedReturnClassName(binding)?.let { resultType ->
+        } ?: binding.interfaceId?.let { defaultInterfaceId ->
+            // A WinRT signature is fully determined by metadata. Referencing another
+            // projection's Metadata companion here can re-enter that class initializer
+            // while the module-wide projection registrar is initializing collection types.
             CodeBlock.of(
-                "%T.runtimeClass(%S, %T.guid(%T.Metadata.DEFAULT_INTERFACE_IID))",
+                "%T.runtimeClass(%S, %T.guid(%T(%S)))",
                 WINRT_TYPE_SIGNATURE_CLASS_NAME,
                 binding.resolvedTypeName,
                 WINRT_TYPE_SIGNATURE_CLASS_NAME,
-                resultType,
+                GUID_CLASS_NAME,
+                defaultInterfaceId.toString(),
             )
         }
     else -> null
