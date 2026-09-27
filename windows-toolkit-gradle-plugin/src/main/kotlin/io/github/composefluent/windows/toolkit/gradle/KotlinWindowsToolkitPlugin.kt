@@ -1349,12 +1349,10 @@ private fun configureWinAppTasks(
             task.windowsSdkRegistryRoots.set(windowsSdkRegistryRoots)
             task.runtimeIdentifier.set(selectedVariant.map { variant -> variant.runtimeIdentifier })
             task.includeFrameworkPackageDependencies.set(project.provider {
-                val packageOutput = options.packageOutputFile.orNull?.asFile
-                val usesLegacyMakeAppx = options.makeAppxExecutable.get().isNotBlank() ||
-                    packageOutput?.name?.endsWith(".appx", ignoreCase = true) == true
+                // Match Windows App SDK AppXReference: the package graph must declare
+                // its runtime framework regardless of which tool registers/packages it.
                 options.packageType.get() == WindowsPackageType.Packaged &&
-                    resolvedWindowsAppSdkDeployment.get() == WindowsAppSdkDeployment.FrameworkDependent &&
-                    usesLegacyMakeAppx
+                    resolvedWindowsAppSdkDeployment.get() == WindowsAppSdkDeployment.FrameworkDependent
             })
             task.executableBaseName.set(project.name)
             task.deferredManifestPayloadPaths.set(

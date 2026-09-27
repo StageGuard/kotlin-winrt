@@ -4558,6 +4558,21 @@ class WindowsToolkitPluginTest {
     }
 
     @Test
+    fun winapp_cli_packaged_framework_dependent_application_declares_framework_dependencies() {
+        // Windows App SDK AppXReference.props declares the runtime framework;
+        // switching packaging tools must not remove that deployment contract.
+        val project = ProjectBuilder.builder().build()
+        project.pluginManager.apply(KotlinWindowsToolkitPlugin::class.java)
+        project.extensions.getByType(WindowsExtension::class.java).application { application ->
+            application.packageType.set(WindowsPackageType.Packaged)
+            application.frameworkDependent()
+        }
+        project.pluginManager.apply("application")
+        val stage = project.tasks.named("stageWinAppPackageJvmMain", StageWinAppPackageTask::class.java).get()
+        assertTrue(stage.includeFrameworkPackageDependencies.get())
+    }
+
+    @Test
     fun application_plugin_accepts_gradle_application_distribution_model() {
         val project = ProjectBuilder.builder().build()
 
