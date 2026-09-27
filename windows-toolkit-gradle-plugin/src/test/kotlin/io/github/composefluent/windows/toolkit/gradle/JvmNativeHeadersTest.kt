@@ -1,7 +1,9 @@
 package io.github.composefluent.windows.toolkit.gradle
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertThrows
 import org.junit.Test
+import org.gradle.api.GradleException
 import java.nio.file.Files
 
 class JvmNativeHeadersTest {
@@ -28,5 +30,26 @@ class JvmNativeHeadersTest {
     private fun writeRelease(home: java.nio.file.Path, version: String) {
         Files.createDirectories(home)
         Files.writeString(home.resolve("release"), "JAVA_VERSION=\"$version\"")
+    }
+
+    @Test
+    fun uses_the_local_build_jdk_when_the_ide_overrides_process_java_home() {
+        val root = Files.createTempDirectory("local-jvm-native-headers-")
+        val ideRuntime = root.resolve("IDE runtime")
+        val localJdk = root.resolve("Local JDK")
+        writeRelease(ideRuntime, "25.0.3")
+        writeRelease(localJdk, "25.0.4")
+        Files.createDirectories(localJdk.resolve("include/win32"))
+        Files.writeString(localJdk.resolve("include/jni.h"), "")
+        Files.writeString(localJdk.resolve("include/win32/jni_md.h"), "")
+
+        val fallbacks = jvmDevelopmentKitFallbackHomes(
+            environment = mapOf("JAVA_HOME" to ideRuntime.toString()),
+            currentJavaHome = ideRuntime.toString(),
+            localProperties = "java.home=${localJdk.toString().replace("\\", "\\\\")}",
+        )
+
+        assertEquals(localJdk.toAbsolutePath().normalize(), resolveJvmDevelopmentKitHome(ideRuntime, 25, fallbacks))
+        assertThrows(GradleException::class.java) { resolveJvmDevelopmentKitHome(ideRuntime, 21, fallbacks) }
     }
 }

@@ -3,6 +3,7 @@ package io.github.composefluent.windows.toolkit.gradle
 import org.gradle.api.GradleException
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.Properties
 
 internal data class JvmNativeHeaderDirectories(
     val includeDirectory: Path,
@@ -35,7 +36,7 @@ internal fun resolveJvmDevelopmentKitHome(
         ?: throw GradleException(
             "Kotlin/WinRT JVM native hosts require JNI headers, but the configured Java toolchain at " +
                 "$normalizedSelectedHome does not contain include/jni.h and include/win32/jni_md.h. " +
-                "Configure application.jvmToolchain($expectedJavaMajor) to use a complete JDK or set JAVA_HOME to one.",
+                "Set java.home in .gradle/config.properties or JAVA_HOME to a complete JDK $expectedJavaMajor.",
         )
 }
 
@@ -54,7 +55,9 @@ internal fun resolveJvmNativeHeaderDirectories(javaHome: String): JvmNativeHeade
 internal fun jvmDevelopmentKitFallbackHomes(
     environment: Map<String, String> = System.getenv(),
     currentJavaHome: String = System.getProperty("java.home"),
+    localProperties: String = "",
 ): List<Path> = listOfNotNull(
+    Properties().apply { localProperties.reader().use(::load) }.getProperty("java.home"),
     environment.valueIgnoringCase("JAVA_HOME"),
     environment.valueIgnoringCase("JDK_HOME"),
     currentJavaHome,

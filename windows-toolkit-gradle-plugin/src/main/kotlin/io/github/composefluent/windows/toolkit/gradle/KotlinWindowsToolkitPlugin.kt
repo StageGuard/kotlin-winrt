@@ -109,19 +109,27 @@ internal const val KOTLIN_WINRT_LIBRARY_DEPENDENCY_IDENTITY_CONFIGURATION: Strin
 private fun configuredJvmToolchainHome(
     project: Project,
     options: WinAppOptions,
-): Provider<String> = project.provider {
-    val service = project.extensions.findByType(JavaToolchainService::class.java)
-        ?: throw org.gradle.api.GradleException(
-            "Gradle Java toolchain service is unavailable; cannot build the Kotlin/WinRT JVM host. " +
-                "Apply a Kotlin/JVM or Java plugin with toolchain support.",
-        )
-    val launcher = service.launcherFor(Action<JavaToolchainSpec> { spec ->
-        spec.languageVersion.set(JavaLanguageVersion.of(options.jvmToolchainVersion.get()))
-    }).get()
-    resolveJvmDevelopmentKitHome(
-        selectedHome = launcher.metadata.installationPath.asFile.toPath(),
-        expectedJavaMajor = options.jvmToolchainVersion.get(),
-    ).toString()
+): Provider<String> {
+    // Android Studio can run Gradle on JBR even when its local build JDK is configured.
+    // Track the file through Gradle so a JDK change also invalidates configuration cache.
+    val localJavaProperties = project.providers.fileContents(
+        project.rootProject.layout.projectDirectory.file(".gradle/config.properties"),
+    ).asText.orElse("")
+    return project.provider {
+        val service = project.extensions.findByType(JavaToolchainService::class.java)
+            ?: throw org.gradle.api.GradleException(
+                "Gradle Java toolchain service is unavailable; cannot build the Kotlin/WinRT JVM host. " +
+                    "Apply a Kotlin/JVM or Java plugin with toolchain support.",
+            )
+        val launcher = service.launcherFor(Action<JavaToolchainSpec> { spec ->
+            spec.languageVersion.set(JavaLanguageVersion.of(options.jvmToolchainVersion.get()))
+        }).get()
+        resolveJvmDevelopmentKitHome(
+            selectedHome = launcher.metadata.installationPath.asFile.toPath(),
+            expectedJavaMajor = options.jvmToolchainVersion.get(),
+            fallbackHomes = jvmDevelopmentKitFallbackHomes(localProperties = localJavaProperties.get()),
+        ).toString()
+    }
 }
 
 fun Project.registerWinAppHostRunTask(
