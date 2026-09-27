@@ -1038,6 +1038,36 @@ class WinRTMetadataLoaderTest {
     }
 
     @Test
+    fun resolves_transitive_dependencies_from_archived_nuspec_in_nuget_install_layout() {
+        // CsWinRT main.cpp consumes resolved metadata inputs. NuGet manifest
+        // discovery belongs to this resolver, before projection planning.
+        val root = Files.createTempDirectory("kotlin-winrt-archived-nuspec")
+        fun installed(id: String, dependency: String = "") {
+            val directory = Files.createDirectories(root.resolve("$id.1.0.0"))
+            java.util.zip.ZipOutputStream(Files.newOutputStream(directory.resolve("$id.1.0.0.nupkg"))).use { zip ->
+                zip.putNextEntry(java.util.zip.ZipEntry("$id.nuspec"))
+                zip.write("""
+                    <package xmlns="http://schemas.microsoft.com/packaging/2013/05/nuspec.xsd">
+                    <metadata><id>$id</id><version>1.0.0</version>
+                    <dependencies>$dependency</dependencies></metadata></package>
+                """.trimIndent().toByteArray())
+                zip.closeEntry()
+            }
+        }
+        installed("Sample.Root", """<dependency id="Sample.Middle" version="[1.0.0]" />""")
+        installed("Sample.Middle", """<dependency id="Sample.Leaf" version="[1.0.0]" />""")
+        installed("Sample.Leaf")
+        installed("Sample.Unrelated")
+        val closure = WinRTNuGetPackageResolver.resolveClosure(
+            WinRTNuGetPackageIdentity("Sample.Root", "1.0.0"), listOf(root),
+        )
+        assertEquals(
+            listOf("Sample.Root@1.0.0", "Sample.Middle@1.0.0", "Sample.Leaf@1.0.0"),
+            closure.map { it.identity.toString() },
+        )
+    }
+
+    @Test
     fun resolves_only_requested_closure_from_flat_nuget_install_directories() {
         val root = Files.createTempDirectory("kotlin-winrt-flat-nuget")
         fun packageDirectory(id: String, version: String, dependency: String = "") {
@@ -1059,6 +1089,12 @@ class WinRTMetadataLoaderTest {
             listOf("Sample.Root@2.0.0", "Sample.Dependency@1.1.0"),
             closure.map { it.identity.toString() },
         )
+        packageDirectory("Sample.Dependency", "1.0.0")
+        val directReferences = WinRTNuGetPackageResolver.resolveClosures(listOf(
+            WinRTNuGetPackageIdentity("Sample.Root", "2.0.0") to listOf(root),
+            WinRTNuGetPackageIdentity("Sample.Dependency", "1.1.0") to listOf(root),
+        ))
+        assertEquals(closure.map { it.identity }, directReferences.map { it.identity })
     }
 
     @Test

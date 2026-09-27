@@ -366,13 +366,24 @@ object WinRTNuGetPackageResolver {
     fun resolveClosure(
         rootIdentity: WinRTNuGetPackageIdentity,
         globalPackagesRoots: List<Path> = globalPackagesRoots(),
+    ): List<WinRTNuGetResolvedPackage> =
+        resolveClosures(listOf(rootIdentity to globalPackagesRoots))
+
+    internal fun resolveClosures(
+        roots: List<Pair<WinRTNuGetPackageIdentity, List<Path>>>,
     ): List<WinRTNuGetResolvedPackage> {
-        val queue = ArrayDeque(listOf(NuGetPackageRequest(rootIdentity, isDependency = false)))
+        // Seed every direct reference before its transitive dependencies, so a
+        // package's minimum dependency cannot load a second, older SDK alongside
+        // the application's explicitly selected SDK.
+        val queue = ArrayDeque(roots.map { (identity, paths) ->
+            NuGetPackageRequest(identity, isDependency = false, globalPackagesRoots = paths)
+        })
         val visited = linkedSetOf<String>()
         val resolvedByPackageId = mutableMapOf<String, WinRTNuGetResolvedPackage>()
         val resolved = mutableListOf<WinRTNuGetResolvedPackage>()
         while (queue.isNotEmpty()) {
             val current = queue.removeFirst()
+            val globalPackagesRoots = current.globalPackagesRoots
             val requestedPackageIdKey = current.identity.normalizedPackageId.lowercase()
             if (current.isDependency) {
                 resolvedByPackageId[requestedPackageIdKey]?.let { selected ->
@@ -413,7 +424,7 @@ object WinRTNuGetPackageResolver {
             }
             resolved += currentResolved
             currentResolved.dependencies.forEach { dependency ->
-                queue.add(NuGetPackageRequest(dependency, isDependency = true))
+                queue.add(NuGetPackageRequest(dependency, isDependency = true, globalPackagesRoots = globalPackagesRoots))
             }
         }
         return resolved
@@ -473,12 +484,7 @@ object WinRTNuGetPackageResolver {
     }
 
     fun dependencies(packageRoot: Path): List<WinRTNuGetPackageIdentity> {
-        val nuspec = findNuspec(packageRoot) ?: return emptyList()
-        val builder = DocumentBuilderFactory.newInstance().apply {
-            isNamespaceAware = true
-            setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
-        }.newDocumentBuilder()
-        val document = builder.parse(nuspec.toFile())
+        val document = readNuspec(packageRoot) ?: return emptyList()
         val dependencyNodes = document.getElementsByTagNameNS("*", "dependency")
             .takeIf { it.length > 0 }
             ?: document.getElementsByTagName("dependency")
@@ -495,6 +501,7 @@ object WinRTNuGetPackageResolver {
     private data class NuGetPackageRequest(
         val identity: WinRTNuGetPackageIdentity,
         val isDependency: Boolean,
+        val globalPackagesRoots: List<Path>,
     )
 
     private data class NuGetVersionConstraint(
@@ -607,19 +614,14 @@ object WinRTNuGetPackageResolver {
     }
 
     private fun packageIdentity(packageRoot: Path): WinRTNuGetPackageIdentity {
-        val nuspec = findNuspec(packageRoot) ?: return packageIdentityFromInstallDirectory(packageRoot)
-        val builder = DocumentBuilderFactory.newInstance().apply {
-            isNamespaceAware = true
-            setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
-        }.newDocumentBuilder()
-        val document = builder.parse(nuspec.toFile())
+        val document = readNuspec(packageRoot) ?: return packageIdentityFromInstallDirectory(packageRoot)
         val metadataNodes = document.getElementsByTagNameNS("*", "metadata")
             .takeIf { it.length > 0 }
             ?: document.getElementsByTagName("metadata")
         val metadata = (0 until metadataNodes.length)
             .mapNotNull { metadataNodes.item(it) as? org.w3c.dom.Element }
             .firstOrNull()
-            ?: throw IllegalArgumentException("NuGet package '$packageRoot' has no metadata node in ${nuspec.fileName}.")
+            ?: throw IllegalArgumentException("NuGet package '$packageRoot' has no metadata node in its nuspec.")
         return WinRTNuGetPackageIdentity(
             packageId = metadata.childText("id"),
             version = metadata.childText("version"),
@@ -661,6 +663,26 @@ object WinRTNuGetPackageResolver {
                 .filter { it.isRegularFile() }
                 .firstOrNull { it.name.endsWith(".nuspec", ignoreCase = true) }
         }
+
+    private fun readNuspec(packageRoot: Path): org.w3c.dom.Document? {
+        val builder = DocumentBuilderFactory.newInstance().apply {
+            isNamespaceAware = true
+            setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
+        }.newDocumentBuilder()
+        findNuspec(packageRoot)?.let { return builder.parse(it.toFile()) }
+        // NuGet install keeps the manifest inside the package archive. Consume
+        // the same dependency manifest as restore rather than assuming a leaf package.
+        val archive = Files.list(packageRoot).use { files ->
+            files.asSequence().filter { it.isRegularFile() }
+                .firstOrNull { it.name.endsWith(".nupkg", ignoreCase = true) }
+        } ?: return null
+        return ZipFile(archive.toFile()).use { zip ->
+            val manifest = zip.entries().asSequence().firstOrNull {
+                !it.isDirectory && '/' !in it.name && it.name.endsWith(".nuspec", ignoreCase = true)
+            } ?: return@use null
+            zip.getInputStream(manifest).use(builder::parse)
+        }
+    }
 
     private fun nuGetCanonicalizePath(path: Path): Path =
         runCatching { path.toAbsolutePath().normalize().toRealPath() }
@@ -776,6 +798,7 @@ data class WinRTMetadataCache(
                 .onSuccess { cached -> return cached.copy(windowsSdkSelections = windowsSdkSelections).normalized() }
                 .onFailure { Files.deleteIfExists(cacheFile) }
         }
+
         val model = loadParsedModel()
         WinRTMetadataModelCodec.writeAtomic(cacheFile, model)
         return model
@@ -788,7 +811,13 @@ data class WinRTMetadataCache(
 
 object WinRTMetadataSourceResolver {
     fun resolve(sources: List<WinRTMetadataSource>): WinRTMetadataCache {
-        val resolvedSources = sources.map(::resolveSource)
+        val packageReferences = sources.filterIsInstance<WinRTMetadataSource.NuGetPackageReference>()
+        val packages = WinRTNuGetPackageResolver.resolveClosures(packageReferences.map { source ->
+            WinRTNuGetPackageIdentity(source.packageId, source.version) to
+                WinRTNuGetPackageResolver.globalPackagesRoots(explicitRoots = source.globalPackagesRoots)
+        })
+        val resolvedSources = sources.filterNot { it is WinRTMetadataSource.NuGetPackageReference }.map(::resolveSource) +
+            packages.map { resolveNuGetPackageDirectory(it.packageRoot) }
         val seenFiles = linkedSetOf<String>()
         val resolvedFiles = resolvedSources
             .asSequence()
