@@ -13797,6 +13797,10 @@ class WindowsToolkitPluginTest {
                 dependsOn writeTransitiveSupportProbe
             }
 
+            tasks.matching { it.name == "compileKotlinWinRTProjectionWinuiJvm" }.configureEach {
+                source("projection-probe")
+            }
+
             tasks.register("printApplicationIdentity") {
                 dependsOn("generateWinAppIdentityWinuiJvmMain")
                 doLast {
@@ -13921,6 +13925,21 @@ class WindowsToolkitPluginTest {
             }
             """.trimIndent(),
         )
+        // Like .cswinrt/src/Projections/Windows.UI.Xaml/Windows.UI.Xaml.csproj,
+        // projection declarations and their module registration compile together.
+        val projectionProbe = projectDir.resolve("winrt-app/projection-probe/ProjectionProbe.kt")
+        writeGradleFile(
+            projectionProbe,
+            """
+            package incrementalprobe
+
+            import microsoft.ui.xaml.ResourceDictionary
+
+            class ProjectionProbe {
+                fun create() = ResourceDictionary()
+            }
+            """.trimIndent(),
+        )
         val result = GradleRunner.create()
             .withProjectDir(projectDir.toFile())
             .withPluginClasspath()
@@ -13971,6 +13990,41 @@ class WindowsToolkitPluginTest {
         assertTrue(appWindowsFoundationProjection.contains("IAsyncAction"))
         assertFalse(libraryWindowsFoundationProjection.contains("IClosable"))
         assertEquals(TaskOutcome.SUCCESS, result.task(":winrt-app:verifyTransitiveCompilerSupport")?.outcome)
+
+        Files.writeString(
+            projectionProbe,
+            Files.readString(projectionProbe).replace(
+                "fun create() = ResourceDictionary()",
+                "fun create() = ResourceDictionary()\n    fun createTwice() = listOf(create(), create())",
+            ),
+        )
+        val incremental = GradleRunner.create()
+            .withProjectDir(projectDir.toFile())
+            .withPluginClasspath()
+            .withArguments(":winrt-app:verifyTransitiveCompilerSupport", "--stacktrace")
+            .forwardOutput()
+            .build()
+        assertEquals(TaskOutcome.SUCCESS, incremental.task(":winrt-app:compileKotlinWinRTProjectionWinuiJvm")?.outcome)
+        assertEquals(TaskOutcome.SUCCESS, incremental.task(":winrt-app:verifyTransitiveCompilerSupport")?.outcome)
+
+        // Moving a source into the business compilation must remove its old projection class
+        // without erasing the unchanged projections needed by the remaining sources.
+        val businessProbe = projectDir.resolve("winrt-app/src/commonMain/kotlin/incrementalprobe/ProjectionProbe.kt")
+        Files.createDirectories(businessProbe.parent)
+        Files.move(projectionProbe, businessProbe)
+        val moved = GradleRunner.create()
+            .withProjectDir(projectDir.toFile())
+            .withPluginClasspath()
+            .withArguments(":winrt-app:verifyTransitiveCompilerSupport", "--stacktrace")
+            .forwardOutput()
+            .build()
+        assertEquals(TaskOutcome.SUCCESS, moved.task(":winrt-app:verifyTransitiveCompilerSupport")?.outcome)
+        assertFalse(Files.exists(projectDir.resolve(
+            "winrt-app/build/classes/kotlin-winrt/projection/compileKotlinWinuiJvm/incrementalprobe/ProjectionProbe.class",
+        )))
+        assertTrue(Files.exists(projectDir.resolve(
+            "winrt-app/build/classes/kotlin/winuiJvm/main/incrementalprobe/ProjectionProbe.class",
+        )))
     }
 
     @Test
