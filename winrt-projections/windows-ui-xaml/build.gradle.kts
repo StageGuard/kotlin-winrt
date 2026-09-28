@@ -29,7 +29,7 @@ kotlin {
 }
 
 dependencies {
-    commonMainCompileOnly(project(":winrt-projections:windows-sdk"))
+    commonMainApi(project(":winrt-projections:windows-sdk"))
 }
 
 windows {
