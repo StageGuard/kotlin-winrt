@@ -175,7 +175,7 @@ internal fun gallerySettingsPage(
                 children.add(link("WinUI 3", "https://aka.ms/winui"))
                 children.add(link("WinUI Gallery", "https://github.com/microsoft/WinUI-Gallery"))
                 children.add(link("Win2D", "https://github.com/microsoft/Win2D"))
-                children.add(link("WinUI Essential 1.8.0", "https://github.com/HO-COOH/WinUIEssentials"))
+                children.add(link("WinUI Essential", "https://github.com/HO-COOH/WinUIEssentials"))
             }
         })
         items.add(SettingsCard().apply {
