@@ -271,14 +271,14 @@ class WindowsToolkitPluginTest {
     }
 
     @Test
-    fun generation_worker_forwards_complete_environment_to_nuget_child_process() {
+    fun winapp_restore_forwards_environment_and_supplies_generation_worker() {
         assumeTrue(System.getProperty("os.name").contains("Windows", ignoreCase = true))
         val projectDir = Files.createTempDirectory("kotlin-winrt-generator-worker-environment-test-")
         val packageId = "Kotlin.WinRT.Worker.Environment.Probe"
         val packageVersion = "1.0.0"
-        val packageDirectoryName = "$packageId.$packageVersion"
+        val cacheRoot = projectDir.resolve("global-packages")
         val probeValue = "from-owning-gradle-process"
-        val fixtureWinmd = projectDir.resolve("fixture/Sample.winmd")
+        val fixtureWinmd = cacheRoot.resolve(packageId.lowercase()).resolve(packageVersion).resolve("metadata/Sample.winmd")
         Files.createDirectories(fixtureWinmd.parent)
         WinRTPortableExecutableMetadataWriter.writeProjectionFixtureWinmd(
             assemblyName = "Sample",
@@ -293,57 +293,37 @@ class WindowsToolkitPluginTest {
         )
         writeMinimalGradleFixture(projectDir, "kotlin-winrt-generator-worker-environment-test")
         val logFile = projectDir.resolve("worker-environment.txt")
-        val nugetExecutable = projectDir.resolve("nuget.cmd")
-        writeGradleFile(
-            nugetExecutable,
-            """
+        val lockFixture = projectDir.resolve("fixture-lock.json")
+        Files.writeString(lockFixture, """
+            {"schema":3,"nuget_cache_dir":${("\"" + cacheRoot.toString().replace("\\", "/") + "\"")},"packages":[
+              {"name":"$packageId","version":"$packageVersion","winmds":[${("\"" + fixtureWinmd.toString().replace("\\", "/") + "\"")}]}
+            ]}
+        """.trimIndent())
+        writeGradleFile(projectDir.resolve("winapp.cmd"), """
             @echo off
-            setlocal
+            if /I "%~1"=="--version" (
+              echo 0.6.0
+              exit /b 0
+            )
             >>"$logFile" echo KOTLIN_WINRT_WORKER_ENV_PROBE=%KOTLIN_WINRT_WORKER_ENV_PROBE%
             >>"$logFile" echo NUGET_PACKAGES=%NUGET_PACKAGES%
-            set "OUTPUT="
-            :parse
-            if "%~1"=="" goto install
-            if /I "%~1"=="-OutputDirectory" (
-              set "OUTPUT=%~2"
-              shift
-            )
-            shift
-            goto parse
-            :install
-            if not defined OUTPUT exit /b 1
-            mkdir "%OUTPUT%\$packageDirectoryName\metadata" 2>nul
-            copy /Y "$fixtureWinmd" "%OUTPUT%\$packageDirectoryName\metadata\Sample.winmd" >nul
+            mkdir .winapp\bin 2>nul
+            copy /Y "$lockFixture" .winapp\winmds.lock.json >nul
             exit /b %ERRORLEVEL%
-            """.trimIndent(),
-        )
-        writeGradleFile(
-            projectDir.resolve("build.gradle"),
-            """
-            plugins {
-                id "io.github.compose-fluent.windows-toolkit"
-            }
-
+        """.trimIndent())
+        writeGradleFile(projectDir.resolve("build.gradle"), """
+            plugins { id "io.github.compose-fluent.windows-toolkit" }
             windows {
+                winAppCliExecutable.set(file("winapp.cmd").absolutePath)
                 packageReferences {
                     namespace "Sample"
-                    metadataInputs.add(file("fixture/Sample.winmd").absolutePath)
+                    nugetPackage "$packageId", "$packageVersion"
                 }
             }
-
-            // Exercise task/worker restore directly. A declared DSL package is now
-            // prepared during configuration, before any worker can be started.
             tasks.withType(io.github.composefluent.windows.toolkit.gradle.GenerateWinRTProjectionsTask).configureEach {
-                nugetPackages.set(["$packageId@$packageVersion"])
-                winAppRestoreLockFiles.setFrom([])
-                nugetExecutable.set(file("nuget.cmd").absolutePath)
-                restoreNuGetPackages.set(true)
-                useNuGetCliGlobalPackages.set(false)
                 generatorWorkerJvmArgs.set(["-Xmx256m", "-XX:+UseSerialGC", "-Dfile.encoding=UTF-8"])
             }
-            """.trimIndent(),
-        )
-
+        """.trimIndent())
         val environment = System.getenv().toMutableMap().apply {
             put("KOTLIN_WINRT_WORKER_ENV_PROBE", probeValue)
             put("NUGET_PACKAGES", projectDir.resolve("global-packages").toString())
@@ -352,7 +332,7 @@ class WindowsToolkitPluginTest {
             .withProjectDir(projectDir.toFile())
             .withPluginClasspath()
             .withEnvironment(environment)
-            .withArguments("generateWinRTProjections", "--stacktrace", "--max-workers=1")
+            .withArguments("generateWinRTProjections", "--configuration-cache", "--stacktrace", "--max-workers=1")
             .forwardOutput()
             .build()
 
@@ -371,6 +351,18 @@ class WindowsToolkitPluginTest {
                 projectDir.resolve("build/generated/kotlin-winrt/src/jvmMain/kotlin/sample/sample.kt"),
             ),
         )
+        // A cold restore creates the lock used to snapshot package-content task inputs.
+        // Settle that first transition, then require stable reuse without another CLI run.
+        GradleRunner.create()
+            .withProjectDir(projectDir.toFile()).withPluginClasspath().withEnvironment(environment)
+            .withArguments("generateWinRTProjections", "--configuration-cache", "--stacktrace", "--max-workers=1")
+            .build()
+        val repeated = GradleRunner.create()
+            .withProjectDir(projectDir.toFile()).withPluginClasspath().withEnvironment(environment)
+            .withArguments("generateWinRTProjections", "--configuration-cache", "--stacktrace", "--max-workers=1")
+            .build()
+        assertTrue(repeated.output, repeated.output.contains("Reusing configuration cache"))
+        assertEquals(invocation, Files.readAllLines(logFile))
     }
 
     @Test
@@ -392,11 +384,7 @@ class WindowsToolkitPluginTest {
         extension.packageReferences.excludeAdditionNamespace("Microsoft.UI.Xaml.Media.Animation")
         extension.packageReferences.winmd("sdk+")
         extension.packageReferences.windowsSdk("10.0.26100.0", includeExtensions = true, generateProjection = true)
-        extension.packageReferences.nugetExecutable.set("nuget.exe")
-        extension.packageReferences.nugetCliVersion.set("7.3.1")
         extension.packageReferences.restoreNuGetPackages.set(false)
-        extension.packageReferences.useNuGetCliGlobalPackages.set(false)
-        extension.packageReferences.nugetGlobalPackagesRoots.add(project.layout.projectDirectory.dir("nuget-cache").asFile.absolutePath)
         extension.application.runtimeAsset(project.layout.projectDirectory.file("SimpleMathComponent.dll").asFile.absolutePath)
         extension.packageReferences.nugetPackage("Microsoft.WindowsAppSDK", "1.8.260416003") { pkg ->
             pkg.generateProjection = true
@@ -420,14 +408,10 @@ class WindowsToolkitPluginTest {
         assertEquals("10.0.26100.0", task.windowsSdkVersion.get())
         assertTrue(task.includeWindowsSdkExtensions.get())
         assertTrue(task.generateWindowsSdkProjection.get())
-        assertEquals("nuget.exe", task.nugetExecutable.get())
-        assertEquals("7.3.1", task.nugetCliVersion.get())
         assertEquals(
             System.getenv(),
             task.workerEnvironment.get(),
         )
-        assertEquals(false, task.restoreNuGetPackages.get())
-        assertEquals(false, task.useNuGetCliGlobalPackages.get())
         assertEquals(
             listOf(project.layout.projectDirectory.file("SimpleMathComponent.dll").asFile.absolutePath),
             project.extensions.getByType(WindowsExtension::class.java).runtimeAssets.get(),
@@ -438,7 +422,7 @@ class WindowsToolkitPluginTest {
         )
         assertFalse("Windows.UI.Composition" in task.excludeTypes.get())
         assertEquals(
-            setOf(nugetPackageRoot.toFile()),
+            emptySet<java.io.File>(),
             task.nugetPackageContentFiles.files,
         )
         assertEquals(
@@ -626,7 +610,6 @@ class WindowsToolkitPluginTest {
         project.pluginManager.apply(KotlinWindowsToolkitPlugin::class.java)
         val extension = project.extensions.getByType(WindowsExtension::class.java)
         extension.packageReferences.restoreNuGetPackages.set(false)
-        extension.packageReferences.useNuGetCliGlobalPackages.set(false)
         extension.packageReferences.nugetPackage("Microsoft.WindowsAppSDK", "2.2.0")
         extension.application { application ->
             application.mainClass.set("sample.MainKt")
@@ -653,7 +636,6 @@ class WindowsToolkitPluginTest {
         Files.createDirectories(bootstrap.parent)
         Files.writeString(bootstrap, "bootstrap")
         extension.packageReferences.restoreNuGetPackages.set(false)
-        extension.packageReferences.useNuGetCliGlobalPackages.set(false)
         extension.application.runtimeAsset(bootstrap)
         extension.packageReferences.nugetPackage("Microsoft.WindowsAppSDK", "2.2.0")
         extension.application { application ->
@@ -705,9 +687,7 @@ class WindowsToolkitPluginTest {
         app.dependencies.add("implementation", dependency)
         val extension = app.extensions.getByType(WindowsExtension::class.java)
         extension.packageReferences.winmd(winmd)
-        extension.packageReferences.nugetGlobalPackagesRoots.add(app.projectDir.toPath().resolve("nuget-cache").toString())
         extension.packageReferences.restoreNuGetPackages.set(false)
-        extension.packageReferences.useNuGetCliGlobalPackages.set(false)
         extension.packageReferences.nugetPackage("Sample.Package", "1.0.0")
         extension.packageReferences.nugetPackage("Microsoft.WindowsAppSDK", "1.8.260416003") { pkg ->
             pkg.generateProjection = true
@@ -3405,7 +3385,7 @@ class WindowsToolkitPluginTest {
     }
 
     @Test
-    fun projected_nuget_static_sources_are_prepared_from_configured_global_packages_root() {
+    fun projected_nuget_static_sources_are_deferred_even_when_restore_is_disabled() {
         val project = ProjectBuilder.builder().withName("prepared-static-nuget-test").build()
         project.pluginManager.apply(KotlinWindowsToolkitPlugin::class.java)
         val extension = project.extensions.getByType(WindowsExtension::class.java)
@@ -3423,15 +3403,11 @@ class WindowsToolkitPluginTest {
             runtimeClasses = emptyList(),
             outputFile = winmd,
         )
-        extension.packageReferences.nugetGlobalPackagesRoots.add(
-            project.projectDir.toPath().resolve("nuget-cache").toString(),
-        )
-        extension.packageReferences.useNuGetCliGlobalPackages.set(false)
         extension.packageReferences.restoreNuGetPackages.set(false)
         extension.packageReferences.nugetPackage("Sample.Package", "1.0.0")
         extension.packageReferences.type("Sample.IProbe")
 
-        val prepared = prepareWinRTStaticProjectionSources(
+        val failure = runCatching { prepareWinRTStaticProjectionSources(
             project = project,
             extension = extension.packageReferences,
             dependencyIdentityFiles = emptyList(),
@@ -3439,10 +3415,8 @@ class WindowsToolkitPluginTest {
             supportOwnerIdentity = "prepared-static-nuget-test.jar",
         )
 
-        assertTrue(prepared != null)
-        assertTrue(Files.walk(prepared!!).use { stream ->
-            stream.anyMatch { path -> path.fileName.toString().endsWith(".kt") }
-        })
+        }.exceptionOrNull()
+        assertTrue(failure is StaticPreparationUnavailable)
     }
 
     @Test
@@ -3453,7 +3427,6 @@ class WindowsToolkitPluginTest {
         val extension = project.extensions.getByType(WindowsExtension::class.java)
         extension.packageReferences.nugetPackage("Sample.Package", "1.0.0")
         extension.packageReferences.type("Sample.IProbe")
-        extension.packageReferences.nugetExecutable.set("must-not-be-invoked")
         extension.metadataInputs.add("nuget:Sample.Raw@2.0.0")
         val generation = project.tasks.named("generateWinRTProjections", GenerateWinRTProjectionsTask::class.java).get()
         val restore = project.tasks.named("restoreWinAppDependencies").get()
@@ -3468,7 +3441,7 @@ class WindowsToolkitPluginTest {
     }
 
     @Test
-    fun configuration_sync_prepares_projected_nuget_sources_without_generation_task() {
+    fun configuration_sync_prepares_local_winmd_sources_without_generation_task() {
         val projectDir = Files.createTempDirectory("kotlin-winrt-nuget-sync-preparation-test-")
         val packageRoot = projectDir.resolve("nuget-cache/sample.package/1.0.0")
         WinRTPortableExecutableMetadataWriter.writeProjectionFixtureWinmd(
@@ -3492,10 +3465,8 @@ class WindowsToolkitPluginTest {
 
             windows {
                 packageReferences {
-                    nugetGlobalPackagesRoots.add(file("nuget-cache").absolutePath)
-                    useNuGetCliGlobalPackages.set(false)
                     restoreNuGetPackages.set(false)
-                    nugetPackage "Sample.Package", "1.0.0"
+                    winmd file("nuget-cache/sample.package/1.0.0/metadata/Sample.winmd").absolutePath
                     type "Sample.IProbe"
                 }
             }
@@ -3555,7 +3526,7 @@ class WindowsToolkitPluginTest {
     }
 
     @Test
-    fun nuget_sync_replaces_changed_versions_and_filters_without_touching_user_sources() {
+    fun local_winmd_sync_replaces_changed_inputs_and_filters_without_touching_user_sources() {
         // Gradle lifecycle adaptation: the same namespace writer input must be reflected
         // after configuration changes, as in cswinrt/main.cpp's filtered namespace output.
         val projectDir = Files.createTempDirectory("kotlin-winrt-nuget-sync-lifecycle-")
@@ -3576,10 +3547,8 @@ class WindowsToolkitPluginTest {
                 plugins { id "io.github.compose-fluent.windows-toolkit" }
                 windows {
                     packageReferences {
-                        nugetGlobalPackagesRoots.add(file("nuget-cache").absolutePath)
-                        useNuGetCliGlobalPackages.set(false)
                         restoreNuGetPackages.set(false)
-                        ${version?.let { "nugetPackage 'Sample.Package', '$it'\nnamespace 'Sample'" }.orEmpty()}
+                        ${version?.let { "winmd file('nuget-cache/sample.package/$it/metadata/Sample.winmd').absolutePath\nnamespace 'Sample'" }.orEmpty()}
                         ${if (excluded) "excludeNamespace 'Sample'" else ""}
                     }
                 }
@@ -3612,7 +3581,7 @@ class WindowsToolkitPluginTest {
     }
 
     @Test
-    fun configuration_sync_reports_missing_nuget_before_generation() {
+    fun configuration_sync_defers_missing_nuget_until_restore_task() {
         val projectDir = Files.createTempDirectory("kotlin-winrt-nuget-sync-missing-test-")
         writeMinimalGradleFixture(projectDir, "kotlin-winrt-nuget-sync-missing-test")
         fun configure(restore: Boolean) {
@@ -3620,8 +3589,6 @@ class WindowsToolkitPluginTest {
                 plugins { id "io.github.compose-fluent.windows-toolkit" }
                 windows {
                     packageReferences {
-                        nugetGlobalPackagesRoots.add(file("empty-cache").absolutePath)
-                        useNuGetCliGlobalPackages.set(false)
                         restoreNuGetPackages.set($restore)
                         nugetPackage "Sample.Missing.Package", "1.0.0"
                         type "Sample.IProbe"
@@ -3635,13 +3602,14 @@ class WindowsToolkitPluginTest {
         assertEquals(TaskOutcome.SUCCESS, offline.task(":help")?.outcome)
         configure(false)
         val disabled = GradleRunner.create().withProjectDir(projectDir.toFile()).withPluginClasspath()
-            .withArguments("help", "--stacktrace").buildAndFail()
-        assertTrue(disabled.output, disabled.output.contains("sample.missing.package", ignoreCase = true))
-        assertFalse(Files.exists(projectDir.resolve("build/generated/kotlin-winrt/src/jvmMain/kotlin")))
+            .withArguments("help", "--stacktrace").build()
+        assertEquals(TaskOutcome.SUCCESS, disabled.task(":help")?.outcome)
+        val generation = GradleRunner.create().withProjectDir(projectDir.toFile()).withPluginClasspath()
+            .withArguments("generateWinRTProjections", "--stacktrace").buildAndFail()
+        assertTrue(generation.output, generation.output.contains("no verified lock/cache"))
     }
-
     @Test
-    fun configuration_cache_sync_repairs_deleted_readonly_nuget_sources() {
+    fun configuration_cache_sync_repairs_deleted_local_winmd_sources() {
         assumeTrue(System.getProperty("os.name").contains("Windows", ignoreCase = true))
         val projectDir = Files.createTempDirectory("kotlin-winrt-nuget-sync-preparation-test-")
         val packageRoot = projectDir.resolve("nuget-cache/sample.package/1.0.0")
@@ -3666,11 +3634,8 @@ class WindowsToolkitPluginTest {
 
             windows {
                 packageReferences {
-                    nugetGlobalPackagesRoots.add(file("nuget-cache").absolutePath)
-                    useNuGetCliGlobalPackages.set(false)
                     restoreNuGetPackages.set(false)
-                    nugetExecutable.set("must-not-be-invoked")
-                    nugetPackage "Sample.Package", "1.0.0"
+                    winmd file("nuget-cache/sample.package/1.0.0/metadata/Sample.winmd").absolutePath
                     type "Sample.IProbe"
                 }
             }
@@ -4151,12 +4116,12 @@ class WindowsToolkitPluginTest {
             }
 
             windows {
+                winAppCliExecutable.set "${writeWinAppRestoreFixture(nugetRoot).toString().replace("\\", "/")}"
                 packageReferences {
-                    nugetGlobalPackagesRoots.add("${nugetRoot.toString().replace("\\", "\\\\")}")
-                    restoreNuGetPackages = false
+                    restoreNuGetPackages = true
                     nugetPackage "Microsoft.WindowsAppSDK", "1.8.260416003"
                 }
-                application {}
+                application { windowsAppSdkDeployment.set(io.github.composefluent.windows.toolkit.gradle.WindowsAppSdkDeployment.SelfContained) }
             }
             """.trimIndent(),
         )
@@ -4197,11 +4162,17 @@ class WindowsToolkitPluginTest {
         project.extensions.getByType(WindowsExtension::class.java).apply {
             application {}
             packageReferences { packageReferences ->
-                packageReferences.nugetGlobalPackagesRoots.add(globalPackagesRoot.toString())
                 packageReferences.nugetPackage("Sample.Package", "1.0.0")
             }
         }
 
+        val restore = project.tasks.named("restoreWinAppDependencies", RestoreWinAppDependenciesTask::class.java).get()
+        val lock = restore.winmdLockFile.get().asFile.toPath()
+        Files.createDirectories(lock.parent)
+        Files.writeString(lock, """
+            {"schema":3,"nuget_cache_dir":"${globalPackagesRoot.toString().replace("\\", "/")}",
+             "packages":[{"name":"Sample.Package","version":"1.0.0","winmds":[]}]}
+        """.trimIndent())
         val task = project.tasks.named("stageWindowsPackageRuntimeAssetsJvmMain", StageWindowsPackageRuntimeAssetsTask::class.java).get()
 
         assertTrue(
@@ -4746,12 +4717,6 @@ class WindowsToolkitPluginTest {
             registeredTask.authoredHostManifestFiles.from(appHostManifest)
             registeredTask.authoredTargetArtifactFiles.from(appJar)
             registeredTask.authoredHostDllFiles.from(appHostDll)
-            registeredTask.nugetGlobalPackagesRoots.set(emptyList())
-            registeredTask.useNuGetCliGlobalPackages.set(false)
-            registeredTask.nugetExecutable.set("nuget")
-            registeredTask.nugetCliVersion.set("7.3.1")
-            registeredTask.nugetCliCacheDirectory.set(project.layout.buildDirectory.dir("nuget-cli"))
-            registeredTask.restoreNuGetPackages.set(false)
             registeredTask.runtimeIdentifier.set("win-x64")
             registeredTask.dependencyIdentityFiles.from(dependencyIdentity)
         }.get()
@@ -4823,12 +4788,6 @@ class WindowsToolkitPluginTest {
             registeredTask.defaultProjectPriLayoutFiles.from(project.files())
             registeredTask.defaultProjectPriContentFiles.from(project.files())
             registeredTask.defaultProjectPriResourceRoot.set(project.layout.buildDirectory.dir("default-pri"))
-            registeredTask.nugetGlobalPackagesRoots.set(emptyList())
-            registeredTask.useNuGetCliGlobalPackages.set(false)
-            registeredTask.nugetExecutable.set("nuget")
-            registeredTask.nugetCliVersion.set("7.3.1")
-            registeredTask.nugetCliCacheDirectory.set(project.layout.buildDirectory.dir("nuget-cli"))
-            registeredTask.restoreNuGetPackages.set(false)
             registeredTask.runtimeIdentifier.set("win-x64")
             registeredTask.generateProjectPri.set(false)
             registeredTask.executableBaseName.set("sample-app")
@@ -4887,12 +4846,6 @@ class WindowsToolkitPluginTest {
             registeredTask.defaultProjectPriLayoutFiles.from(project.files())
             registeredTask.defaultProjectPriContentFiles.from(project.files())
             registeredTask.defaultProjectPriResourceRoot.set(project.layout.buildDirectory.dir("default-pri"))
-            registeredTask.nugetGlobalPackagesRoots.set(emptyList())
-            registeredTask.useNuGetCliGlobalPackages.set(false)
-            registeredTask.nugetExecutable.set("nuget")
-            registeredTask.nugetCliVersion.set("7.3.1")
-            registeredTask.nugetCliCacheDirectory.set(project.layout.buildDirectory.dir("nuget-cli"))
-            registeredTask.restoreNuGetPackages.set(false)
             registeredTask.runtimeIdentifier.set("win-x64")
             registeredTask.generateProjectPri.set(false)
             registeredTask.executableBaseName.set("sample-app")
@@ -4962,12 +4915,6 @@ class WindowsToolkitPluginTest {
             registeredTask.defaultProjectPriLayoutFiles.from(project.files())
             registeredTask.defaultProjectPriContentFiles.from(project.files())
             registeredTask.defaultProjectPriResourceRoot.set(project.layout.buildDirectory.dir("default-pri"))
-            registeredTask.nugetGlobalPackagesRoots.set(emptyList())
-            registeredTask.useNuGetCliGlobalPackages.set(false)
-            registeredTask.nugetExecutable.set("nuget")
-            registeredTask.nugetCliVersion.set("7.3.1")
-            registeredTask.nugetCliCacheDirectory.set(project.layout.buildDirectory.dir("nuget-cli"))
-            registeredTask.restoreNuGetPackages.set(false)
             registeredTask.runtimeIdentifier.set("win-x64")
             registeredTask.generateProjectPri.set(false)
             registeredTask.executableBaseName.set("sample-app")
@@ -5069,12 +5016,6 @@ class WindowsToolkitPluginTest {
             registeredTask.defaultProjectPriLayoutFiles.from(project.files())
             registeredTask.defaultProjectPriContentFiles.from(project.files())
             registeredTask.defaultProjectPriResourceRoot.set(project.layout.buildDirectory.dir("default-pri"))
-            registeredTask.nugetGlobalPackagesRoots.set(emptyList())
-            registeredTask.useNuGetCliGlobalPackages.set(false)
-            registeredTask.nugetExecutable.set("nuget")
-            registeredTask.nugetCliVersion.set("7.3.1")
-            registeredTask.nugetCliCacheDirectory.set(project.layout.buildDirectory.dir("nuget-cli"))
-            registeredTask.restoreNuGetPackages.set(false)
             registeredTask.runtimeIdentifier.set("win-x64")
             registeredTask.generateProjectPri.set(false)
         }.get()
@@ -5119,12 +5060,6 @@ class WindowsToolkitPluginTest {
             registeredTask.defaultProjectPriLayoutFiles.from(project.files())
             registeredTask.defaultProjectPriContentFiles.from(project.files())
             registeredTask.defaultProjectPriResourceRoot.set(project.layout.buildDirectory.dir("default-pri"))
-            registeredTask.nugetGlobalPackagesRoots.set(emptyList())
-            registeredTask.useNuGetCliGlobalPackages.set(false)
-            registeredTask.nugetExecutable.set("nuget")
-            registeredTask.nugetCliVersion.set("7.3.1")
-            registeredTask.nugetCliCacheDirectory.set(project.layout.buildDirectory.dir("nuget-cli"))
-            registeredTask.restoreNuGetPackages.set(false)
             registeredTask.runtimeIdentifier.set("win-x64")
             registeredTask.generateProjectPri.set(false)
         }.get()
@@ -5175,12 +5110,6 @@ class WindowsToolkitPluginTest {
             registeredTask.defaultProjectPriLayoutFiles.from(project.files())
             registeredTask.defaultProjectPriContentFiles.from(project.files())
             registeredTask.defaultProjectPriResourceRoot.set(project.layout.buildDirectory.dir("default-pri"))
-            registeredTask.nugetGlobalPackagesRoots.set(emptyList())
-            registeredTask.useNuGetCliGlobalPackages.set(false)
-            registeredTask.nugetExecutable.set("nuget")
-            registeredTask.nugetCliVersion.set("7.3.1")
-            registeredTask.nugetCliCacheDirectory.set(project.layout.buildDirectory.dir("nuget-cli"))
-            registeredTask.restoreNuGetPackages.set(false)
             registeredTask.runtimeIdentifier.set("win-x64")
             registeredTask.generateProjectPri.set(false)
         }.get()
@@ -5223,7 +5152,7 @@ class WindowsToolkitPluginTest {
             registeredTask.runtimeAssets.set(emptyList())
             registeredTask.runtimeAssetFiles.from(project.files())
             registeredTask.dependencyRuntimeAssetFiles.from(project.files())
-            registeredTask.nugetPackageContentFiles.from(packageRoot)
+            registeredTask.resolvedNuGetPackageManifestFiles.from(writeRuntimePackageManifest(packageRoot))
             registeredTask.resolvedNuGetPackageManifestFiles.from(project.files())
             registeredTask.authoredMetadataFiles.from(project.files())
             registeredTask.authoredHostManifestFiles.from(project.files())
@@ -5239,12 +5168,6 @@ class WindowsToolkitPluginTest {
             registeredTask.defaultProjectPriLayoutFiles.from(project.files())
             registeredTask.defaultProjectPriContentFiles.from(project.files())
             registeredTask.defaultProjectPriResourceRoot.set(project.layout.buildDirectory.dir("default-pri"))
-            registeredTask.nugetGlobalPackagesRoots.set(listOf(globalPackagesRoot.toString()))
-            registeredTask.useNuGetCliGlobalPackages.set(false)
-            registeredTask.nugetExecutable.set("nuget")
-            registeredTask.nugetCliVersion.set("7.3.1")
-            registeredTask.nugetCliCacheDirectory.set(project.layout.buildDirectory.dir("nuget-cli"))
-            registeredTask.restoreNuGetPackages.set(false)
             registeredTask.runtimeIdentifier.set("win-x64")
             registeredTask.generateProjectPri.set(false)
         }.get()
@@ -5289,12 +5212,6 @@ class WindowsToolkitPluginTest {
             registeredTask.defaultProjectPriLayoutFiles.from(project.files())
             registeredTask.defaultProjectPriContentFiles.from(project.files())
             registeredTask.defaultProjectPriResourceRoot.set(project.layout.buildDirectory.dir("default-pri"))
-            registeredTask.nugetGlobalPackagesRoots.set(emptyList())
-            registeredTask.useNuGetCliGlobalPackages.set(false)
-            registeredTask.nugetExecutable.set("nuget")
-            registeredTask.nugetCliVersion.set("7.3.1")
-            registeredTask.nugetCliCacheDirectory.set(project.layout.buildDirectory.dir("nuget-cli"))
-            registeredTask.restoreNuGetPackages.set(false)
             registeredTask.runtimeIdentifier.set("win-x64")
             registeredTask.generateProjectPri.set(false)
         }.get()
@@ -5600,13 +5517,7 @@ class WindowsToolkitPluginTest {
             registeredTask.outputDirectory.set(project.layout.buildDirectory.dir("runtime-assets"))
             registeredTask.nugetPackages.set(emptyList())
             registeredTask.runtimeAssets.set(emptyList())
-            registeredTask.nugetPackageContentFiles.from(packageRoot)
-            registeredTask.nugetGlobalPackagesRoots.set(emptyList())
-            registeredTask.useNuGetCliGlobalPackages.set(false)
-            registeredTask.nugetExecutable.set("nuget")
-            registeredTask.nugetCliVersion.set("7.3.1")
-            registeredTask.nugetCliCacheDirectory.set(project.layout.buildDirectory.dir("nuget-cli"))
-            registeredTask.restoreNuGetPackages.set(false)
+            registeredTask.resolvedNuGetPackageManifestFiles.from(writeRuntimePackageManifest(packageRoot))
             registeredTask.runtimeIdentifier.set("win-x64")
             registeredTask.dependencyIdentityFiles.from(dependencyIdentity)
         }.get()
@@ -5688,13 +5599,7 @@ class WindowsToolkitPluginTest {
             registeredTask.outputDirectory.set(project.layout.buildDirectory.dir("runtime-assets-webview"))
             registeredTask.nugetPackages.set(emptyList())
             registeredTask.runtimeAssets.set(emptyList())
-            registeredTask.nugetPackageContentFiles.from(packageRoot)
-            registeredTask.nugetGlobalPackagesRoots.set(emptyList())
-            registeredTask.useNuGetCliGlobalPackages.set(false)
-            registeredTask.nugetExecutable.set("nuget")
-            registeredTask.nugetCliVersion.set("7.3.1")
-            registeredTask.nugetCliCacheDirectory.set(project.layout.buildDirectory.dir("nuget-cli"))
-            registeredTask.restoreNuGetPackages.set(false)
+            registeredTask.resolvedNuGetPackageManifestFiles.from(writeRuntimePackageManifest(packageRoot))
             registeredTask.runtimeIdentifier.set("win-x64")
             registeredTask.dependencyIdentityFiles.from(dependencyIdentity)
             registeredTask.generateProjectPri.set(false)
@@ -5756,13 +5661,7 @@ class WindowsToolkitPluginTest {
             registeredTask.outputDirectory.set(project.layout.buildDirectory.dir("runtime-assets-wildcard-import"))
             registeredTask.nugetPackages.set(emptyList())
             registeredTask.runtimeAssets.set(emptyList())
-            registeredTask.nugetPackageContentFiles.from(packageRoot)
-            registeredTask.nugetGlobalPackagesRoots.set(emptyList())
-            registeredTask.useNuGetCliGlobalPackages.set(false)
-            registeredTask.nugetExecutable.set("nuget")
-            registeredTask.nugetCliVersion.set("7.3.1")
-            registeredTask.nugetCliCacheDirectory.set(project.layout.buildDirectory.dir("nuget-cli"))
-            registeredTask.restoreNuGetPackages.set(false)
+            registeredTask.resolvedNuGetPackageManifestFiles.from(writeRuntimePackageManifest(packageRoot))
             registeredTask.runtimeIdentifier.set("win-x64")
             registeredTask.dependencyIdentityFiles.from(dependencyIdentity)
             registeredTask.generateProjectPri.set(false)
@@ -5819,13 +5718,7 @@ class WindowsToolkitPluginTest {
             registeredTask.outputDirectory.set(project.layout.buildDirectory.dir("runtime-assets-msbuild-function"))
             registeredTask.nugetPackages.set(emptyList())
             registeredTask.runtimeAssets.set(emptyList())
-            registeredTask.nugetPackageContentFiles.from(packageRoot)
-            registeredTask.nugetGlobalPackagesRoots.set(emptyList())
-            registeredTask.useNuGetCliGlobalPackages.set(false)
-            registeredTask.nugetExecutable.set("nuget")
-            registeredTask.nugetCliVersion.set("7.3.1")
-            registeredTask.nugetCliCacheDirectory.set(project.layout.buildDirectory.dir("nuget-cli"))
-            registeredTask.restoreNuGetPackages.set(false)
+            registeredTask.resolvedNuGetPackageManifestFiles.from(writeRuntimePackageManifest(packageRoot))
             registeredTask.runtimeIdentifier.set("win-x64")
             registeredTask.dependencyIdentityFiles.from(dependencyIdentity)
             registeredTask.generateProjectPri.set(false)
@@ -5881,13 +5774,7 @@ class WindowsToolkitPluginTest {
             registeredTask.outputDirectory.set(project.layout.buildDirectory.dir("runtime-assets-msbuild-import-function"))
             registeredTask.nugetPackages.set(emptyList())
             registeredTask.runtimeAssets.set(emptyList())
-            registeredTask.nugetPackageContentFiles.from(packageRoot)
-            registeredTask.nugetGlobalPackagesRoots.set(emptyList())
-            registeredTask.useNuGetCliGlobalPackages.set(false)
-            registeredTask.nugetExecutable.set("nuget")
-            registeredTask.nugetCliVersion.set("7.3.1")
-            registeredTask.nugetCliCacheDirectory.set(project.layout.buildDirectory.dir("nuget-cli"))
-            registeredTask.restoreNuGetPackages.set(false)
+            registeredTask.resolvedNuGetPackageManifestFiles.from(writeRuntimePackageManifest(packageRoot))
             registeredTask.runtimeIdentifier.set("win-x64")
             registeredTask.dependencyIdentityFiles.from(dependencyIdentity)
             registeredTask.generateProjectPri.set(false)
@@ -5941,13 +5828,7 @@ class WindowsToolkitPluginTest {
             registeredTask.outputDirectory.set(project.layout.buildDirectory.dir("runtime-assets-resources"))
             registeredTask.nugetPackages.set(emptyList())
             registeredTask.runtimeAssets.set(emptyList())
-            registeredTask.nugetPackageContentFiles.from(packageRoot)
-            registeredTask.nugetGlobalPackagesRoots.set(emptyList())
-            registeredTask.useNuGetCliGlobalPackages.set(false)
-            registeredTask.nugetExecutable.set("nuget")
-            registeredTask.nugetCliVersion.set("7.3.1")
-            registeredTask.nugetCliCacheDirectory.set(project.layout.buildDirectory.dir("nuget-cli"))
-            registeredTask.restoreNuGetPackages.set(false)
+            registeredTask.resolvedNuGetPackageManifestFiles.from(writeRuntimePackageManifest(packageRoot))
             registeredTask.runtimeIdentifier.set("win-x64")
             registeredTask.dependencyIdentityFiles.from(dependencyIdentity)
             registeredTask.generateProjectPri.set(false)
@@ -6000,13 +5881,7 @@ class WindowsToolkitPluginTest {
             registeredTask.outputDirectory.set(project.layout.buildDirectory.dir("runtime-assets-content-target-path"))
             registeredTask.nugetPackages.set(emptyList())
             registeredTask.runtimeAssets.set(emptyList())
-            registeredTask.nugetPackageContentFiles.from(packageRoot)
-            registeredTask.nugetGlobalPackagesRoots.set(emptyList())
-            registeredTask.useNuGetCliGlobalPackages.set(false)
-            registeredTask.nugetExecutable.set("nuget")
-            registeredTask.nugetCliVersion.set("7.3.1")
-            registeredTask.nugetCliCacheDirectory.set(project.layout.buildDirectory.dir("nuget-cli"))
-            registeredTask.restoreNuGetPackages.set(false)
+            registeredTask.resolvedNuGetPackageManifestFiles.from(writeRuntimePackageManifest(packageRoot))
             registeredTask.runtimeIdentifier.set("win-x64")
             registeredTask.dependencyIdentityFiles.from(dependencyIdentity)
             registeredTask.generateProjectPri.set(false)
@@ -6031,12 +5906,6 @@ class WindowsToolkitPluginTest {
             registeredTask.runtimeAssets.set(emptyList())
             registeredTask.nugetPackageContentFiles.from(project.files())
             registeredTask.resolvedNuGetPackageManifestFiles.from(project.files())
-            registeredTask.nugetGlobalPackagesRoots.set(emptyList())
-            registeredTask.useNuGetCliGlobalPackages.set(false)
-            registeredTask.nugetExecutable.set("nuget")
-            registeredTask.nugetCliVersion.set("7.3.1")
-            registeredTask.nugetCliCacheDirectory.set(project.layout.buildDirectory.dir("nuget-cli"))
-            registeredTask.restoreNuGetPackages.set(false)
             registeredTask.runtimeIdentifier.set("win-x64")
             registeredTask.dependencyIdentityFiles.from(project.files())
             registeredTask.generateProjectPri.set(false)
@@ -6106,13 +5975,7 @@ class WindowsToolkitPluginTest {
             registeredTask.outputDirectory.set(project.layout.buildDirectory.dir("runtime-assets-duplicate"))
             registeredTask.nugetPackages.set(emptyList())
             registeredTask.runtimeAssets.set(emptyList())
-            registeredTask.nugetPackageContentFiles.from(packageRoot)
-            registeredTask.nugetGlobalPackagesRoots.set(emptyList())
-            registeredTask.useNuGetCliGlobalPackages.set(false)
-            registeredTask.nugetExecutable.set("nuget")
-            registeredTask.nugetCliVersion.set("7.3.1")
-            registeredTask.nugetCliCacheDirectory.set(project.layout.buildDirectory.dir("nuget-cli"))
-            registeredTask.restoreNuGetPackages.set(false)
+            registeredTask.resolvedNuGetPackageManifestFiles.from(writeRuntimePackageManifest(packageRoot))
             registeredTask.runtimeIdentifier.set("win-x64")
             registeredTask.dependencyIdentityFiles.from(dependencyIdentity)
             registeredTask.generateProjectPri.set(false)
@@ -6172,13 +6035,7 @@ class WindowsToolkitPluginTest {
             registeredTask.outputDirectory.set(project.layout.buildDirectory.dir("runtime-assets-framework-dependent"))
             registeredTask.nugetPackages.set(emptyList())
             registeredTask.runtimeAssets.set(emptyList())
-            registeredTask.nugetPackageContentFiles.from(packageRoot)
-            registeredTask.nugetGlobalPackagesRoots.set(emptyList())
-            registeredTask.useNuGetCliGlobalPackages.set(false)
-            registeredTask.nugetExecutable.set("nuget")
-            registeredTask.nugetCliVersion.set("7.3.1")
-            registeredTask.nugetCliCacheDirectory.set(project.layout.buildDirectory.dir("nuget-cli"))
-            registeredTask.restoreNuGetPackages.set(false)
+            registeredTask.resolvedNuGetPackageManifestFiles.from(writeRuntimePackageManifest(packageRoot))
             registeredTask.runtimeIdentifier.set("win-x64")
             registeredTask.dependencyIdentityFiles.from(dependencyIdentity)
             registeredTask.generateProjectPri.set(false)
@@ -6229,13 +6086,7 @@ class WindowsToolkitPluginTest {
             registeredTask.outputDirectory.set(project.layout.buildDirectory.dir("cppwinrt-assets"))
             registeredTask.nugetPackages.set(listOf("Sample.CppWinRT@1.0.0"))
             registeredTask.runtimeAssets.set(emptyList())
-            registeredTask.nugetPackageContentFiles.from(packageRoot)
-            registeredTask.nugetGlobalPackagesRoots.set(listOf(globalPackagesRoot.toString()))
-            registeredTask.useNuGetCliGlobalPackages.set(false)
-            registeredTask.nugetExecutable.set("nuget")
-            registeredTask.nugetCliVersion.set("7.3.1")
-            registeredTask.nugetCliCacheDirectory.set(project.layout.buildDirectory.dir("nuget-cli"))
-            registeredTask.restoreNuGetPackages.set(false)
+            registeredTask.resolvedNuGetPackageManifestFiles.from(writeRuntimePackageManifest(packageRoot))
             registeredTask.runtimeIdentifier.set("win-x64")
             registeredTask.generateProjectPri.set(false)
             registeredTask.dependencyIdentityFiles.from(project.files())
@@ -6305,12 +6156,6 @@ class WindowsToolkitPluginTest {
             registeredTask.nugetPackageContentFiles.from(project.files())
             registeredTask.winAppRuntimeAssetDirectories.from(winAppBin)
             registeredTask.winAppRestoreLockFiles.from(lockfile)
-            registeredTask.nugetGlobalPackagesRoots.set(emptyList())
-            registeredTask.useNuGetCliGlobalPackages.set(false)
-            registeredTask.nugetExecutable.set("nuget")
-            registeredTask.nugetCliVersion.set("7.3.1")
-            registeredTask.nugetCliCacheDirectory.set(project.layout.buildDirectory.dir("nuget-cli"))
-            registeredTask.restoreNuGetPackages.set(true)
             registeredTask.runtimeIdentifier.set("win-x64")
             registeredTask.generateProjectPri.set(false)
             registeredTask.dependencyIdentityFiles.from(project.files())
@@ -6372,13 +6217,7 @@ class WindowsToolkitPluginTest {
             registeredTask.outputDirectory.set(project.layout.buildDirectory.dir("cppwinui-assets"))
             registeredTask.nugetPackages.set(listOf("Sample.CppWinUI@1.0.0"))
             registeredTask.runtimeAssets.set(emptyList())
-            registeredTask.nugetPackageContentFiles.from(packageRoot)
-            registeredTask.nugetGlobalPackagesRoots.set(listOf(globalPackagesRoot.toString()))
-            registeredTask.useNuGetCliGlobalPackages.set(false)
-            registeredTask.nugetExecutable.set("nuget")
-            registeredTask.nugetCliVersion.set("7.3.1")
-            registeredTask.nugetCliCacheDirectory.set(project.layout.buildDirectory.dir("nuget-cli"))
-            registeredTask.restoreNuGetPackages.set(false)
+            registeredTask.resolvedNuGetPackageManifestFiles.from(writeRuntimePackageManifest(packageRoot))
             registeredTask.runtimeIdentifier.set("win-x64")
             registeredTask.generateProjectPri.set(false)
             registeredTask.dependencyIdentityFiles.from(project.files())
@@ -6435,13 +6274,7 @@ class WindowsToolkitPluginTest {
             registeredTask.outputDirectory.set(project.layout.buildDirectory.dir("windowsappsdk-assets"))
             registeredTask.nugetPackages.set(emptyList())
             registeredTask.runtimeAssets.set(emptyList())
-            registeredTask.nugetPackageContentFiles.from(packageRoot)
-            registeredTask.nugetGlobalPackagesRoots.set(listOf(globalPackagesRoot.toString()))
-            registeredTask.useNuGetCliGlobalPackages.set(false)
-            registeredTask.nugetExecutable.set("nuget")
-            registeredTask.nugetCliVersion.set("7.3.1")
-            registeredTask.nugetCliCacheDirectory.set(project.layout.buildDirectory.dir("nuget-cli"))
-            registeredTask.restoreNuGetPackages.set(false)
+            registeredTask.resolvedNuGetPackageManifestFiles.from(writeRuntimePackageManifest(packageRoot))
             registeredTask.runtimeIdentifier.set("win-x64")
             registeredTask.dependencyIdentityFiles.from(dependencyIdentity)
         }.get()
@@ -6511,13 +6344,7 @@ class WindowsToolkitPluginTest {
             registeredTask.outputDirectory.set(project.layout.buildDirectory.dir("pri-assets"))
             registeredTask.nugetPackages.set(listOf("Sample.Resources@1.0.0"))
             registeredTask.runtimeAssets.set(emptyList())
-            registeredTask.nugetPackageContentFiles.from(packageRoot)
-            registeredTask.nugetGlobalPackagesRoots.set(listOf(globalPackagesRoot.toString()))
-            registeredTask.useNuGetCliGlobalPackages.set(false)
-            registeredTask.nugetExecutable.set("nuget")
-            registeredTask.nugetCliVersion.set("7.3.1")
-            registeredTask.nugetCliCacheDirectory.set(project.layout.buildDirectory.dir("nuget-cli"))
-            registeredTask.restoreNuGetPackages.set(false)
+            registeredTask.resolvedNuGetPackageManifestFiles.from(writeRuntimePackageManifest(packageRoot))
             registeredTask.runtimeIdentifier.set("win-x64")
             registeredTask.generateProjectPri.set(true)
             registeredTask.projectPriIndexName.set("Contoso.App")
@@ -6580,12 +6407,6 @@ class WindowsToolkitPluginTest {
             registeredTask.outputDirectory.set(project.layout.buildDirectory.dir("pri-manifest-index-assets"))
             registeredTask.nugetPackages.set(emptyList())
             registeredTask.runtimeAssets.set(emptyList())
-            registeredTask.nugetGlobalPackagesRoots.set(emptyList())
-            registeredTask.useNuGetCliGlobalPackages.set(false)
-            registeredTask.nugetExecutable.set("nuget")
-            registeredTask.nugetCliVersion.set("7.3.1")
-            registeredTask.nugetCliCacheDirectory.set(project.layout.buildDirectory.dir("nuget-cli"))
-            registeredTask.restoreNuGetPackages.set(false)
             registeredTask.runtimeIdentifier.set("win-x64")
             registeredTask.generateProjectPri.set(true)
             registeredTask.projectPriIndexName.set("")
@@ -6644,13 +6465,7 @@ class WindowsToolkitPluginTest {
             registeredTask.outputDirectory.set(project.layout.buildDirectory.dir("pri-dedupe-assets"))
             registeredTask.nugetPackages.set(listOf("Sample.Resources@1.0.0"))
             registeredTask.runtimeAssets.set(emptyList())
-            registeredTask.nugetPackageContentFiles.from(packageRoot)
-            registeredTask.nugetGlobalPackagesRoots.set(listOf(globalPackagesRoot.toString()))
-            registeredTask.useNuGetCliGlobalPackages.set(false)
-            registeredTask.nugetExecutable.set("nuget")
-            registeredTask.nugetCliVersion.set("7.3.1")
-            registeredTask.nugetCliCacheDirectory.set(project.layout.buildDirectory.dir("nuget-cli"))
-            registeredTask.restoreNuGetPackages.set(false)
+            registeredTask.resolvedNuGetPackageManifestFiles.from(writeRuntimePackageManifest(packageRoot))
             registeredTask.runtimeIdentifier.set("win-x64")
             registeredTask.generateProjectPri.set(true)
             registeredTask.projectPriIndexName.set("Contoso.App")
@@ -6689,12 +6504,6 @@ class WindowsToolkitPluginTest {
             registeredTask.outputDirectory.set(project.layout.buildDirectory.dir("pri-default-resw-assets"))
             registeredTask.nugetPackages.set(emptyList())
             registeredTask.runtimeAssets.set(emptyList())
-            registeredTask.nugetGlobalPackagesRoots.set(emptyList())
-            registeredTask.useNuGetCliGlobalPackages.set(false)
-            registeredTask.nugetExecutable.set("nuget")
-            registeredTask.nugetCliVersion.set("7.3.1")
-            registeredTask.nugetCliCacheDirectory.set(project.layout.buildDirectory.dir("nuget-cli"))
-            registeredTask.restoreNuGetPackages.set(false)
             registeredTask.runtimeIdentifier.set("win-x64")
             registeredTask.generateProjectPri.set(true)
             registeredTask.projectPriIndexName.set("Contoso.App")
@@ -6740,12 +6549,6 @@ class WindowsToolkitPluginTest {
             registeredTask.outputDirectory.set(project.layout.buildDirectory.dir("pri-explicit-resw-assets"))
             registeredTask.nugetPackages.set(emptyList())
             registeredTask.runtimeAssets.set(emptyList())
-            registeredTask.nugetGlobalPackagesRoots.set(emptyList())
-            registeredTask.useNuGetCliGlobalPackages.set(false)
-            registeredTask.nugetExecutable.set("nuget")
-            registeredTask.nugetCliVersion.set("7.3.1")
-            registeredTask.nugetCliCacheDirectory.set(project.layout.buildDirectory.dir("nuget-cli"))
-            registeredTask.restoreNuGetPackages.set(false)
             registeredTask.runtimeIdentifier.set("win-x64")
             registeredTask.generateProjectPri.set(true)
             registeredTask.projectPriIndexName.set("Contoso.App")
@@ -6795,12 +6598,6 @@ class WindowsToolkitPluginTest {
             registeredTask.outputDirectory.set(project.layout.buildDirectory.dir("pri-explicit-directory-assets"))
             registeredTask.nugetPackages.set(emptyList())
             registeredTask.runtimeAssets.set(emptyList())
-            registeredTask.nugetGlobalPackagesRoots.set(emptyList())
-            registeredTask.useNuGetCliGlobalPackages.set(false)
-            registeredTask.nugetExecutable.set("nuget")
-            registeredTask.nugetCliVersion.set("7.3.1")
-            registeredTask.nugetCliCacheDirectory.set(project.layout.buildDirectory.dir("nuget-cli"))
-            registeredTask.restoreNuGetPackages.set(false)
             registeredTask.runtimeIdentifier.set("win-x64")
             registeredTask.generateProjectPri.set(true)
             registeredTask.projectPriIndexName.set("Contoso.App")
@@ -9757,12 +9554,6 @@ class WindowsToolkitPluginTest {
             registeredTask.outputDirectory.set(project.layout.buildDirectory.dir("pri-default-content-assets"))
             registeredTask.nugetPackages.set(emptyList())
             registeredTask.runtimeAssets.set(emptyList())
-            registeredTask.nugetGlobalPackagesRoots.set(emptyList())
-            registeredTask.useNuGetCliGlobalPackages.set(false)
-            registeredTask.nugetExecutable.set("nuget")
-            registeredTask.nugetCliVersion.set("7.3.1")
-            registeredTask.nugetCliCacheDirectory.set(project.layout.buildDirectory.dir("nuget-cli"))
-            registeredTask.restoreNuGetPackages.set(false)
             registeredTask.runtimeIdentifier.set("win-x64")
             registeredTask.generateProjectPri.set(true)
             registeredTask.projectPriIndexName.set("Contoso.App")
@@ -9808,12 +9599,6 @@ class WindowsToolkitPluginTest {
             registeredTask.outputDirectory.set(project.layout.buildDirectory.dir("pri-explicit-content-assets"))
             registeredTask.nugetPackages.set(emptyList())
             registeredTask.runtimeAssets.set(emptyList())
-            registeredTask.nugetGlobalPackagesRoots.set(emptyList())
-            registeredTask.useNuGetCliGlobalPackages.set(false)
-            registeredTask.nugetExecutable.set("nuget")
-            registeredTask.nugetCliVersion.set("7.3.1")
-            registeredTask.nugetCliCacheDirectory.set(project.layout.buildDirectory.dir("nuget-cli"))
-            registeredTask.restoreNuGetPackages.set(false)
             registeredTask.runtimeIdentifier.set("win-x64")
             registeredTask.generateProjectPri.set(true)
             registeredTask.projectPriIndexName.set("Contoso.App")
@@ -9859,12 +9644,6 @@ class WindowsToolkitPluginTest {
             registeredTask.outputDirectory.set(project.layout.buildDirectory.dir("pri-default-xaml-assets"))
             registeredTask.nugetPackages.set(emptyList())
             registeredTask.runtimeAssets.set(emptyList())
-            registeredTask.nugetGlobalPackagesRoots.set(emptyList())
-            registeredTask.useNuGetCliGlobalPackages.set(false)
-            registeredTask.nugetExecutable.set("nuget")
-            registeredTask.nugetCliVersion.set("7.3.1")
-            registeredTask.nugetCliCacheDirectory.set(project.layout.buildDirectory.dir("nuget-cli"))
-            registeredTask.restoreNuGetPackages.set(false)
             registeredTask.runtimeIdentifier.set("win-x64")
             registeredTask.generateProjectPri.set(true)
             registeredTask.projectPriIndexName.set("Contoso.App")
@@ -9917,12 +9696,6 @@ class WindowsToolkitPluginTest {
             registeredTask.outputDirectory.set(project.layout.buildDirectory.dir("pri-layout-xbf-assets"))
             registeredTask.nugetPackages.set(emptyList())
             registeredTask.runtimeAssets.set(emptyList())
-            registeredTask.nugetGlobalPackagesRoots.set(emptyList())
-            registeredTask.useNuGetCliGlobalPackages.set(false)
-            registeredTask.nugetExecutable.set("nuget")
-            registeredTask.nugetCliVersion.set("7.3.1")
-            registeredTask.nugetCliCacheDirectory.set(project.layout.buildDirectory.dir("nuget-cli"))
-            registeredTask.restoreNuGetPackages.set(false)
             registeredTask.runtimeIdentifier.set("win-x64")
             registeredTask.generateProjectPri.set(true)
             registeredTask.projectPriIndexName.set("Contoso.App")
@@ -9980,12 +9753,6 @@ class WindowsToolkitPluginTest {
             registeredTask.outputDirectory.set(project.layout.buildDirectory.dir("pri-explicit-xaml-assets"))
             registeredTask.nugetPackages.set(emptyList())
             registeredTask.runtimeAssets.set(emptyList())
-            registeredTask.nugetGlobalPackagesRoots.set(emptyList())
-            registeredTask.useNuGetCliGlobalPackages.set(false)
-            registeredTask.nugetExecutable.set("nuget")
-            registeredTask.nugetCliVersion.set("7.3.1")
-            registeredTask.nugetCliCacheDirectory.set(project.layout.buildDirectory.dir("nuget-cli"))
-            registeredTask.restoreNuGetPackages.set(false)
             registeredTask.runtimeIdentifier.set("win-x64")
             registeredTask.generateProjectPri.set(true)
             registeredTask.projectPriIndexName.set("Contoso.App")
@@ -12384,12 +12151,6 @@ class WindowsToolkitPluginTest {
             registeredTask.excludeTypes.set(emptyList())
             registeredTask.includeWindowsSdkExtensions.set(false)
             registeredTask.generateWindowsSdkProjection.set(false)
-            registeredTask.nugetExecutable.set("nuget")
-            registeredTask.nugetCliVersion.set("7.3.1")
-            registeredTask.nugetCliCacheDirectory.set(project.layout.buildDirectory.dir("nuget-cli"))
-            registeredTask.restoreNuGetPackages.set(false)
-            registeredTask.useNuGetCliGlobalPackages.set(false)
-            registeredTask.nugetGlobalPackagesRoots.set(emptyList())
             registeredTask.nugetPackages.set(emptyList())
             registeredTask.authoringAssemblyName.set("Sample")
         }.get()
@@ -13591,9 +13352,9 @@ class WindowsToolkitPluginTest {
             $generatorWorkerSetup
 
             windows {
+                winAppCliExecutable.set "${writeWinAppRestoreFixture(nugetRoot).toString().replace("\\", "/")}"
                 packageReferences {
-                    nugetGlobalPackagesRoots.add("${nugetRoot.toString().replace("\\", "\\\\")}")
-                    restoreNuGetPackages.set false
+                    restoreNuGetPackages.set true
                 }
             }
 
@@ -13609,6 +13370,7 @@ class WindowsToolkitPluginTest {
             }
 
             windows {
+                winAppCliExecutable.set "${writeWinAppRestoreFixture(nugetRoot).toString().replace("\\", "/")}"
                 packageReferences {
                     windowsSdk(null, false, true)
                     type "Windows.Foundation.IClosable"
@@ -13626,9 +13388,9 @@ class WindowsToolkitPluginTest {
             $generatorWorkerSetup
 
             windows {
+                winAppCliExecutable.set "${writeWinAppRestoreFixture(nugetRoot).toString().replace("\\", "/")}"
                 packageReferences {
-                    nugetGlobalPackagesRoots.add("${nugetRoot.toString().replace("\\", "\\\\")}")
-                    restoreNuGetPackages.set false
+                    restoreNuGetPackages.set true
                 }
             }
 
@@ -13645,6 +13407,7 @@ class WindowsToolkitPluginTest {
             }
 
             windows {
+                winAppCliExecutable.set "${writeWinAppRestoreFixture(nugetRoot).toString().replace("\\", "/")}"
                 packageReferences {
                     windowsSdk(null, false, true)
                     type "Windows.Foundation.Uri"
@@ -13672,9 +13435,9 @@ class WindowsToolkitPluginTest {
             $generatorWorkerSetup
 
             windows {
+                winAppCliExecutable.set "${writeWinAppRestoreFixture(nugetRoot).toString().replace("\\", "/")}"
                 packageReferences {
-                    nugetGlobalPackagesRoots.add("${nugetRoot.toString().replace("\\", "\\\\")}")
-                    restoreNuGetPackages.set false
+                    restoreNuGetPackages.set true
                 }
             }
 
@@ -13691,6 +13454,7 @@ class WindowsToolkitPluginTest {
             }
 
             windows {
+                winAppCliExecutable.set "${writeWinAppRestoreFixture(nugetRoot).toString().replace("\\", "/")}"
                 application {
                     mainClass.set "app.MainKt"
                 }
@@ -14062,9 +13826,9 @@ class WindowsToolkitPluginTest {
             }
 
             windows {
+                winAppCliExecutable.set "${writeWinAppRestoreFixture(nugetRoot).toString().replace("\\", "/")}"
                 packageReferences {
-                    nugetGlobalPackagesRoots.add("${nugetRoot.toString().replace("\\", "\\\\")}")
-                    restoreNuGetPackages.set false
+                    restoreNuGetPackages.set true
                     nugetPackage "Microsoft.WindowsAppSDK", "1.8.260416003"
                 }
                 application {
@@ -14998,3 +14762,37 @@ private fun List<Pair<String, String>>.toNuspecDependencies(): String {
         postfix = "${System.lineSeparator()}</dependencies>",
     ) { (id, version) -> """<dependency id="$id" version="$version" />""" }
 }
+
+/** Test CLI publishes the same authoritative lock contract as WinApp, using fixture packages. */
+private fun writeWinAppRestoreFixture(cacheRoot: Path): Path {
+    fun quoted(path: Path) = "\"" + path.toAbsolutePath().toString().replace("\\", "/") + "\""
+    val packages = Files.walk(cacheRoot).use { paths ->
+        paths.filter { it.toString().endsWith(".nuspec") }.map { nuspec ->
+            val root = nuspec.parent
+            val name = root.parent.fileName.toString()
+            val version = root.fileName.toString()
+            val winmds = Files.walk(root).use { files ->
+                files.filter { it.toString().endsWith(".winmd") }.map(::quoted).toList()
+            }
+            """{"name":"$name","version":"$version","winmds":[${winmds.joinToString()}]}"""
+        }.toList()
+    }
+    val lock = cacheRoot.resolve("fixture-lock.json")
+    Files.writeString(lock, """{"schema":3,"nuget_cache_dir":${quoted(cacheRoot)},"packages":[${packages.joinToString()}]}""")
+    return cacheRoot.resolve("winapp.cmd").also { cli ->
+        Files.writeString(cli, """
+            @echo off
+            if /I "%~1"=="--version" (
+              echo 0.6.0
+              exit /b 0
+            )
+            mkdir .winapp\bin 2>nul
+            copy /Y "$lock" .winapp\winmds.lock.json >nul
+            exit /b %ERRORLEVEL%
+        """.trimIndent())
+    }
+}
+private fun writeRuntimePackageManifest(packageRoot: Path): Path =
+    packageRoot.parent.resolve("runtime-packages.json").also {
+        writeResolvedRuntimeNuGetPackages(it, listOf(packageRoot))
+    }

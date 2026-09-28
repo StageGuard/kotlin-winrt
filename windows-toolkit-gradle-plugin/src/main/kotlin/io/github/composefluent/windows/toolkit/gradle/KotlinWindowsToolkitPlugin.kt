@@ -4,7 +4,6 @@ import io.github.composefluent.winrt.metadata.WinRTMetadataLoader
 import io.github.composefluent.winrt.metadata.WinRTMetadataModel
 import io.github.composefluent.winrt.metadata.WinRTMetadataProjectionContext
 import io.github.composefluent.winrt.metadata.WinRTMetadataSource
-import io.github.composefluent.winrt.metadata.WinRTNuGetPackageResolver
 import io.github.composefluent.winrt.metadata.WindowsSdkRootDiscovery
 import io.github.composefluent.winrt.metadata.filterProjectionSurface
 import io.github.composefluent.winrt.metadata.projectionInventory
@@ -53,7 +52,6 @@ import org.jetbrains.kotlin.gradle.plugin.KotlinJvmFactory
 import org.jetbrains.kotlin.gradle.plugin.getKotlinPluginVersion
 import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
 import org.jetbrains.kotlin.gradle.plugin.mpp.Executable
-import org.jetbrains.kotlin.gradle.plugin.mpp.NativeBuildType
 import org.jetbrains.kotlin.gradle.tasks.KotlinJvmCompile
 import org.jetbrains.kotlin.gradle.tasks.KotlinNativeCompile
 import java.io.File
@@ -454,7 +452,7 @@ private fun configureWinRTLibraryModel(
     }
     project.tasks.named("restoreWinAppDependencies", RestoreWinAppDependenciesTask::class.java).configure { task ->
         task.dependencyIdentityFiles.from(dependencyIdentityFiles)
-        configureWinAppRestoreInputFiles(project, task, extension.packageReferences, dependencyIdentityFiles)
+        configureWinAppRestoreInputFiles(project, task, extension.packageReferences)
     }
     project.tasks.named("mergeWinRTCompilerSupport", MergeWinRTCompilerSupportTask::class.java).configure { task ->
         task.dependencyIdentityFiles.from(dependencyIdentityFiles)
@@ -896,7 +894,7 @@ private fun configureWinAppTasks(
     }
     restoreWinAppDependenciesTask.configure { task ->
         task.dependencyIdentityFiles.from(projectionIdentityFiles)
-        configureWinAppRestoreInputFiles(project, task, extension.packageReferences, projectionIdentityFiles)
+        configureWinAppRestoreInputFiles(project, task, extension.packageReferences)
     }
     project.tasks.named("prepareWinRTProjectionMetadata", GenerateWinRTProjectionsTask::class.java).configure { task ->
         task.dependencyIdentityFiles.from(projectionIdentityFiles)
@@ -1010,32 +1008,7 @@ private fun configureWinAppTasks(
                 },
             )
             task.dependencyIdentityFiles.from(dependencyIdentityFiles)
-            val dependencyNuGetPackages = dependencyIdentityFiles.elements.map { elements ->
-                elements.map { it.asFile }.flatMap(::readNuGetPackages)
-            }
-            task.existingPackageContentFiles.from(
-                task.nugetPackages.zip(extension.nugetGlobalPackagesRoots) { packageSpecs, explicitGlobalPackagesRoots ->
-                    packageSpecs to explicitGlobalPackagesRoots
-                }.zip(dependencyNuGetPackages) { packageInput, dependencyPackageSpecs ->
-                    existingNuGetPackageContentRoots(
-                        packageSpecs = packageInput.first + dependencyPackageSpecs,
-                        explicitGlobalPackagesRoots = packageInput.second,
-                    )
-                },
-            )
-            task.nugetGlobalPackagesRoots.set(extension.nugetGlobalPackagesRoots)
-            task.useNuGetCliGlobalPackages.set(extension.useNuGetCliGlobalPackages)
-            task.nugetExecutable.set(extension.nugetExecutable)
-            task.nugetCliVersion.set(extension.nugetCliVersion)
-            task.nugetCliCacheDirectory.set(
-                project.layout.dir(
-                    project.provider {
-                        project.gradle.gradleUserHomeDir.resolve("caches/kotlin-winrt/nuget-cli")
-                    },
-                ),
-            )
-            task.restoreNuGetPackages.set(extension.restoreNuGetPackages)
-            task.onlyIf { !task.restoreNuGetPackages.get() }
+            task.winAppRestoreLockFiles.from(restoreWinAppDependenciesTask.flatMap { it.winmdLockFile })
         },
     )
     val stageRuntimeAssetsTask = project.tasks.register(
@@ -1053,19 +1026,9 @@ private fun configureWinAppTasks(
             )
             task.runtimeAssets.set(extension.runtimeAssets)
             task.runtimeAssetFiles.from(extension.runtimeAssets)
-            val dependencyNuGetPackages = dependencyIdentityFiles.elements.map { elements ->
-                elements.map { it.asFile }.flatMap(::readNuGetPackages)
-            }
-            task.nugetPackageContentFiles.from(
-                task.nugetPackages.zip(task.nugetGlobalPackagesRoots) { packageSpecs, explicitGlobalPackagesRoots ->
-                    packageSpecs to explicitGlobalPackagesRoots
-                }.zip(dependencyNuGetPackages) { packageInput, dependencyPackageSpecs ->
-                    existingNuGetPackageContentRoots(
-                        packageSpecs = packageInput.first + dependencyPackageSpecs,
-                        explicitGlobalPackagesRoots = packageInput.second,
-                    )
-                },
-            )
+            task.nugetPackageContentFiles.from(project.provider {
+            existingWinAppPackageContentRoots(listOf(restoreWinAppDependenciesTask.get().winmdLockFile.get().asFile))
+        })
             task.resolvedNuGetPackageManifestFiles.from(resolveRuntimeNuGetPackagesTask.flatMap { it.outputFile })
             task.winAppRuntimeAssetDirectories.from(
                 restoreWinAppDependenciesTask.flatMap { restore -> restore.winAppDirectory }.map { directory ->
@@ -1073,18 +1036,6 @@ private fun configureWinAppTasks(
                 },
             )
             task.winAppRestoreLockFiles.from(restoreWinAppDependenciesTask.flatMap { restore -> restore.winmdLockFile })
-            task.nugetGlobalPackagesRoots.set(extension.nugetGlobalPackagesRoots)
-            task.useNuGetCliGlobalPackages.set(extension.useNuGetCliGlobalPackages)
-            task.nugetExecutable.set(extension.nugetExecutable)
-            task.nugetCliVersion.set(extension.nugetCliVersion)
-            task.nugetCliCacheDirectory.set(
-                project.layout.dir(
-                    project.provider {
-                        project.gradle.gradleUserHomeDir.resolve("caches/kotlin-winrt/nuget-cli")
-                    },
-                ),
-            )
-            task.restoreNuGetPackages.set(extension.restoreNuGetPackages)
             task.includeFrameworkRuntimeAssets.set(project.provider {
                 val outputFile = options.packageOutputFile.orNull?.asFile
                 resolvedWindowsAppSdkDeployment.get() == WindowsAppSdkDeployment.SelfContained ||
@@ -2298,27 +2249,12 @@ private fun configureWinRTGeneration(
         task.windowsSdkVersion.set(extension.windowsSdkVersion)
         task.includeWindowsSdkExtensions.set(extension.includeWindowsSdkExtensions)
         task.generateWindowsSdkProjection.set(extension.generateWindowsSdkProjection)
-        task.nugetExecutable.set(extension.nugetExecutable)
-        task.nugetCliVersion.set(extension.nugetCliVersion)
-        task.nugetCliCacheDirectory.set(
-            project.layout.dir(project.provider {
-                project.gradle.gradleUserHomeDir.resolve("caches/kotlin-winrt/nuget-cli")
-            }),
-        )
         task.workerEnvironment.set(project.providers.environmentVariablesPrefixedBy(""))
-        task.restoreNuGetPackages.set(extension.restoreNuGetPackages)
-        task.useNuGetCliGlobalPackages.set(extension.useNuGetCliGlobalPackages)
-        task.nugetGlobalPackagesRoots.set(extension.nugetGlobalPackagesRoots)
         task.nugetPackages.set(project.provider { projectionNuGetPackageSpecs(extension.packageReferences) })
         task.winAppRestoreLockFiles.from(restoreWinAppDependenciesTask.flatMap { it.winmdLockFile })
-        task.nugetPackageContentFiles.from(
-            task.nugetPackages.zip(extension.nugetGlobalPackagesRoots) { packageSpecs, explicitGlobalPackagesRoots ->
-                existingNuGetPackageContentRoots(
-                    packageSpecs = packageSpecs,
-                    explicitGlobalPackagesRoots = explicitGlobalPackagesRoots,
-                )
-            },
-        )
+        task.nugetPackageContentFiles.from(project.provider {
+            existingWinAppPackageContentRoots(listOf(restoreWinAppDependenciesTask.get().winmdLockFile.get().asFile))
+        })
         task.projectModel.set(
             project.provider {
                 if (extension.applicationEnabled.get()) "application" else "library"
@@ -2388,14 +2324,8 @@ private fun configureWinRTGeneration(
     )
     // The metadata preparation task feeds the generation task's prepared manifest. Keep all
     // NuGet inputs on that edge aligned so a task-level override cannot make preparation resolve
-    // a different package set or restore policy than the consumer that uses its manifest.
+    // a different package set than the consumer that uses its manifest.
     prepareMetadataTask.configure { task ->
-        task.nugetExecutable.set(generateTask.flatMap { it.nugetExecutable })
-        task.nugetCliVersion.set(generateTask.flatMap { it.nugetCliVersion })
-        task.nugetCliCacheDirectory.set(generateTask.flatMap { it.nugetCliCacheDirectory })
-        task.restoreNuGetPackages.set(generateTask.flatMap { it.restoreNuGetPackages })
-        task.useNuGetCliGlobalPackages.set(generateTask.flatMap { it.useNuGetCliGlobalPackages })
-        task.nugetGlobalPackagesRoots.set(generateTask.flatMap { it.nugetGlobalPackagesRoots })
         task.nugetPackages.set(generateTask.flatMap { it.nugetPackages })
     }
     // A build script may narrow the legacy generateWinRTProjections.sourceRoots
@@ -3151,18 +3081,6 @@ private fun registerWinRTAuthoredCandidateValidation(
             task.windowsSdkVersion.set(extension.windowsSdkVersion)
             task.includeWindowsSdkExtensions.set(extension.includeWindowsSdkExtensions)
             task.generateWindowsSdkProjection.set(extension.generateWindowsSdkProjection)
-            task.nugetExecutable.set(extension.nugetExecutable)
-            task.nugetCliVersion.set(extension.nugetCliVersion)
-            task.nugetCliCacheDirectory.set(
-                project.layout.dir(
-                    project.provider {
-                        project.gradle.gradleUserHomeDir.resolve("caches/kotlin-winrt/nuget-cli")
-                    },
-                ),
-            )
-            task.restoreNuGetPackages.set(extension.restoreNuGetPackages)
-            task.useNuGetCliGlobalPackages.set(extension.useNuGetCliGlobalPackages)
-            task.nugetGlobalPackagesRoots.set(extension.nugetGlobalPackagesRoots)
             task.nugetPackages.set(
                 project.provider {
                     projectionNuGetPackageSpecs(extension)
@@ -3806,6 +3724,13 @@ private fun kotlinWinRTLocalGenerationRequired(
 ): Provider<Boolean> =
     memoizedBooleanProvider(project) {
         try {
+            // Package metadata belongs to the restore/generator task boundary. Keep the
+            // generation edge without walking restored packages during configuration.
+            if (projectionNuGetPackageSpecs(extension).isNotEmpty() ||
+                metadataNuGetPackageSpecs(extension).isNotEmpty()
+            ) {
+                return@memoizedBooleanProvider true
+            }
             val initialPlan = kotlinWinRTLocalGenerationMetadataPlan(extension, emptySet())
             if (!initialPlan.hasLocalProjectionSelection) {
                 false
@@ -3957,24 +3882,8 @@ private fun kotlinWinRTLocalGenerationMetadataPlan(
     } else {
         emptyList()
     }
-    val nugetSources = if (packageSpecs.isEmpty()) {
-        emptyList()
-    } else {
-        val nugetRoots = WinRTNuGetPackageResolver.globalPackagesRoots(
-            explicitRoots = extension.nugetGlobalPackagesRoots.get().map(Path::of),
-        )
-        packageSpecs
-            .map(::parseNuGetPackageIdentity)
-            .map { identity ->
-                WinRTMetadataSource.nugetPackage(
-                    packageId = identity.normalizedPackageId,
-                    version = identity.normalizedVersion,
-                    globalPackagesRoots = nugetRoots,
-                )
-            }
-    }
     return KotlinWinRTLocalGenerationMetadataPlan(
-        sources = explicitSources + sdkSource + nugetSources,
+        sources = explicitSources + sdkSource,
         hasLocalProjectionSelection = explicitSources.isNotEmpty() ||
             hasProjectionFilter ||
             extension.generateWindowsSdkProjection.get() ||
@@ -4994,25 +4903,13 @@ private fun localAuthoredHostManifestFiles(project: Project, manifestFile: Provi
     project.files(manifestFile)
         .filter(::authoredHostManifestDeclaresActivatableClasses)
 
-private fun existingNuGetPackageContentRoots(
-    packageSpecs: List<String>,
-    explicitGlobalPackagesRoots: List<String>,
-): List<File> {
-    val roots = WinRTNuGetPackageResolver.globalPackagesRoots(
-        explicitRoots = explicitGlobalPackagesRoots.map(Path::of),
-    )
-    return packageSpecs
-        .map(::parseNuGetPackageIdentity)
-        .flatMap { identity ->
-            runCatching {
-                WinRTNuGetPackageResolver.resolveClosure(identity, roots)
-            }.getOrElse {
-                emptyList()
-            }
-        }
-        .map { resolved -> resolved.packageRoot.toFile() }
-        .distinctBy { it.toPath().toAbsolutePath().normalize().toString().lowercase() }
-}
+private fun existingWinAppPackageContentRoots(lockFiles: List<File>): List<File> =
+    lockFiles.filter(File::isFile).flatMap { lock ->
+        // A stale restore must reach the restore task so it can repair its output.
+        // Consumers validate the resulting lock strictly before using package inputs.
+        runCatching { readWinAppRestoredPackageRoots(listOf(lock)).map(Path::toFile) }
+            .getOrDefault(emptyList())
+    }.distinct()
 
 private fun windowsSdkMetadataInputFiles(
     extension: PackageReferencesConfiguration,
@@ -5094,7 +4991,6 @@ private fun Test.kotlinWinRTProjectionTaskName(): String {
     return "compileKotlinWinRTProjection$suffix"
 }
 
-
 internal fun generatedWinRTProjectionSourceFiles(project: Project, directory: Directory): org.gradle.api.file.FileTree =
     // Generation can change shard names and ownership after Gradle configures
     // the compiler. Keep a live tree instead of freezing the previous output's
@@ -5107,21 +5003,10 @@ private fun configureWinAppRestoreInputFiles(
     project: Project,
     task: RestoreWinAppDependenciesTask,
     extension: PackageReferencesConfiguration,
-    dependencyIdentityFiles: org.gradle.api.file.FileCollection,
 ) {
-    val dependencyNuGetPackages = dependencyIdentityFiles.elements.map { elements ->
-        elements.map { it.asFile }.flatMap(::readNuGetPackages)
-    }
-    task.packageContentFiles.from(
-        task.nugetPackages.zip(extension.nugetGlobalPackagesRoots) { packageSpecs, explicitGlobalPackagesRoots ->
-            packageSpecs to explicitGlobalPackagesRoots
-        }.zip(dependencyNuGetPackages) { packageInput, dependencyPackageSpecs ->
-            existingNuGetPackageContentRoots(
-                packageSpecs = packageInput.first + dependencyPackageSpecs,
-                explicitGlobalPackagesRoots = packageInput.second,
-            )
-        },
-    )
+    task.packageContentFiles.from(project.provider {
+        existingWinAppPackageContentRoots(listOf(task.winmdLockFile.get().asFile))
+    })
     task.nugetConfigHierarchyFiles.from(
         project.provider {
             discoverNuGetConfigHierarchyFiles(

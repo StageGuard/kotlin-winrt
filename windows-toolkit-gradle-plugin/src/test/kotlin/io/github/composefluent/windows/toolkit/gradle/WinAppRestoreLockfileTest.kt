@@ -12,10 +12,9 @@ class WinAppRestoreLockfileTest {
         val root = Files.createTempDirectory("kotlin-winrt-required-lock-")
         try {
             val missing = root.resolve("winmds.lock.json").toFile()
-            val failure = runCatching { projectionRestoreLockFiles(listOf(missing), true) }.exceptionOrNull()
+            val failure = runCatching { projectionRestoreLockFiles(listOf(missing)) }.exceptionOrNull()
             assertTrue(failure is GradleException)
             assertTrue(failure?.message.orEmpty().contains("restoreWinAppDependencies"))
-            assertEquals(emptyList<java.io.File>(), projectionRestoreLockFiles(listOf(missing), false))
         } finally {
             Files.delete(root)
         }

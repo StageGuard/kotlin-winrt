@@ -22,10 +22,10 @@ object PreparedProjectionGeneratorMain {
         fun value(name: String): String = requireNotNull(request.getProperty(name)) { "Missing $name" }
         fun values(name: String): List<String> = value(name).takeIf(String::isNotEmpty)?.split('\u0000').orEmpty()
         val registryRoots = values("registryRoots").map(Path::of).takeIf(List<Path>::isNotEmpty)
-        val sources = values("sources").map(WinRTMetadataSource::parse).mapIndexed { index, source ->
+        val sources = values("sources").map(WinRTMetadataSource::parse).map { source ->
             when (source) {
                 is WinRTMetadataSource.WindowsSdk -> source.copy(registryRoots = registryRoots)
-                is WinRTMetadataSource.NuGetPackageReference -> source.copy(globalPackagesRoots = values("nugetRoots.$index").map(Path::of))
+                is WinRTMetadataSource.NuGetPackageReference -> error("Package references require WinApp restore")
                 else -> source
             }
         }

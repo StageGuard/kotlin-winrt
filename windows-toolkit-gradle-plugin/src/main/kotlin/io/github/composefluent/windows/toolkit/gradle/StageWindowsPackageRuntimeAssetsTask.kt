@@ -85,24 +85,6 @@ abstract class StageWindowsPackageRuntimeAssetsTask : DefaultTask() {
     @get:PathSensitive(PathSensitivity.RELATIVE)
     abstract val winAppRestoreLockFiles: ConfigurableFileCollection
 
-    @get:Input
-    abstract val nugetGlobalPackagesRoots: ListProperty<String>
-
-    @get:Input
-    abstract val useNuGetCliGlobalPackages: Property<Boolean>
-
-    @get:Input
-    abstract val nugetExecutable: Property<String>
-
-    @get:Input
-    abstract val nugetCliVersion: Property<String>
-
-    @get:Internal
-    abstract val nugetCliCacheDirectory: DirectoryProperty
-
-    @get:Input
-    abstract val restoreNuGetPackages: Property<Boolean>
-
     /**
      * Whether package-declared framework payloads under `runtimes-framework` should be staged.
      * Framework-dependent WinApp CLI packages resolve the Windows App Runtime through manifest
@@ -327,7 +309,7 @@ abstract class StageWindowsPackageRuntimeAssetsTask : DefaultTask() {
                 identity.normalizedPackageId.lowercase() in WinAppConfigurationDefaults.toolingPackageIds
             }
             .distinctBy { "${it.normalizedPackageId.lowercase()}:${it.normalizedVersion.lowercase()}" }
-        val winAppLockFiles = winAppRestoreLockFiles.files.filter(java.io.File::isFile)
+        val winAppLockFiles = projectionRestoreLockFiles(winAppRestoreLockFiles.files)
         val winAppPackageRoots = if (winAppLockFiles.isNotEmpty()) {
             readWinAppRestoredPackageRoots(
                 lockFiles = winAppLockFiles,
@@ -356,7 +338,6 @@ abstract class StageWindowsPackageRuntimeAssetsTask : DefaultTask() {
         val resolvedPackages = resolveNuGetPackages(
             identities = identities,
             resolvedPackageRoots = resolvedPackageRoots,
-            modeledPackageRoots = nugetPackageContentFiles.files.map { it.toPath() },
         )
         resolvedPackages.forEach { resolved ->
             stageTopLevelDlls(resolved.packageRoot, outputRoot)
@@ -422,7 +403,6 @@ abstract class StageWindowsPackageRuntimeAssetsTask : DefaultTask() {
     private fun resolveNuGetPackages(
         identities: List<WinRTNuGetPackageIdentity>,
         resolvedPackageRoots: List<Path>,
-        modeledPackageRoots: List<Path>,
     ): List<io.github.composefluent.winrt.metadata.WinRTNuGetResolvedPackage> {
         if (resolvedPackageRoots.isNotEmpty()) {
             return resolvedPackageRoots
@@ -439,13 +419,9 @@ abstract class StageWindowsPackageRuntimeAssetsTask : DefaultTask() {
         if (identities.isEmpty()) {
             return emptyList()
         }
-        val resolvedFromModeledInputs = resolveNuGetPackagesFromModeledInputs(identities, modeledPackageRoots)
-        if (resolvedFromModeledInputs != null) {
-            return resolvedFromModeledInputs
-        }
         error(
             "Resolved WinRT runtime NuGet package inputs are incomplete for: ${identities.joinToString()}. " +
-                "Run resolveWinRTRuntimeNuGetPackages or provide nugetPackageContentFiles containing the full package closure.",
+                "Run restoreWinAppDependencies and resolveWinRTRuntimeNuGetPackages first.",
         )
     }
 

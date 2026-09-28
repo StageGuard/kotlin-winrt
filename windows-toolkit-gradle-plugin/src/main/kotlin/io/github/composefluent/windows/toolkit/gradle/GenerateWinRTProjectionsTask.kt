@@ -6,7 +6,6 @@ import io.github.composefluent.winrt.compiler.authoring.KotlinWinRTAuthoringCand
 import io.github.composefluent.winrt.compiler.authoring.KotlinWinRTAuthoringMetadataModel
 import io.github.composefluent.winrt.compiler.authoring.KotlinWinRTAuthoringTypeDetailsRenderer
 import io.github.composefluent.winrt.compiler.authoring.authoringTypeDetailsRegistrarName
-import io.github.composefluent.winrt.compiler.authoring.readAuthoringMetadataIndex
 import io.github.composefluent.winrt.compiler.authoring.readAuthoringMetadataIndexRows as parseAuthoringMetadataIndexRows
 import io.github.composefluent.winrt.compiler.authoring.writeAuthoringMetadataIndex
 import io.github.composefluent.winrt.metadata.WinRTMetadataProjectionContext
@@ -16,7 +15,6 @@ import io.github.composefluent.winrt.metadata.WinRTMetadataSource
 import io.github.composefluent.winrt.metadata.WinRTMetadataCache
 import io.github.composefluent.winrt.metadata.WinRTMetadataSourceKind
 import io.github.composefluent.winrt.metadata.WinRTMetadataSourceResolver
-import io.github.composefluent.winrt.metadata.WinRTNuGetPackageIdentity
 import io.github.composefluent.winrt.metadata.WinRTTypeRef
 import io.github.composefluent.winrt.metadata.WinRTTypeRefKind
 import io.github.composefluent.winrt.metadata.WinRTTypeDefinition
@@ -37,7 +35,6 @@ import org.gradle.api.provider.Property
 import org.gradle.api.tasks.CacheableTask
 import org.gradle.api.tasks.Classpath
 import org.gradle.api.tasks.Input
-import org.gradle.api.tasks.InputDirectory
 import org.gradle.api.tasks.InputFile
 import org.gradle.api.tasks.InputFiles
 import org.gradle.api.tasks.Internal
@@ -182,27 +179,9 @@ abstract class GenerateWinRTProjectionsTask : DefaultTask() {
     @get:Input
     abstract val generateWindowsSdkProjection: Property<Boolean>
 
-    @get:Input
-    abstract val nugetExecutable: Property<String>
-
-    @get:Input
-    abstract val nugetCliVersion: Property<String>
-
-    @get:Internal
-    abstract val nugetCliCacheDirectory: DirectoryProperty
-
     /** Runtime environment is passed to the isolated worker but is not a projection input. */
     @get:Internal
     abstract val workerEnvironment: MapProperty<String, String>
-
-    @get:Input
-    abstract val restoreNuGetPackages: Property<Boolean>
-
-    @get:Input
-    abstract val useNuGetCliGlobalPackages: Property<Boolean>
-
-    @get:Input
-    abstract val nugetGlobalPackagesRoots: ListProperty<String>
 
     @get:Input
     abstract val nugetPackages: ListProperty<String>
@@ -269,12 +248,6 @@ abstract class GenerateWinRTProjectionsTask : DefaultTask() {
             parameters.windowsSdkVersion.set(windowsSdkVersion)
             parameters.includeWindowsSdkExtensions.set(includeWindowsSdkExtensions)
             parameters.generateWindowsSdkProjection.set(generateWindowsSdkProjection)
-            parameters.nugetExecutable.set(nugetExecutable)
-            parameters.nugetCliVersion.set(nugetCliVersion)
-            parameters.nugetCliCacheDirectory.set(nugetCliCacheDirectory)
-            parameters.restoreNuGetPackages.set(restoreNuGetPackages)
-            parameters.useNuGetCliGlobalPackages.set(useNuGetCliGlobalPackages)
-            parameters.nugetGlobalPackagesRoots.set(nugetGlobalPackagesRoots)
             parameters.nugetPackages.set(nugetPackages)
             parameters.projectModel.set(projectModel)
             parameters.authoringAssemblyName.set(authoringAssemblyName)
@@ -315,12 +288,6 @@ internal interface GenerateWinRTProjectionsWorkParameters : WorkParameters {
     val windowsSdkVersion: Property<String>
     val includeWindowsSdkExtensions: Property<Boolean>
     val generateWindowsSdkProjection: Property<Boolean>
-    val nugetExecutable: Property<String>
-    val nugetCliVersion: Property<String>
-    val nugetCliCacheDirectory: DirectoryProperty
-    val restoreNuGetPackages: Property<Boolean>
-    val useNuGetCliGlobalPackages: Property<Boolean>
-    val nugetGlobalPackagesRoots: ListProperty<String>
     val nugetPackages: ListProperty<String>
     val projectModel: Property<String>
     val authoringAssemblyName: Property<String>
@@ -596,40 +563,14 @@ internal abstract class GenerateWinRTProjectionsWorkAction : WorkAction<Generate
         } else {
             emptyList()
         }
-        val winAppLockFiles = projectionRestoreLockFiles(
-            parameters.winAppRestoreLockFiles.files, parameters.restoreNuGetPackages.get(),
-        )
-        val nugetSources = if (winAppLockFiles.isNotEmpty()) {
-            readWinAppProjectionWinmdFiles(
-                lockFiles = winAppLockFiles,
-                rootPackageSpecs = packageSpecs,
-            ).map(WinRTMetadataSource::path)
-        } else {
-            resolveNuGetProjectionMetadataSources(
-                packageSpecs = packageSpecs,
-                explicitGlobalPackagesRoots = parameters.nugetGlobalPackagesRoots.get().map(Path::of),
-                cliGlobalPackagesRoots = resolveNuGetCliGlobalPackagesRoots(
-                    enabled = parameters.useNuGetCliGlobalPackages.get(),
-                    executable = parameters.nugetExecutable.get(),
-                    cliVersion = parameters.nugetCliVersion.get(),
-                    cliCacheDirectory = parameters.nugetCliCacheDirectory.get().asFile.toPath(),
-                    scratchDirectory = parameters.workDirectory.get().asFile.toPath().resolve("nuget-scratch"),
-                    logger = logger,
-                ),
-                restoreNuGetPackages = parameters.restoreNuGetPackages.get(),
-                restoreMissing = ::restoreNuGetPackages,
-            )
-        }
         val dependencyRecords = parameters.dependencyIdentityFiles.files.flatMap(::readDependencyAuthoredMetadataRecords)
         val dependencyAuthoredMetadataSources = writeDependencyAuthoredMetadataRecords(
             records = dependencyRecords,
             outputRoot = parameters.workDirectory.get().asFile.toPath().resolve("dependency-authored-metadata"),
         )
             .map(WinRTMetadataSource::path)
-        val sources = explicitSources.filterNot {
-            it is WinRTMetadataSource.NuGetPackageReference && winAppLockFiles.isNotEmpty()
-        } + sdkSource + nugetSources + dependencyAuthoredMetadataSources
-        return sources
+        return resolveWinAppProjectionSources(explicitSources, packageSpecs, parameters.winAppRestoreLockFiles.files) +
+            sdkSource + dependencyAuthoredMetadataSources
     }
 
     /**
@@ -756,23 +697,6 @@ internal abstract class GenerateWinRTProjectionsWorkAction : WorkAction<Generate
     private fun decodePreparedMetadataValue(value: String): String =
         String(Base64.getUrlDecoder().decode(value), StandardCharsets.UTF_8)
 
-    private fun restoreNuGetPackages(
-        packageIdentities: List<WinRTNuGetPackageIdentity>,
-    ): List<Path> {
-        if (packageIdentities.isEmpty()) {
-            return emptyList()
-        }
-
-        val installRoot = prepareNuGetInstallRoot(
-            parameters.workDirectory.get().asFile.toPath().resolve("nuget-install"),
-        )
-        return restoreNuGetPackagesToDirectory(
-            packageIdentities = packageIdentities,
-            installRoot = installRoot,
-            nuGetCli = nuGetCli(),
-        )
-    }
-
     private fun containsKotlinSource(root: Path): Boolean {
         if (Files.isRegularFile(root)) {
             return root.extension == "kt"
@@ -840,13 +764,6 @@ internal abstract class GenerateWinRTProjectionsWorkAction : WorkAction<Generate
         }
     }
 
-    private fun nuGetCli(): NuGetCliSupport = NuGetCliSupport(
-        executable = parameters.nugetExecutable.get(),
-        cliVersion = parameters.nugetCliVersion.get(),
-        cliCacheDirectory = parameters.nugetCliCacheDirectory.get().asFile.toPath(),
-        scratchDirectory = parameters.workDirectory.get().asFile.toPath().resolve("nuget-scratch"),
-        logger = logger,
-    )
 }
 
 internal fun dependencyProjectedTypeNames(

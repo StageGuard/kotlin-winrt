@@ -7,16 +7,19 @@ generation; they do not alter target ABI behavior.
 
 ## Package restoration
 
-With restoration enabled, `restoreWinAppDependencies` owns package acquisition
-through WinApp CLI. IDE preparation depends on projection generation and its
-restore task. Configuration does not run `nuget install` or populate
-`.gradle/kotlin-winrt/prepared-nuget`. A missing task-produced WinApp lock is an
-error, not permission to start an independent package restore.
+`restoreWinAppDependencies` owns all package acquisition through WinApp CLI.
+IDE preparation depends on projection generation and its restore task. Package
+references are resolved exclusively from the task-produced WinApp lockfile.
+The plugin has no NuGet CLI downloader, separate package cache, or global-package
+search fallback. Direct local WinMD inputs still support configuration-time
+preparation.
 
-When `restoreNuGetPackages=false`, existing explicitly supplied/default NuGet
-package roots can still support read-only configuration-time preparation.
-Standalone legacy tasks retain their compatibility paths; normal plugin-wired
-restoration uses WinApp. Package/version retention belongs to that package store.
+With `restoreNuGetPackages=false`, the restore task validates and reuses an
+existing WinApp lock and its package files without downloading. A missing,
+incomplete, or stale restore fails with an instruction to restore online.
+Configure package locations and feeds through `NuGet.Config` (the DSL method
+`nugetConfig(...)`) or the environment used by WinApp. Package/version retention
+belongs to that package store.
 
 ## Projection and model caches
 
@@ -45,7 +48,7 @@ separate from `.gradle/configuration-cache`. They can be removed when their
 diagnostics are no longer needed. This plugin does not delete Gradle reports.
 
 Old project-local `metadata-models`, `prepared-nuget`, and `nuget-scratch`
-directories are no longer written by normal configuration-time preparation.
+directories are no longer written by the plugin.
 They are not automatically migrated or removed. Remove them manually after
 checking that no explicit local metadata path or custom task uses them; missing
 WinApp packages will be restored on the next online build.

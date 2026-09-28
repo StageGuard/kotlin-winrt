@@ -28,11 +28,7 @@ interface PackageReferencesConfiguration {
     val windowsSdkVersion: Property<String>
     val includeWindowsSdkExtensions: Property<Boolean>
     val generateWindowsSdkProjection: Property<Boolean>
-    val nugetExecutable: Property<String>
-    val nugetCliVersion: Property<String>
     val restoreNuGetPackages: Property<Boolean>
-    val useNuGetCliGlobalPackages: Property<Boolean>
-    val nugetGlobalPackagesRoots: ListProperty<String>
     val nugetConfigFile: RegularFileProperty
     val nugetConfigDirectory: DirectoryProperty
     val nugetPackages: NamedNuGetPackageContainer
@@ -80,11 +76,7 @@ abstract class PackageReferencesConfigurationSupport @Inject constructor(
     override val includeWindowsSdkExtensions: Property<Boolean> = objects.property(Boolean::class.java).convention(false)
     override val generateWindowsSdkProjection: Property<Boolean> =
         objects.property(Boolean::class.java).convention(false)
-    override val nugetExecutable: Property<String> = objects.property(String::class.java).convention("nuget")
-    override val nugetCliVersion: Property<String> = objects.property(String::class.java).convention("7.3.1")
     override val restoreNuGetPackages: Property<Boolean> = objects.property(Boolean::class.java).convention(true)
-    override val useNuGetCliGlobalPackages: Property<Boolean> = objects.property(Boolean::class.java).convention(true)
-    override val nugetGlobalPackagesRoots: ListProperty<String> = objects.listProperty(String::class.java).convention(emptyList())
     override val nugetConfigFile: RegularFileProperty = objects.fileProperty()
     override val nugetConfigDirectory: DirectoryProperty = objects.directoryProperty()
 
@@ -215,11 +207,7 @@ abstract class WindowsExtension @Inject constructor(
     internal val windowsSdkVersion get() = packageReferences.windowsSdkVersion
     internal val includeWindowsSdkExtensions get() = packageReferences.includeWindowsSdkExtensions
     internal val generateWindowsSdkProjection get() = packageReferences.generateWindowsSdkProjection
-    internal val nugetExecutable get() = packageReferences.nugetExecutable
-    internal val nugetCliVersion get() = packageReferences.nugetCliVersion
     internal val restoreNuGetPackages get() = packageReferences.restoreNuGetPackages
-    internal val useNuGetCliGlobalPackages get() = packageReferences.useNuGetCliGlobalPackages
-    internal val nugetGlobalPackagesRoots get() = packageReferences.nugetGlobalPackagesRoots
     internal val nugetConfigFile get() = packageReferences.nugetConfigFile
     internal val nugetConfigDirectory get() = packageReferences.nugetConfigDirectory
     internal val nugetPackages get() = packageReferences.nugetPackages

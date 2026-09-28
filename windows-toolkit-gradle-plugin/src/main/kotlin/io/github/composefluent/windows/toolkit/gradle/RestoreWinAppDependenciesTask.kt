@@ -9,7 +9,6 @@ import org.gradle.api.provider.ListProperty
 import org.gradle.api.provider.Property
 import org.gradle.api.tasks.Input
 import org.gradle.api.tasks.InputFile
-import org.gradle.api.tasks.InputDirectory
 import org.gradle.api.tasks.InputFiles
 import org.gradle.api.tasks.Internal
 import org.gradle.api.tasks.Optional
@@ -144,10 +143,6 @@ abstract class RestoreWinAppDependenciesTask : DefaultTask() {
                 return
             }
         }
-        if (!restoreEnabled.get()) {
-            GradleFileOperations.cleanDirectory(output)
-            return
-        }
 
         if (packageSpecs.isEmpty() && !includeToolingPackages.get()) {
             GradleFileOperations.cleanDirectory(output)
@@ -166,20 +161,21 @@ abstract class RestoreWinAppDependenciesTask : DefaultTask() {
             return
         }
 
-        if (offline.get()) {
+        if (offline.get() || !restoreEnabled.get()) {
             val existingLock = output.resolve("winmds.lock.json")
             if (existingLock.isRegularFile()) {
                 runCatching {
                     validateRestore(existingLock, packageSpecs)
                     validateRestoreContext(output, config, restoreBase, packageSpecs, existingLock)
                 }.onSuccess {
-                    logger.lifecycle("Reusing verified WinApp restore from $output because Gradle is offline.")
+                    logger.lifecycle("Reusing verified WinApp restore from $output without downloading packages.")
                     return
                 }
             }
             throw GradleException(
-                "WinApp restore cannot run offline because no verified lock/cache exists at $output. " +
-                    "Run once without --offline to populate the WinApp and NuGet caches.",
+                "WinApp restore cannot download packages because Gradle is offline or restoreNuGetPackages is false, " +
+                    "and no verified lock/cache exists at $output. " +
+                    "Run restoreWinAppDependencies online with restoreNuGetPackages enabled first.",
             )
         }
 

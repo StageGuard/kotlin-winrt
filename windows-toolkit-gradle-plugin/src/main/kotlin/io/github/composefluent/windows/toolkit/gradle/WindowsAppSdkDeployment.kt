@@ -42,8 +42,8 @@ internal fun frameworkDependentDeploymentAvailable(
     if (restoreEnabled) {
         return true
     }
-    // A disabled restore task clears its output. Only explicit assets are authoritative in that
-    // mode; a stale .winapp directory must not make Auto select FrameworkDependent.
+    // With downloads disabled, configuration cannot assume a verified restore exists. Explicit
+    // assets allow Auto to select FrameworkDependent without inspecting stale .winapp output.
     return explicitRuntimeAssets.any(::containsWindowsAppSdkBootstrap)
 }
 

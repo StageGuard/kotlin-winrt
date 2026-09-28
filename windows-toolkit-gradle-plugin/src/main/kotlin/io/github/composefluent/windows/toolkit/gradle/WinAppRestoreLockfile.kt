@@ -2,6 +2,7 @@ package io.github.composefluent.windows.toolkit.gradle
 
 import io.github.composefluent.winrt.metadata.WinRTNuGetPackageIdentity
 import io.github.composefluent.winrt.metadata.WinRTNuGetPackageResolver
+import io.github.composefluent.winrt.metadata.WinRTMetadataSource
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -72,15 +73,28 @@ internal object WinAppRestoreLockfileReader {
 }
 
 /** A missing task-produced lock must fail rather than activate an unrelated NuGet downloader. */
-internal fun projectionRestoreLockFiles(files: Iterable<File>, restoreEnabled: Boolean): List<File> =
+internal fun projectionRestoreLockFiles(files: Iterable<File>): List<File> =
     files.toList().also { locks ->
-        if (restoreEnabled) {
             val missing = locks.filterNot(File::isFile)
             if (missing.isNotEmpty()) {
                 throw GradleException("WinApp restore lockfiles are missing: ${missing.joinToString()}. Run restoreWinAppDependencies first.")
             }
-        }
-    }.filter(File::isFile)
+    }
+
+/** CsWinRT's resolved-input boundary: package references always use the authoritative restore. */
+internal fun resolveWinAppProjectionSources(
+    explicitSources: List<WinRTMetadataSource>,
+    packageSpecs: List<String>,
+    lockFiles: Iterable<File>,
+): List<WinRTMetadataSource> {
+    val references = explicitSources.filterIsInstance<WinRTMetadataSource.NuGetPackageReference>()
+    val specs = (packageSpecs + references.map { "${it.packageId}@${it.version}" }).distinct()
+    val localSources = explicitSources.filterNot { it is WinRTMetadataSource.NuGetPackageReference }
+    if (specs.isEmpty()) return localSources
+    return localSources + readWinAppProjectionWinmdFiles(
+        projectionRestoreLockFiles(lockFiles), specs,
+    ).map(WinRTMetadataSource::path)
+}
 
 internal fun readWinAppProjectionWinmdFiles(
     lockFiles: Iterable<File>,

@@ -63,23 +63,9 @@ internal fun prepareWinRTStaticProjectionSources(
     // Like CsWinRTPrepareProjection's resolved package inputs, restored NuGet metadata is
     // task-produced. IDE preparation already depends on generateWinRTProjections, which
     // depends on WinApp restore. Never introduce a second downloader during configuration.
-    if (packageSpecs.isNotEmpty() && extension.restoreNuGetPackages.get()) {
+    if (packageSpecs.isNotEmpty()) {
         throw StaticPreparationUnavailable("NuGet metadata requires the restoreWinAppDependencies task")
     }
-    val explicitNuGetRoots = extension.nugetGlobalPackagesRoots.get().map(Path::of) +
-        explicitNuGetReferences.flatMap { source -> source.globalPackagesRoots }
-    val preparedNuGetSources = if (packageSpecs.isEmpty()) {
-        emptyList()
-    } else {
-        resolveNuGetProjectionMetadataSources(
-            packageSpecs = packageSpecs,
-            explicitGlobalPackagesRoots = explicitNuGetRoots,
-            cliGlobalPackagesRoots = emptyList(),
-            restoreNuGetPackages = false,
-            restoreMissing = { error("Configuration-time NuGet restore is not supported") },
-        )
-    }
-
     val effectiveSources = parsedSources.filterNot { source ->
         source is WinRTMetadataSource.NuGetPackageReference
     } +
@@ -93,7 +79,7 @@ internal fun prepareWinRTStaticProjectionSources(
             )
         } else {
             emptyList()
-        } + preparedNuGetSources
+        }
     if (effectiveSources.isEmpty()) {
         return null
     }
@@ -131,7 +117,6 @@ internal fun prepareWinRTStaticProjectionSources(
             when (source) {
                 is WinRTMetadataSource.PathSource -> source.path.toAbsolutePath().normalize().toString()
                 is WinRTMetadataSource.NuGetPackage -> "nuget:${source.packagePath.toAbsolutePath().normalize()}"
-                is WinRTMetadataSource.NuGetPackageReference -> "nuget:${source.packageId}@${source.version}"
                 is WinRTMetadataSource.WindowsSdk -> (source.version ?: "sdk") +
                     if (source.includeExtensions) "+" else ""
                 else -> error("Static projection source was not resolved: $source")
@@ -150,11 +135,7 @@ internal fun prepareWinRTStaticProjectionSources(
             extension.includeTypes.get().isEmpty() && !extension.generateWindowsSdkProjection.get()).toString(),
         "owner" to supportOwnerIdentity,
         "emitJvmAuthoringHostExports" to emitJvmAuthoringHostExports.toString(),
-    ) + effectiveSources.mapIndexedNotNull { index, source ->
-        (source as? WinRTMetadataSource.NuGetPackageReference)?.let {
-            "nugetRoots.$index" to it.globalPackagesRoots.joinToString("\u0000") { root -> root.toAbsolutePath().normalize().toString() }
-        }
-    }.toMap()
+    )
     project.providers.of(PreparedProjectionValueSource::class.java) { spec ->
         spec.parameters.request.set(request)
         spec.parameters.classpath.from(kotlinWinRTPreparedGeneratorClasspath(project))
@@ -235,11 +216,6 @@ private fun preparedStaticProjectionKey(
     updateField("includeWindowsSdkExtensions", extension.includeWindowsSdkExtensions.get().toString())
     updateField("generateWindowsSdkProjection", extension.generateWindowsSdkProjection.get().toString())
     updateList("windowsSdkRegistryRoots", windowsSdkRegistryRoots.map(Path::toString).sorted())
-    updateField("restoreNuGetPackages", extension.restoreNuGetPackages.get().toString())
-    updateField("useNuGetCliGlobalPackages", extension.useNuGetCliGlobalPackages.get().toString())
-    updateField("nugetExecutable", extension.nugetExecutable.get())
-    updateField("nugetCliVersion", extension.nugetCliVersion.get())
-    updateList("nugetGlobalPackagesRoots", extension.nugetGlobalPackagesRoots.get().map(Path::of).map(Path::toString).sorted())
     extension.nugetPackages
         .map { packageReference ->
             listOf(

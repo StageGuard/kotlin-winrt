@@ -163,5 +163,18 @@ class RestoreWinAppDependenciesTaskTest {
         Files.list(workspace).use { children ->
             assertFalse(children.anyMatch { it.fileName.toString().startsWith(".kotlin-winrt-winapp-config-") })
         }
+
+        // Disabling restore must reuse the verified WinApp result, even without a CLI.
+        task.restoreEnabled.set(false)
+        task.winAppCliExecutable.set(workspace.resolve("missing-winapp.exe").toString())
+        task.restore()
+        assertTrue(Files.isRegularFile(lockfile))
+
+        // Changed inputs cannot silently reuse unrelated package caches.
+        task.nugetPackages.set(listOf("Missing.Package@1.0.0"))
+        val failure = runCatching { task.restore() }.exceptionOrNull()
+        assertTrue(failure is org.gradle.api.GradleException)
+        assertTrue(failure?.message.orEmpty().contains("no verified lock/cache"))
+        assertTrue(Files.isRegularFile(lockfile))
     }
 }

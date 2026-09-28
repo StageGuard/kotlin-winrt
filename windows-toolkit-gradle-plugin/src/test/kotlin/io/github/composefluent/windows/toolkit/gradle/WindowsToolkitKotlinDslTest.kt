@@ -50,8 +50,6 @@ class WindowsToolkitKotlinDslTest {
                 winAppCliExecutable = "custom-winapp"
                 packageReferences {
                     restoreNuGetPackages = false
-                    useNuGetCliGlobalPackages = false
-                    nugetGlobalPackagesRoots = listOf("cache-a", "cache-b")
 
                     nugetPackage("Sample.Package") {
                         version = "1.2.3"
@@ -83,8 +81,6 @@ class WindowsToolkitKotlinDslTest {
                     check(configured.appxResourcePackageName.get() == "sample.appx")
                     check(configured.winAppCliExecutable.get() == "custom-winapp")
                     check(!configured.packageReferences.restoreNuGetPackages.get())
-                    check(!configured.packageReferences.useNuGetCliGlobalPackages.get())
-                    check(configured.packageReferences.nugetGlobalPackagesRoots.get() == listOf("cache-a", "cache-b"))
 
                     val nugetPackage = configured.packageReferences.nugetPackages.getByName("Sample.Package")
                     check(nugetPackage.version.get() == "1.2.3")

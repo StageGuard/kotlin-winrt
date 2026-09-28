@@ -72,7 +72,7 @@ val sampleWindowsSdkVersion = providers.gradleProperty("kotlinWinRT.samples.wind
     .orElse("10.0.26100.0")
 val sampleWinUIEssentialVersion = providers.gradleProperty("kotlinWinRT.samples.winUIEssentialVersion")
     .orElse("1.6.7")
-val sampleNuGetGlobalPackagesRoot = providers.gradleProperty("kotlinWinRT.samples.nugetGlobalPackagesRoot")
+val sampleNuGetConfig = providers.gradleProperty("kotlinWinRT.samples.nugetConfig")
 val sampleApplicationPackageType = providers.gradleProperty("kotlinWinRT.samples.packageType")
     .map(String::lowercase)
     .orElse("packaged")
@@ -137,11 +137,7 @@ windows {
             type("Windows.Foundation.IStringable")
             type("Windows.Foundation.Point")
             namespace("Windows.Data.Json")
-            sampleNuGetGlobalPackagesRoot.orNull?.let { globalPackagesRoot ->
-                nugetGlobalPackagesRoots.add(globalPackagesRoot)
-                useNuGetCliGlobalPackages = false
-                restoreNuGetPackages = false
-            }
+            sampleNuGetConfig.orNull?.let { nugetConfig(file(it)) }
             windowsSdk(sampleWindowsSdkVersion.get(), includeExtensions = true, generateProjection = true)
             nugetPackage("Microsoft.WindowsAppSDK", windowsAppSdkVersion) {
                 generateProjection = true

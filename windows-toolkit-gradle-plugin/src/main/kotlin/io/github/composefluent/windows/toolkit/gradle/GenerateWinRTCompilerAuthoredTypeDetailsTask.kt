@@ -7,8 +7,6 @@ import io.github.composefluent.winrt.metadata.WinRTMetadataModel
 import io.github.composefluent.winrt.metadata.WinRTMetadataLoader
 import io.github.composefluent.winrt.metadata.WinRTMetadataSource
 import io.github.composefluent.winrt.metadata.WinRTNamespace
-import io.github.composefluent.winrt.metadata.WinRTNuGetPackageIdentity
-import io.github.composefluent.winrt.metadata.WinRTNuGetPackageResolver
 import io.github.composefluent.winrt.metadata.WinRTTypeKind
 import io.github.composefluent.winrt.metadata.filterProjectionSurface
 import io.github.composefluent.winrt.projections.generator.redirectedWinAppSdkProjectionSurfaceTypeReferences
@@ -27,12 +25,9 @@ import org.gradle.api.tasks.OutputDirectory
 import org.gradle.api.tasks.PathSensitive
 import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.TaskAction
-import java.nio.file.Files
 import java.nio.file.Path
 import javax.inject.Inject
-import kotlin.io.path.isDirectory
 import kotlin.io.path.name
-import kotlin.streams.asSequence
 
 @CacheableTask
 abstract class GenerateWinRTCompilerAuthoredTypeDetailsTask @Inject constructor() : DefaultTask() {
@@ -102,24 +97,6 @@ abstract class GenerateWinRTCompilerAuthoredTypeDetailsTask @Inject constructor(
 
     @get:Input
     abstract val generateWindowsSdkProjection: Property<Boolean>
-
-    @get:Input
-    abstract val nugetExecutable: Property<String>
-
-    @get:Input
-    abstract val nugetCliVersion: Property<String>
-
-    @get:Internal
-    abstract val nugetCliCacheDirectory: DirectoryProperty
-
-    @get:Input
-    abstract val restoreNuGetPackages: Property<Boolean>
-
-    @get:Input
-    abstract val useNuGetCliGlobalPackages: Property<Boolean>
-
-    @get:Input
-    abstract val nugetGlobalPackagesRoots: ListProperty<String>
 
     @get:Input
     abstract val nugetPackages: ListProperty<String>
@@ -200,141 +177,16 @@ abstract class GenerateWinRTCompilerAuthoredTypeDetailsTask @Inject constructor(
         } else {
             emptyList()
         }
-        val winAppLockFiles = projectionRestoreLockFiles(winAppRestoreLockFiles.files, restoreNuGetPackages.get())
-        val nugetSources = if (winAppLockFiles.isNotEmpty()) {
-            readWinAppProjectionWinmdFiles(
-                lockFiles = winAppLockFiles,
-                rootPackageSpecs = packageSpecs,
-            ).map(WinRTMetadataSource::path)
-        } else {
-            legacyNuGetMetadataSources(packageSpecs)
-        }
         val dependencyRecords = dependencyIdentityFiles.files.flatMap(::readDependencyAuthoredMetadataRecords)
         val dependencyAuthoredMetadataSources = writeDependencyAuthoredMetadataRecords(
             records = dependencyRecords,
             outputRoot = temporaryDir.toPath().resolve("dependency-authored-metadata"),
         )
             .map(WinRTMetadataSource::path)
-        return explicitSources.filterNot {
-            it is WinRTMetadataSource.NuGetPackageReference && winAppLockFiles.isNotEmpty()
-        } + sdkSource + nugetSources + dependencyAuthoredMetadataSources
+        return resolveWinAppProjectionSources(explicitSources, packageSpecs, winAppRestoreLockFiles.files) +
+            sdkSource + dependencyAuthoredMetadataSources
     }
 
-    private fun legacyNuGetMetadataSources(packageSpecs: List<String>): List<WinRTMetadataSource> {
-        val explicitNuGetRoots = nugetGlobalPackagesRoots.get().map(Path::of)
-        val cliNuGetRoots = nugetCliGlobalPackagesRoots()
-        val packageIdentities = packageSpecs.map(::parseNuGetPackageIdentity)
-        val nugetRoots = explicitNuGetRoots + cliNuGetRoots
-        val packageIdentitiesFromRoots = if (restoreNuGetPackages.get()) {
-            packageIdentities.filter { identity -> isNuGetPackageClosureAvailable(identity, nugetRoots) }
-        } else {
-            val missingNuGetIdentities = packageIdentities.filterNot { identity ->
-                isNuGetPackageClosureAvailable(identity, nugetRoots)
-            }
-            require(missingNuGetIdentities.isEmpty()) {
-                "NuGet packages are missing from the configured NuGet cache and restoreNuGetPackages is false: ${missingNuGetIdentities.joinToString()}"
-            }
-            packageIdentities
-        }
-        val restoredPackageDirectories = if (restoreNuGetPackages.get()) {
-            val identitiesFromRoots = packageIdentitiesFromRoots.toSet()
-            restoreNuGetPackages(packageIdentities.filterNot { identity -> identity in identitiesFromRoots })
-        } else {
-            emptyList()
-        }
-        return packageIdentitiesFromRoots.map { identity ->
-            WinRTMetadataSource.nugetPackage(
-                packageId = identity.normalizedPackageId,
-                version = identity.normalizedVersion,
-                globalPackagesRoots = nugetRoots,
-            )
-        } + restoredPackageDirectories.map(WinRTMetadataSource::nugetPackage)
-    }
-
-    private fun isNuGetPackageClosureAvailable(
-        identity: WinRTNuGetPackageIdentity,
-        globalPackagesRoots: List<Path>,
-    ): Boolean {
-        val roots = WinRTNuGetPackageResolver.globalPackagesRoots(explicitRoots = globalPackagesRoots)
-        return runCatching {
-            WinRTNuGetPackageResolver.resolveClosure(identity, roots)
-        }.isSuccess
-    }
-
-    private fun restoreNuGetPackages(
-        packageIdentities: List<WinRTNuGetPackageIdentity>,
-    ): List<Path> {
-        if (packageIdentities.isEmpty()) {
-            return emptyList()
-        }
-        val installRoot = prepareNuGetInstallRoot(temporaryDir.toPath().resolve("nuget-install"))
-        packageIdentities.forEach { identity ->
-            runNuGetInstall(identity, installRoot)
-        }
-        return discoverInstalledPackages(installRoot)
-    }
-
-    private fun runNuGetInstall(
-        identity: WinRTNuGetPackageIdentity,
-        installRoot: Path,
-    ) {
-        nuGetCli().run(
-            arguments = listOf(
-                "install",
-                identity.normalizedPackageId,
-                "-Version",
-                identity.normalizedVersion,
-                "-NonInteractive",
-                "-OutputDirectory",
-                installRoot.toString(),
-            ),
-            workingDirectory = installRoot,
-            description = "install $identity",
-        )
-    }
-
-    private fun discoverInstalledPackages(installRoot: Path): List<Path> =
-        Files.list(installRoot).use { stream ->
-            stream.asSequence()
-                .filter { it.isDirectory() }
-                .sortedBy { it.name.lowercase() }
-                .toList()
-        }
-
-    private fun parseNuGetPackageIdentity(spec: String): WinRTNuGetPackageIdentity {
-        val separator = spec.lastIndexOf('@')
-        require(separator > 0 && separator < spec.lastIndex) {
-            "NuGet package must use '<id>@<version>' format: $spec"
-        }
-        return WinRTNuGetPackageIdentity(
-            packageId = spec.substring(0, separator),
-            version = spec.substring(separator + 1),
-        )
-    }
-
-    private fun nugetCliGlobalPackagesRoots(): List<Path> {
-        if (!useNuGetCliGlobalPackages.get()) {
-            return emptyList()
-        }
-        return runCatching {
-            val invocation = nuGetCli().run(
-                arguments = listOf("locals", "global-packages", "-list"),
-                description = "locate global-packages",
-            )
-            WinRTNuGetPackageResolver.parseNuGetGlobalPackagesOutput(invocation.output)
-        }.getOrElse { error ->
-            logger.info("NuGet CLI global-packages lookup failed: ${error.message}")
-            emptyList()
-        }
-    }
-
-    private fun nuGetCli(): NuGetCliSupport = NuGetCliSupport(
-        executable = nugetExecutable.get(),
-        cliVersion = nugetCliVersion.get(),
-        cliCacheDirectory = nugetCliCacheDirectory.get().asFile.toPath(),
-        scratchDirectory = temporaryDir.toPath().resolve("nuget-scratch"),
-        logger = logger,
-    )
 }
 
 internal fun WinRTMetadataModel.withProjectionRegistrarInterfaceIids(
