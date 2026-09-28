@@ -22,7 +22,7 @@ import java.nio.file.Path
 /** Private Kotlin handlers stay in this compile-time sidecar, never in the public WinMD ABI. */
 @OptIn(ExperimentalCompilerApi::class)
 internal object XamlSemanticOptions {
-    private val keys = listOf("xamlDeclarations", "xamlSemanticOutput", "xamlReferences")
+    private val keys = listOf("xamlDeclarations", "xamlSemanticOutput", "xamlReferences", "xamlImplementation")
         .associateWith { CompilerConfigurationKey<String>(it) }
     val options = keys.keys.map { CliOption(it, "<path>", "Kotlin XAML semantic compilation $it", false) }
 
@@ -32,16 +32,32 @@ internal object XamlSemanticOptions {
         return true
     }
 
-    fun extension(configuration: CompilerConfiguration): IrGenerationExtension? {
+    fun compilation(configuration: CompilerConfiguration): XamlCompilation? {
         fun value(name: String) = configuration.get(keys.getValue(name))
         if (keys.keys.all { value(it) == null }) return null
         val declarationPath = Path.of(requireNotNull(value("xamlDeclarations")))
+        val declarations = WinRTXamlDeclarations.parse(Files.readString(declarationPath))
+        val finalPath = value("xamlImplementation")
+        if (finalPath != null) {
+            require(value("xamlSemanticOutput") == null) { "XAML final and semantic modes are mutually exclusive" }
+            val actual = WinRTXamlDeclarations.readCompilerOutput(Path.of(finalPath))
+            val plan = Json.parseToJsonElement(Files.readString(Path.of(finalPath))).jsonObject
+                .getValue("KotlinImplementation").jsonObject
+            require(plan.getValue("SchemaVersion").jsonPrimitive.int == 1 &&
+                plan.getValue("DeclarationFingerprint").jsonPrimitive.content == WinRTXamlDeclarations.fingerprint(declarations) &&
+                WinRTXamlDeclarations.canonicalText(actual) == WinRTXamlDeclarations.canonicalText(declarations)) {
+                "XAML final plan does not match declaration input"
+            }
+            return XamlCompilation(declarations, null)
+        }
         val output = Path.of(requireNotNull(value("xamlSemanticOutput")))
         val references = requireNotNull(value("xamlReferences")).split(File.pathSeparator).map(Path::of)
         val metadataIndex = Path.of(requireNotNull(configuration.get(KotlinWinRTCommandLineProcessor.METADATA_INDEX_KEY)))
-        return XamlSemanticExport(declarationPath, output, references, metadataIndex)
+        return XamlCompilation(declarations, XamlSemanticExport(declarationPath, output, references, metadataIndex))
     }
 }
+
+internal data class XamlCompilation(val declarations: WinRTXamlDeclarationIndex, val semanticExport: IrGenerationExtension?)
 
 @OptIn(UnsafeDuringIrConstructionAPI::class)
 private class XamlSemanticExport(

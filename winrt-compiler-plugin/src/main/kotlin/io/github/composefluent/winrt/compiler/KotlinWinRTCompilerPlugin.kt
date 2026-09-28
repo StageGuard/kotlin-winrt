@@ -1,6 +1,9 @@
 package io.github.composefluent.winrt.compiler
 
 import io.github.composefluent.winrt.compiler.xaml.XamlSemanticOptions
+import io.github.composefluent.winrt.compiler.xaml.XamlFirRegistrar
+import io.github.composefluent.winrt.compiler.xaml.XamlPageBodies
+import org.jetbrains.kotlin.fir.extensions.FirExtensionRegistrarAdapter
 
 import io.github.composefluent.winrt.compiler.callsites.WinRTProjectionSupportLayout
 import io.github.composefluent.winrt.compiler.callsites.lowering.lowerWinRTProjectionCallSites
@@ -259,10 +262,14 @@ class KotlinWinRTCompilerPluginRegistrar : CompilerPluginRegistrar() {
     override val supportsK2: Boolean = true
 
     override fun ExtensionStorage.registerExtensions(configuration: CompilerConfiguration) {
-        XamlSemanticOptions.extension(configuration)?.let {
-            // Isolated semantic pass: these binaries are never runtime or packaging inputs.
-            IrGenerationExtension.registerExtension(it)
-            return
+        XamlSemanticOptions.compilation(configuration)?.let { xaml ->
+            FirExtensionRegistrarAdapter.registerExtension(XamlFirRegistrar(xaml.declarations))
+            IrGenerationExtension.registerExtension(XamlPageBodies(xaml.declarations, xaml.semanticExport != null))
+            xaml.semanticExport?.let {
+                // Isolated semantic pass: these binaries are never runtime or packaging inputs.
+                IrGenerationExtension.registerExtension(it)
+                return
+            }
         }
         IrGenerationExtension.registerExtension(
             KotlinWinRTIrGenerationExtension(
