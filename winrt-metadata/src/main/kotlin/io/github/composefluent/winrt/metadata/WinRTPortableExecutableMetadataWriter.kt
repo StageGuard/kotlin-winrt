@@ -18,9 +18,10 @@ object WinRTPortableExecutableMetadataWriter {
         assemblyName: String,
         runtimeClasses: List<WinRTAuthoredRuntimeClassDescriptor>,
         outputFile: Path,
+        externalTypeAssemblies: Map<String, String>? = null,
     ) {
         Files.createDirectories(outputFile.parent)
-        writeIfChanged(outputFile, WinmdBuilder(assemblyName, runtimeClasses).build())
+        writeIfChanged(outputFile, WinmdBuilder(assemblyName, runtimeClasses, externalTypeAssemblies = externalTypeAssemblies).build())
     }
 
     fun writeProjectionFixtureWinmd(
@@ -49,6 +50,7 @@ private class WinmdBuilder(
     private val assemblyName: String,
     private val runtimeClasses: List<WinRTAuthoredRuntimeClassDescriptor>,
     private val interfaces: List<WinRTPortableExecutableInterfaceDescriptor> = emptyList(),
+    private val externalTypeAssemblies: Map<String, String>? = null,
 ) {
     private val strings = IndexedStringHeap()
     private val blobs = IndexedBlobHeap()
@@ -139,6 +141,13 @@ private class WinmdBuilder(
         localTypeDefRowIds: Map<String, Int>,
     ): ByteArray {
         val writer = BinaryWriter()
+        // CsWinRT WinRTTypeWriter.GetTypeReference owns one AssemblyRef per declaring assembly.
+        val typeAssemblies = typeRefs.associate { ref -> ref.qualifiedName to
+            if (ref.namespace == "System") "mscorlib" else externalTypeAssemblies?.let {
+                requireNotNull(it[ref.qualifiedName]) { "Missing declaring assembly for ${ref.qualifiedName}" }
+            }
+        }
+        val assemblyRefs = typeAssemblies.values.filterNotNull().distinct().sorted()
         val attributeMemberRefs = attributeMemberRefs(typeRefs)
         val customAttributes = typeDefCustomAttributes(attributeMemberRefs, localTypeDefRowIds) +
             interfaceImplCustomAttributes(attributeMemberRefs, localTypeDefRowIds)
@@ -148,7 +157,8 @@ private class WinmdBuilder(
             (if (interfaceImplCount() > 0) 1L shl TABLE_INTERFACE_IMPL else 0L) or
             (if (attributeMemberRefs.isEmpty()) 0L else 1L shl TABLE_MEMBER_REF) or
             (if (customAttributes.isEmpty()) 0L else 1L shl TABLE_CUSTOM_ATTRIBUTE) or
-            (1L shl TABLE_ASSEMBLY)
+            (1L shl TABLE_ASSEMBLY) or
+            (if (assemblyRefs.isEmpty()) 0L else 1L shl TABLE_ASSEMBLY_REF)
         writer.int32(0)
         writer.int8(2)
         writer.int8(0)
@@ -171,13 +181,15 @@ private class WinmdBuilder(
             writer.int32(customAttributes.size)
         }
         writer.int32(1)
+        if (assemblyRefs.isNotEmpty()) writer.int32(assemblyRefs.size)
         writer.int16(0)
         writer.index(moduleName)
         writer.index(1)
         writer.index(0)
         writer.index(0)
         typeRefs.forEach { typeRef ->
-            writer.index(0)
+            val assembly = typeAssemblies[typeRef.qualifiedName]
+            writer.index(if (assembly == null) 0 else ((assemblyRefs.indexOf(assembly) + 1) shl 2) or 2)
             writer.index(strings.index(typeRef.name))
             writer.index(strings.index(typeRef.namespace))
         }
@@ -241,6 +253,16 @@ private class WinmdBuilder(
         writer.index(0)
         writer.index(assemblyNameIndex)
         writer.index(0)
+        assemblyRefs.forEach { assembly ->
+            repeat(4) { writer.int16(255) }
+            writer.int32(if (assembly == "mscorlib") 0 else 0x00000200)
+            writer.index(if (assembly == "mscorlib") blobs.index(byteArrayOf(
+                0xb7.toByte(), 0x7a, 0x5c, 0x56, 0x19, 0x34, 0xe0.toByte(), 0x89.toByte(),
+            )) else 0)
+            writer.index(strings.index(assembly))
+            writer.index(0)
+            writer.index(0)
+        }
         return writer.toByteArray()
     }
 
@@ -459,7 +481,9 @@ private class WinmdBuilder(
         writer.int16(1)
         writer.int16(1)
         writer.int32(0)
-        writer.int32(version.size)
+        // ECMA-335 II.24.2.1: Length includes the padding, not just the UTF-8
+        // text and terminator. CsWinRT delegates this layout to MetadataBuilder.
+        writer.int32(align(version.size, 4))
         writer.bytes(version)
         writer.padTo(16 + align(version.size, 4))
         writer.int16(0)
@@ -579,6 +603,7 @@ private class WinmdBuilder(
         const val TABLE_MEMBER_REF = 10
         const val TABLE_CUSTOM_ATTRIBUTE = 12
         const val TABLE_ASSEMBLY = 0x20
+        const val TABLE_ASSEMBLY_REF = 0x23
         const val CODED_TYPE_DEF_OR_REF_TAG_BITS = 2
         const val CODED_TYPE_DEF_OR_REF_TYPE_DEF = 0
         const val CODED_TYPE_DEF_OR_REF_TYPE_REF = 1
