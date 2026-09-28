@@ -1,5 +1,7 @@
 package io.github.composefluent.winrt.compiler
 
+import io.github.composefluent.winrt.compiler.xaml.XamlSemanticOptions
+
 import io.github.composefluent.winrt.compiler.callsites.WinRTProjectionSupportLayout
 import io.github.composefluent.winrt.compiler.callsites.lowering.lowerWinRTProjectionCallSites
 import io.github.composefluent.winrt.compiler.authoring.IndexedWinRTType
@@ -114,7 +116,7 @@ import java.nio.file.Path
 @OptIn(ExperimentalCompilerApi::class)
 class KotlinWinRTCommandLineProcessor : CommandLineProcessor {
     override val pluginId: String = PLUGIN_ID
-    override val pluginOptions: Collection<AbstractCliOption> = listOf(
+    override val pluginOptions: Collection<AbstractCliOption> = XamlSemanticOptions.options + listOf(
         CliOption(
             optionName = "metadataIndex",
             valueDescription = "<path>",
@@ -194,6 +196,7 @@ class KotlinWinRTCommandLineProcessor : CommandLineProcessor {
         value: String,
         configuration: CompilerConfiguration,
     ) {
+        if (XamlSemanticOptions.process(option.optionName, value, configuration)) return
         if (option.optionName == "metadataIndex") {
             configuration.put(METADATA_INDEX_KEY, value)
         } else if (option.optionName == "typeIndexOutput") {
@@ -256,6 +259,11 @@ class KotlinWinRTCompilerPluginRegistrar : CompilerPluginRegistrar() {
     override val supportsK2: Boolean = true
 
     override fun ExtensionStorage.registerExtensions(configuration: CompilerConfiguration) {
+        XamlSemanticOptions.extension(configuration)?.let {
+            // Isolated semantic pass: these binaries are never runtime or packaging inputs.
+            IrGenerationExtension.registerExtension(it)
+            return
+        }
         IrGenerationExtension.registerExtension(
             KotlinWinRTIrGenerationExtension(
                 metadataIndexPath = configuration.get(KotlinWinRTCommandLineProcessor.METADATA_INDEX_KEY),

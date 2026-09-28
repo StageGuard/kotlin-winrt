@@ -1,0 +1,114 @@
+package io.github.composefluent.winrt.compiler.xaml
+
+import io.github.composefluent.winrt.compiler.KotlinWinRTCommandLineProcessor
+import io.github.composefluent.winrt.compiler.authoring.readAuthoringMetadataIndex
+import io.github.composefluent.winrt.compiler.authoring.resolveIndexedWinRTTypeByProjectedName
+import io.github.composefluent.winrt.metadata.*
+import kotlinx.serialization.json.*
+import org.jetbrains.kotlin.backend.common.extensions.IrGenerationExtension
+import org.jetbrains.kotlin.backend.common.extensions.IrPluginContext
+import org.jetbrains.kotlin.compiler.plugin.CliOption
+import org.jetbrains.kotlin.compiler.plugin.ExperimentalCompilerApi
+import org.jetbrains.kotlin.config.CompilerConfiguration
+import org.jetbrains.kotlin.config.CompilerConfigurationKey
+import org.jetbrains.kotlin.ir.declarations.*
+import org.jetbrains.kotlin.ir.symbols.UnsafeDuringIrConstructionAPI
+import org.jetbrains.kotlin.ir.types.classFqName
+import org.jetbrains.kotlin.ir.util.fqNameWhenAvailable
+import java.io.File
+import java.nio.file.Files
+import java.nio.file.Path
+
+/** Private Kotlin handlers stay in this compile-time sidecar, never in the public WinMD ABI. */
+@OptIn(ExperimentalCompilerApi::class)
+internal object XamlSemanticOptions {
+    private val keys = listOf("xamlDeclarations", "xamlSemanticOutput", "xamlReferences")
+        .associateWith { CompilerConfigurationKey<String>(it) }
+    val options = keys.keys.map { CliOption(it, "<path>", "Kotlin XAML semantic compilation $it", false) }
+
+    fun process(name: String, value: String, configuration: CompilerConfiguration): Boolean {
+        val key = keys[name] ?: return false
+        configuration.put(key, value)
+        return true
+    }
+
+    fun extension(configuration: CompilerConfiguration): IrGenerationExtension? {
+        fun value(name: String) = configuration.get(keys.getValue(name))
+        if (keys.keys.all { value(it) == null }) return null
+        val declarationPath = Path.of(requireNotNull(value("xamlDeclarations")))
+        val output = Path.of(requireNotNull(value("xamlSemanticOutput")))
+        val references = requireNotNull(value("xamlReferences")).split(File.pathSeparator).map(Path::of)
+        val metadataIndex = Path.of(requireNotNull(configuration.get(KotlinWinRTCommandLineProcessor.METADATA_INDEX_KEY)))
+        return XamlSemanticExport(declarationPath, output, references, metadataIndex)
+    }
+}
+
+@OptIn(UnsafeDuringIrConstructionAPI::class)
+private class XamlSemanticExport(
+    private val declarationPath: Path,
+    private val output: Path,
+    private val references: List<Path>,
+    private val metadataIndex: Path,
+) : IrGenerationExtension {
+    override fun generate(moduleFragment: IrModuleFragment, pluginContext: IrPluginContext) {
+        Files.deleteIfExists(output)
+        Files.deleteIfExists(output.resolveSibling("KotlinXaml.winmd"))
+        val declarations = WinRTXamlDeclarations.parse(Files.readString(declarationPath))
+        val types = readAuthoringMetadataIndex(metadataIndex)
+        val classes = moduleFragment.files.flatMap { file ->
+            file.declarations.filterIsInstance<IrClass>().map { it to file }
+        }
+        val authored = mutableListOf<WinRTAuthoredRuntimeClassDescriptor>()
+        val pages = declarations.pages.sortedBy { it.className }.map { page ->
+            val (klass, file) = requireNotNull(classes.singleOrNull { it.first.fqNameWhenAvailable?.asString() == page.className }) {
+                "XAML ${page.resourcePath}: missing top-level Kotlin class ${page.className}"
+            }
+            val source = Path.of(file.fileEntry.name)
+            require(source.fileName.toString() == page.className.substringAfterLast('.') + ".kt" &&
+                Files.isRegularFile(source.resolveSibling(source.fileName.toString().removeSuffix(".kt") + ".xaml"))) {
+                "XAML ${page.className}: requires same-directory, same-basename .kt and .xaml files"
+            }
+            require(klass.superTypes.any { type -> type.classFqName?.asString()?.let {
+                resolveIndexedWinRTTypeByProjectedName(it, types)?.qualifiedName
+            } == page.baseTypeName }) { "XAML ${page.className}: expected direct base ${page.baseTypeName}" }
+            authored += WinRTAuthoredRuntimeClassDescriptor(page.className, page.baseTypeName,
+                listOf("Microsoft.UI.Xaml.Markup.IComponentConnector"), isActivatable = false)
+            val handlers = page.connections.flatMap { it.events }.map { it.handlerName }.distinct().sorted().map { name ->
+                val handler = requireNotNull(klass.declarations.filterIsInstance<IrSimpleFunction>().singleOrNull { it.name.asString() == name }) {
+                    "XAML ${page.className}: missing or overloaded handler $name"
+                }
+                require(!handler.isSuspend && handler.typeParameters.isEmpty() &&
+                    handler.parameters.none { it.kind == IrParameterKind.ExtensionReceiver || it.kind == IrParameterKind.Context } &&
+                    handler.dispatchReceiverParameter != null) { "XAML ${page.className}.$name: expected ordinary instance method" }
+                require(handler.returnType.classFqName?.asString() == "kotlin.Unit") {
+                    "XAML ${page.className}.$name: handler must return Unit"
+                }
+                val parameters = handler.parameters.filter { it.kind == IrParameterKind.Regular }.map { parameter ->
+                    require(parameter.varargElementType == null) { "XAML handler parameters cannot be vararg" }
+                    val kotlinName = requireNotNull(parameter.type.classFqName?.asString()) { "Unresolved XAML handler parameter" }
+                    if (kotlinName == "kotlin.Any") "System.Object" else
+                        requireNotNull(resolveIndexedWinRTTypeByProjectedName(kotlinName, types)?.qualifiedName) {
+                            "XAML ${page.className}.$name: unsupported parameter type $kotlinName"
+                        }
+                }
+                buildJsonObject {
+                    put("Name", name); put("ReturnTypeName", "System.Void")
+                    put("ParameterTypeNames", JsonArray(parameters.map(::JsonPrimitive)))
+                }
+            }
+            buildJsonObject { put("ClassName", page.className); put("Handlers", JsonArray(handlers)) }
+        }
+        val symbols = buildJsonObject {
+            put("SchemaVersion", 1)
+            put("DeclarationFingerprint", WinRTXamlDeclarations.fingerprint(declarations))
+            put("Declarations", Json.parseToJsonElement(WinRTXamlDeclarations.canonicalText(declarations)))
+            put("Pages", JsonArray(pages))
+        }
+        Files.createDirectories(output.toAbsolutePath().parent)
+        WinRTPortableExecutableMetadataWriter.writeAuthoredWinmd(
+            "KotlinXaml", authored, output.resolveSibling("KotlinXaml.winmd"),
+            WinRTMetadataLoader.loadTypeAssemblyNames(references),
+        )
+        Files.writeString(output, symbols.toString())
+    }
+}
