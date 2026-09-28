@@ -12,6 +12,11 @@ internal fun WinRTEventDefinition.withNullableEventContract(ownerTypeName: Strin
 }
 
 internal fun WinRTMethodDefinition.withNullableReturnContract(ownerTypeName: String): WinRTMethodDefinition {
+    // XamlCompiler CSharpPagePass2.tt returns null when there is no binding scope.
+    // CsWinRT MarshalInterface<T>.FromAbi preserves that null across the ABI.
+    if (ownerTypeName == "Microsoft.UI.Xaml.Markup.IComponentConnector" && name == "GetBindingConnector") {
+        return copy(returnTypeName = returnTypeName.removeSuffix("?") + "?")
+    }
     // Picker cancellation completes successfully with a null result. CsWinRT's
     // MarshalInterface<T>.FromAbi preserves null; the operation itself is nonnull.
     val pickerNamespace = ownerTypeName.substringBeforeLast('.')
