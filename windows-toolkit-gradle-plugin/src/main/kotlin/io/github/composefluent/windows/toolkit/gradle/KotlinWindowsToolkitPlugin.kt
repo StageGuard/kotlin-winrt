@@ -2338,9 +2338,7 @@ private fun configureWinRTGeneration(
         task.authoringScannerClasspath.from(kotlinWinRTAuthoringScannerRuntimeClasspath(project))
         task.sourceRoots.from(authoringSourceRoots)
         task.prepareMetadataOnly.set(prepareMetadataOnly)
-        val metadataModelCacheDirectory = project.layout.projectDirectory.dir(".gradle/kotlin-winrt/metadata-models")
-        Files.createDirectories(metadataModelCacheDirectory.asFile.toPath())
-        task.metadataModelCacheDirectory.set(metadataModelCacheDirectory)
+        task.metadataModelCacheDirectory.set(sharedWinRTCacheDirectory(project, "metadata-models").toFile())
     }
 
     val prepareMetadataTask = project.tasks.register(
@@ -3786,14 +3784,19 @@ private fun explicitMetadataInputFiles(inputs: List<String>): List<File> =
     }.filter { it.exists() }
 
 private fun allNuGetPackageSpecs(extension: PackageReferencesConfiguration): List<String> =
-    extension.nugetPackages.map { pkg ->
+    (extension.nugetPackages.map { pkg ->
         "${pkg.packageId}@${pkg.version.get()}"
-    }
+    } + metadataNuGetPackageSpecs(extension)).distinct()
 
 private fun projectionNuGetPackageSpecs(extension: PackageReferencesConfiguration): List<String> =
-    extension.nugetPackages
+    (extension.nugetPackages
         .filter { pkg -> pkg.generateProjection }
-        .map { pkg -> "${pkg.packageId}@${pkg.version.get()}" }
+        .map { pkg -> "${pkg.packageId}@${pkg.version.get()}" } + metadataNuGetPackageSpecs(extension)).distinct()
+
+private fun metadataNuGetPackageSpecs(extension: PackageReferencesConfiguration): List<String> =
+    extension.metadataInputs.get().map(WinRTMetadataSource::parse)
+        .filterIsInstance<WinRTMetadataSource.NuGetPackageReference>()
+        .map { source -> "${source.packageId}@${source.version}" }
 
 private fun kotlinWinRTLocalGenerationRequired(
     project: Project,

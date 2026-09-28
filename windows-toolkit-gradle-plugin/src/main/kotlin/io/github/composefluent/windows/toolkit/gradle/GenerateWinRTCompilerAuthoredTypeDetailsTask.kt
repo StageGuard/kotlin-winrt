@@ -200,7 +200,7 @@ abstract class GenerateWinRTCompilerAuthoredTypeDetailsTask @Inject constructor(
         } else {
             emptyList()
         }
-        val winAppLockFiles = winAppRestoreLockFiles.files.filter(java.io.File::isFile)
+        val winAppLockFiles = projectionRestoreLockFiles(winAppRestoreLockFiles.files, restoreNuGetPackages.get())
         val nugetSources = if (winAppLockFiles.isNotEmpty()) {
             readWinAppProjectionWinmdFiles(
                 lockFiles = winAppLockFiles,
@@ -215,7 +215,9 @@ abstract class GenerateWinRTCompilerAuthoredTypeDetailsTask @Inject constructor(
             outputRoot = temporaryDir.toPath().resolve("dependency-authored-metadata"),
         )
             .map(WinRTMetadataSource::path)
-        return explicitSources + sdkSource + nugetSources + dependencyAuthoredMetadataSources
+        return explicitSources.filterNot {
+            it is WinRTMetadataSource.NuGetPackageReference && winAppLockFiles.isNotEmpty()
+        } + sdkSource + nugetSources + dependencyAuthoredMetadataSources
     }
 
     private fun legacyNuGetMetadataSources(packageSpecs: List<String>): List<WinRTMetadataSource> {

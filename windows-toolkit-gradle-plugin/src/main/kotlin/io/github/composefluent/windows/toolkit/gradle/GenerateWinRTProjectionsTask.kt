@@ -132,16 +132,12 @@ abstract class GenerateWinRTProjectionsTask : DefaultTask() {
     @get:Input
     abstract val prepareMetadataOnly: Property<Boolean>
 
-    /** Persistent parsed-model cache; it is intentionally outside Gradle's build cleanup. */
-    @get:InputDirectory
-    @get:Optional
-    @get:PathSensitive(PathSensitivity.RELATIVE)
+    /** Shared acceleration state, not a semantic input or a task-owned output. */
+    @get:Internal
     abstract val metadataModelCacheDirectory: DirectoryProperty
 
     /** Immutable imported source entry prepared during configuration completion when possible. */
-    @get:InputDirectory
-    @get:Optional
-    @get:PathSensitive(PathSensitivity.RELATIVE)
+    @get:Internal
     abstract val preparedStaticSourceDirectory: DirectoryProperty
 
     @get:Input
@@ -425,10 +421,7 @@ internal abstract class GenerateWinRTProjectionsWorkAction : WorkAction<Generate
         val hasPreparedStaticSources = parameters.preparedStaticSourceDirectory.orNull
             ?.asFile
             ?.toPath()
-            ?.takeIf(::isPreparedStaticSourceValid)
-            ?.also { preparedRoot ->
-                materializePreparedStaticSources(preparedRoot, generatedRoot)
-            } != null
+            ?.let { preparedRoot -> materializeCachedPreparedSources(preparedRoot, generatedRoot) } == true
         KotlinWinRTAuthoringCandidateFile.write(
             generatedRoot.resolve("kotlin-winrt-authoring/authored-candidates.tsv"),
             authoringCandidates,
@@ -603,7 +596,9 @@ internal abstract class GenerateWinRTProjectionsWorkAction : WorkAction<Generate
         } else {
             emptyList()
         }
-        val winAppLockFiles = parameters.winAppRestoreLockFiles.files.filter(File::isFile)
+        val winAppLockFiles = projectionRestoreLockFiles(
+            parameters.winAppRestoreLockFiles.files, parameters.restoreNuGetPackages.get(),
+        )
         val nugetSources = if (winAppLockFiles.isNotEmpty()) {
             readWinAppProjectionWinmdFiles(
                 lockFiles = winAppLockFiles,
@@ -631,7 +626,9 @@ internal abstract class GenerateWinRTProjectionsWorkAction : WorkAction<Generate
             outputRoot = parameters.workDirectory.get().asFile.toPath().resolve("dependency-authored-metadata"),
         )
             .map(WinRTMetadataSource::path)
-        val sources = explicitSources + sdkSource + nugetSources + dependencyAuthoredMetadataSources
+        val sources = explicitSources.filterNot {
+            it is WinRTMetadataSource.NuGetPackageReference && winAppLockFiles.isNotEmpty()
+        } + sdkSource + nugetSources + dependencyAuthoredMetadataSources
         return sources
     }
 

@@ -3446,76 +3446,25 @@ class WindowsToolkitPluginTest {
     }
 
     @Test
-    fun projected_nuget_static_sources_restore_missing_packages_during_configuration() {
-        assumeTrue(System.getProperty("os.name").contains("Windows", ignoreCase = true))
-        val root = Files.createTempDirectory("kotlin-winrt-prepared-nuget-restore-test-")
-        val project = ProjectBuilder.builder()
-            .withName("prepared-static-nuget-restore-test")
-            .withProjectDir(root.toFile())
-            .build()
+    fun projected_nuget_restoration_is_deferred_to_winapp_tasks() {
+        // CsWinRTPrepareProjection consumes resolved package inputs; it does not own restore.
+        val project = ProjectBuilder.builder().withName("deferred-nuget").build()
         project.pluginManager.apply(KotlinWindowsToolkitPlugin::class.java)
-        val packageId = "Kotlin.WinRT.Config.Restore.Probe"
-        val packageVersion = "1.0.0"
-        val fixtureWinmd = root.resolve("fixture/Sample.winmd")
-        WinRTPortableExecutableMetadataWriter.writeProjectionFixtureWinmd(
-            assemblyName = "Sample",
-            interfaces = listOf(
-                WinRTPortableExecutableInterfaceDescriptor(
-                    interfaceName = "Sample.IProbe",
-                    iid = "00000000-0000-0000-0000-000000000001",
-                ),
-            ),
-            runtimeClasses = emptyList(),
-            outputFile = fixtureWinmd,
-        )
-        val invocationLog = root.resolve("nuget-invocation.txt")
-        val nugetExecutable = root.resolve("nuget.cmd")
-        Files.writeString(
-            nugetExecutable,
-            """
-            @echo off
-            setlocal
-            >>"$invocationLog" echo args=%*
-            set "OUTPUT="
-            :parse
-            if "%~1"=="" goto install
-            if /I "%~1"=="-OutputDirectory" (
-              set "OUTPUT=%~2"
-              shift
-            )
-            shift
-            goto parse
-            :install
-            if not defined OUTPUT exit /b 1
-            mkdir "%OUTPUT%\${packageId.lowercase()}\$packageVersion\metadata" 2>nul
-            copy /Y "$fixtureWinmd" "%OUTPUT%\${packageId.lowercase()}\$packageVersion\metadata\Sample.winmd" >nul
-            exit /b %ERRORLEVEL%
-            """.trimIndent(),
-        )
         val extension = project.extensions.getByType(WindowsExtension::class.java)
-        extension.packageReferences.restoreNuGetPackages.set(true)
-        extension.packageReferences.useNuGetCliGlobalPackages.set(false)
-        extension.packageReferences.nugetExecutable.set(nugetExecutable.toString())
-        extension.packageReferences.nugetPackage(packageId, packageVersion)
+        extension.packageReferences.nugetPackage("Sample.Package", "1.0.0")
         extension.packageReferences.type("Sample.IProbe")
-
-        val prepared = prepareWinRTStaticProjectionSources(
-            project = project,
-            extension = extension.packageReferences,
-            dependencyIdentityFiles = emptyList(),
-            generatedOutputDirectory = project.layout.buildDirectory.dir("prepared-output"),
-            supportOwnerIdentity = "prepared-static-nuget-restore-test.jar",
-        )
-
-        assertTrue(prepared != null)
-        assertTrue(Files.readString(invocationLog).contains("install $packageId"))
-        assertTrue(
-            Files.isRegularFile(
-                root.resolve(
-                    ".gradle/kotlin-winrt/prepared-nuget/${packageId.lowercase()}/$packageVersion/metadata/Sample.winmd",
-                ),
-            ),
-        )
+        extension.packageReferences.nugetExecutable.set("must-not-be-invoked")
+        extension.metadataInputs.add("nuget:Sample.Raw@2.0.0")
+        val generation = project.tasks.named("generateWinRTProjections", GenerateWinRTProjectionsTask::class.java).get()
+        val restore = project.tasks.named("restoreWinAppDependencies").get()
+        val ideImport = project.tasks.register("prepareKotlinIdeaImport").get()
+        assertTrue(generation.taskDependencies.getDependencies(generation).contains(restore))
+        assertTrue(ideImport.taskDependencies.getDependencies(ideImport).contains(generation))
+        assertTrue(generation.nugetPackages.get().contains("Sample.Raw@2.0.0"))
+        assertTrue((restore as RestoreWinAppDependenciesTask).nugetPackages.get().contains("Sample.Raw@2.0.0"))
+        (project as org.gradle.api.internal.project.ProjectInternal).evaluate()
+        assertFalse(Files.exists(project.projectDir.toPath().resolve(".gradle/kotlin-winrt/prepared-nuget")))
+        assertFalse(generation.preparedStaticSourceDirectory.isPresent)
     }
 
     @Test
@@ -3682,8 +3631,8 @@ class WindowsToolkitPluginTest {
         }
         configure(true)
         val offline = GradleRunner.create().withProjectDir(projectDir.toFile()).withPluginClasspath()
-            .withArguments("help", "--offline", "--stacktrace").buildAndFail()
-        assertTrue(offline.output, offline.output.contains("Projected NuGet packages are missing while Gradle is offline"))
+            .withArguments("help", "--offline", "--stacktrace").build()
+        assertEquals(TaskOutcome.SUCCESS, offline.task(":help")?.outcome)
         configure(false)
         val disabled = GradleRunner.create().withProjectDir(projectDir.toFile()).withPluginClasspath()
             .withArguments("help", "--stacktrace").buildAndFail()
@@ -3692,10 +3641,10 @@ class WindowsToolkitPluginTest {
     }
 
     @Test
-    fun configuration_cache_sync_restores_missing_nuget_and_repairs_deleted_sources() {
+    fun configuration_cache_sync_repairs_deleted_readonly_nuget_sources() {
         assumeTrue(System.getProperty("os.name").contains("Windows", ignoreCase = true))
         val projectDir = Files.createTempDirectory("kotlin-winrt-nuget-sync-preparation-test-")
-        val packageRoot = projectDir.resolve("fixture/sample.package/1.0.0")
+        val packageRoot = projectDir.resolve("nuget-cache/sample.package/1.0.0")
         WinRTPortableExecutableMetadataWriter.writeProjectionFixtureWinmd(
             assemblyName = "Sample",
             interfaces = listOf(
@@ -3707,24 +3656,6 @@ class WindowsToolkitPluginTest {
             runtimeClasses = emptyList(),
             outputFile = packageRoot.resolve("metadata/Sample.winmd"),
         )
-        Files.writeString(projectDir.resolve("nuget.cmd"), """
-            @echo off
-            setlocal
-            set "OUTPUT="
-            :parse
-            if "%~1"=="" goto install
-            if /I "%~1"=="-OutputDirectory" (
-              set "OUTPUT=%~2"
-              shift
-            )
-            shift
-            goto parse
-            :install
-            if not defined OUTPUT exit /b 1
-            mkdir "%OUTPUT%\sample.package\1.0.0\metadata" 2>nul
-            copy /Y "$packageRoot\metadata\Sample.winmd" "%OUTPUT%\sample.package\1.0.0\metadata\Sample.winmd" >nul
-            exit /b %ERRORLEVEL%
-        """.trimIndent())
         writeMinimalGradleFixture(projectDir, "kotlin-winrt-nuget-sync-preparation-test")
         writeGradleFile(
             projectDir.resolve("build.gradle"),
@@ -3737,8 +3668,8 @@ class WindowsToolkitPluginTest {
                 packageReferences {
                     nugetGlobalPackagesRoots.add(file("nuget-cache").absolutePath)
                     useNuGetCliGlobalPackages.set(false)
-                    restoreNuGetPackages.set(true)
-                    nugetExecutable.set(file("nuget.cmd").absolutePath)
+                    restoreNuGetPackages.set(false)
+                    nugetExecutable.set("must-not-be-invoked")
                     nugetPackage "Sample.Package", "1.0.0"
                     type "Sample.IProbe"
                 }
@@ -3771,8 +3702,9 @@ class WindowsToolkitPluginTest {
             .withArguments("help", "--configuration-cache", "--stacktrace").build()
         assertTrue(repeat.output, repeat.output.contains("Reusing configuration cache"))
         Files.delete(generated.first())
-        GradleRunner.create().withProjectDir(projectDir.toFile()).withPluginClasspath()
+        val repaired = GradleRunner.create().withProjectDir(projectDir.toFile()).withPluginClasspath()
             .withArguments("help", "--configuration-cache", "--stacktrace").build()
+        assertTrue(repaired.output, repaired.output.contains("Reusing configuration cache"))
         expected.forEach { (path, contents) -> assertEquals(contents, Files.readString(path)) }
     }
 

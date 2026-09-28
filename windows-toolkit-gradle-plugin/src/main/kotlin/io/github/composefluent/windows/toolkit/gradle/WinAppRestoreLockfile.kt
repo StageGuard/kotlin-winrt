@@ -71,6 +71,17 @@ internal object WinAppRestoreLockfileReader {
     }
 }
 
+/** A missing task-produced lock must fail rather than activate an unrelated NuGet downloader. */
+internal fun projectionRestoreLockFiles(files: Iterable<File>, restoreEnabled: Boolean): List<File> =
+    files.toList().also { locks ->
+        if (restoreEnabled) {
+            val missing = locks.filterNot(File::isFile)
+            if (missing.isNotEmpty()) {
+                throw GradleException("WinApp restore lockfiles are missing: ${missing.joinToString()}. Run restoreWinAppDependencies first.")
+            }
+        }
+    }.filter(File::isFile)
+
 internal fun readWinAppProjectionWinmdFiles(
     lockFiles: Iterable<File>,
     rootPackageSpecs: Iterable<String>,

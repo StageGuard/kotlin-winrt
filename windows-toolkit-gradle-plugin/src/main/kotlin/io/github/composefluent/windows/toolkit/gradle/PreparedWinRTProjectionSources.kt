@@ -6,7 +6,6 @@ import io.github.composefluent.winrt.metadata.WinRTMetadataSource
 import io.github.composefluent.winrt.metadata.WinRTMetadataSourceResolver
 import io.github.composefluent.winrt.projections.generator.KotlinProjectionGenerator
 import io.github.composefluent.winrt.runtime.Guid
-import org.gradle.api.GradleException
 import org.gradle.api.Project
 import org.gradle.api.file.Directory
 import org.gradle.api.provider.Provider
@@ -61,54 +60,23 @@ internal fun prepareWinRTStaticProjectionSources(
         "${source.packageId}@${source.version}"
     }
     val packageSpecs = (projectionPackageSpecs + explicitNuGetSpecs).distinct()
-    val persistentNuGetRoot = project.layout.projectDirectory
-        .dir(".gradle/kotlin-winrt/prepared-nuget")
-        .asFile
-        .toPath()
+    // Like CsWinRTPrepareProjection's resolved package inputs, restored NuGet metadata is
+    // task-produced. IDE preparation already depends on generateWinRTProjections, which
+    // depends on WinApp restore. Never introduce a second downloader during configuration.
+    if (packageSpecs.isNotEmpty() && extension.restoreNuGetPackages.get()) {
+        throw StaticPreparationUnavailable("NuGet metadata requires the restoreWinAppDependencies task")
+    }
     val explicitNuGetRoots = extension.nugetGlobalPackagesRoots.get().map(Path::of) +
         explicitNuGetReferences.flatMap { source -> source.globalPackagesRoots }
-    val configuredNuGetRoots = explicitNuGetRoots + listOf(persistentNuGetRoot)
-    fun nuGetRoots(lookupOnly: Boolean, specs: List<String> = emptyList()): List<Path> =
-        project.providers.of(PreparedNuGetRootsValueSource::class.java) { spec ->
-            spec.parameters.executable.set(extension.nugetExecutable)
-            spec.parameters.cliVersion.set(extension.nugetCliVersion)
-            spec.parameters.cliCacheDirectory.set(project.gradle.gradleUserHomeDir.toPath().resolve("caches/kotlin-winrt/nuget-cli").toString())
-            spec.parameters.scratchDirectory.set(project.layout.projectDirectory.dir(".gradle/kotlin-winrt/nuget-scratch").asFile.path)
-            spec.parameters.installRoot.set(persistentNuGetRoot.toString())
-            spec.parameters.packageSpecs.set(specs)
-            spec.parameters.lookupOnly.set(lookupOnly)
-        }.get().map(Path::of)
     val preparedNuGetSources = if (packageSpecs.isEmpty()) {
         emptyList()
     } else {
-        val packageIdentities = packageSpecs.map(::parseNuGetPackageIdentity)
-        val configuredRootsContainPackages = packageIdentities.all { identity ->
-            isNuGetPackageClosureAvailable(identity, configuredNuGetRoots)
-        }
-        val cliNuGetRoots = if (
-            extension.useNuGetCliGlobalPackages.get() &&
-            !configuredRootsContainPackages &&
-            !project.gradle.startParameter.isOffline
-        ) {
-            nuGetRoots(lookupOnly = true)
-        } else {
-            emptyList()
-        }
         resolveNuGetProjectionMetadataSources(
             packageSpecs = packageSpecs,
-            explicitGlobalPackagesRoots = configuredNuGetRoots,
-            cliGlobalPackagesRoots = cliNuGetRoots,
-            restoreNuGetPackages = extension.restoreNuGetPackages.get(),
-            restoreMissing = { identities ->
-                if (identities.isEmpty()) {
-                    emptyList()
-                } else {
-                    if (project.gradle.startParameter.isOffline) {
-                        throw GradleException("Projected NuGet packages are missing while Gradle is offline: ${identities.joinToString()}")
-                    }
-                    nuGetRoots(lookupOnly = false, specs = identities.map { "${it.normalizedPackageId}@${it.normalizedVersion}" })
-                }
-            },
+            explicitGlobalPackagesRoots = explicitNuGetRoots,
+            cliGlobalPackagesRoots = emptyList(),
+            restoreNuGetPackages = false,
+            restoreMissing = { error("Configuration-time NuGet restore is not supported") },
         )
     }
 
@@ -158,6 +126,7 @@ internal fun prepareWinRTStaticProjectionSources(
     // Only a cold/invalid entry starts a bounded process; warm imports just validate/copy bytes.
     val request = mapOf(
         "entry" to entry.toString(),
+        "output" to generatedOutputDirectory.get().asFile.absolutePath,
         "sources" to effectiveSources.joinToString("\u0000") { source ->
             when (source) {
                 is WinRTMetadataSource.PathSource -> source.path.toAbsolutePath().normalize().toString()
@@ -169,7 +138,7 @@ internal fun prepareWinRTStaticProjectionSources(
             }
         },
         "registryRoots" to registryRootPaths.orEmpty().joinToString("\u0000"),
-        "modelCache" to project.layout.projectDirectory.dir(".gradle/kotlin-winrt/metadata-models").asFile.path,
+        "modelCache" to sharedWinRTCacheDirectory(project, "metadata-models").toString(),
         "identities" to identityFiles.joinToString("\u0000") { it.absolutePath },
         "includeNamespaces" to extension.includeNamespaces.get().joinToString("\u0000"),
         "includeTypes" to extension.includeTypes.get().joinToString("\u0000"),
@@ -211,7 +180,6 @@ internal fun prepareWinRTStaticProjectionSources(
             project.files(java.io.File(Project::class.java.protectionDomain.codeSource.location.toURI()))
         })
     }.get()
-    materializePreparedStaticSources(sourceRoot, generatedOutputDirectory.get().asFile.toPath())
     return sourceRoot
 }
 

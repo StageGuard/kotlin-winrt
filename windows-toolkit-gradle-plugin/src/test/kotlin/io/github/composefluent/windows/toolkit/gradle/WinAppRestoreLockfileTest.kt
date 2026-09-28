@@ -8,6 +8,20 @@ import java.nio.file.Files
 
 class WinAppRestoreLockfileTest {
     @Test
+    fun missing_managed_restore_lock_does_not_fall_back_to_another_downloader() {
+        val root = Files.createTempDirectory("kotlin-winrt-required-lock-")
+        try {
+            val missing = root.resolve("winmds.lock.json").toFile()
+            val failure = runCatching { projectionRestoreLockFiles(listOf(missing), true) }.exceptionOrNull()
+            assertTrue(failure is GradleException)
+            assertTrue(failure?.message.orEmpty().contains("restoreWinAppDependencies"))
+            assertEquals(emptyList<java.io.File>(), projectionRestoreLockFiles(listOf(missing), false))
+        } finally {
+            Files.delete(root)
+        }
+    }
+
+    @Test
     fun schema_three_lockfile_exposes_resolved_packages_and_winmds() {
         val root = Files.createTempDirectory("kotlin-winrt-winapp-lock-")
         val lockfile = root.resolve("winmds.lock.json")
