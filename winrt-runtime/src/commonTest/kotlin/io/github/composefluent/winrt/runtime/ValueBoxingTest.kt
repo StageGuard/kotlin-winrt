@@ -405,7 +405,7 @@ class ValueBoxingTest {
     }
 
     @Test
-    fun temporary_reference_marshaler_reads_value_and_releases_lean_host() {
+    fun temporary_reference_marshaler_reads_value_and_releases_boxed_host() {
         if (!PlatformRuntime.isWindows) {
             return
         }
@@ -422,8 +422,11 @@ class ValueBoxingTest {
                 IID.NullableInt,
                 preventReleaseOnDispose = true,
             ).use { reference ->
-                assertTrue(reference.queryInterface(IID.IPropertyValue).isFailure)
+                reference.queryInterface(IID.IPropertyValue).getOrThrow().use { queried ->
+                    assertTrue(queried.sameIdentity(reference))
+                }
             }
+            assertEquals(1u, WinRTInspectableComObject.tryProbeReferenceCount(pointer))
             assertEquals(42, WinRTReferenceProjection.fromAbi(pointer, IID.NullableInt))
         } finally {
             marshaler.close()
@@ -432,7 +435,7 @@ class ValueBoxingTest {
     }
 
     @Test
-    fun temporary_reference_array_marshaler_reads_value_and_releases_lean_host() {
+    fun temporary_reference_array_marshaler_reads_value_and_releases_boxed_host() {
         if (!PlatformRuntime.isWindows) {
             return
         }
@@ -450,8 +453,11 @@ class ValueBoxingTest {
                 IID.IReferenceArrayOfString,
                 preventReleaseOnDispose = true,
             ).use { reference ->
-                assertTrue(reference.queryInterface(IID.IPropertyValue).isFailure)
+                reference.queryInterface(IID.IPropertyValue).getOrThrow().use { queried ->
+                    assertTrue(queried.sameIdentity(reference))
+                }
             }
+            assertEquals(1u, WinRTInspectableComObject.tryProbeReferenceCount(pointer))
             val actual = WinRTReferenceArrayProjection.fromAbi(pointer, IID.IReferenceArrayOfString)
             assertEquals(expected.toList(), actual?.toList())
         } finally {

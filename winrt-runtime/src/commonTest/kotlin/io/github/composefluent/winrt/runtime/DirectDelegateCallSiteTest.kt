@@ -46,7 +46,10 @@ class DirectDelegateCallSiteTest {
                     assertFailsWith<WinRTRuntimeException> { passDirectDelegate(receiver, 6, delegate) }
                     fail = false
                     passDirectDelegate(receiver, 6, delegate)
-                    assertEquals(1, delegate.created)
+                    // Each call owns its delegate CCW only for the synchronous ABI call. The
+                    // callback releases its queried interface, so the host is retired before
+                    // the next marshal; the failing invocation must clean up the same way.
+                    assertEquals(3, delegate.created)
                 }
             }
         } finally {

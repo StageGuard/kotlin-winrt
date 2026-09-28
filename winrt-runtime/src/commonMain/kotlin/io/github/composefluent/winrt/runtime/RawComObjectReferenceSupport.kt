@@ -114,7 +114,7 @@ internal class RawComObjectReferenceSupport(
             queriedPointer,
             requestedInterfaceId,
             referenceTrackerHandle,
-            preventReleaseOnDispose || isAggregated,
+            isAggregated,
             isAggregated,
         )
     }
