@@ -34,6 +34,11 @@ abstract class GenerateWinRTAuthoringCandidatesTask @Inject constructor(
     @get:PathSensitive(PathSensitivity.RELATIVE)
     abstract val metadataIndex: RegularFileProperty
 
+    @get:InputFile
+    @get:Optional
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val xamlDeclarations: RegularFileProperty
+
     @get:InputFiles
     @get:Optional
     @get:PathSensitive(PathSensitivity.RELATIVE)
@@ -79,6 +84,10 @@ abstract class GenerateWinRTAuthoringCandidatesTask @Inject constructor(
                         add(metadataIndex.get().asFile.absolutePath)
                         add("--output")
                         add(temporaryOutput.toString())
+                        xamlDeclarations.orNull?.let { declarations ->
+                            add("--xaml-declarations")
+                            add(declarations.asFile.absolutePath)
+                        }
                         roots.forEach { root ->
                             add("--source-root")
                             add(root.toString())

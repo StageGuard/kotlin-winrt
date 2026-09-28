@@ -12,6 +12,7 @@ import io.github.composefluent.winrt.compiler.authoring.projectionPackageToMetad
 import io.github.composefluent.winrt.compiler.authoring.readAuthoringMetadataIndex
 import io.github.composefluent.winrt.compiler.authoring.resolveIndexedWinRTType
 import io.github.composefluent.winrt.compiler.authoring.resolveIndexedWinRTTypeByProjectedName
+import io.github.composefluent.winrt.metadata.WinRTXamlDeclarations
 import org.jetbrains.kotlin.KtNodeTypes
 import org.jetbrains.kotlin.KtSourceFile
 import org.jetbrains.kotlin.cli.jvm.compiler.KotlinCoreApplicationEnvironment
@@ -39,7 +40,27 @@ object KotlinWinRTAuthoringScannerCli {
     fun main(args: Array<String>) {
         val options = CliOptions.parse(args)
         val index = readAuthoringMetadataIndex(options.metadataIndex)
-        val candidates = scan(options.sourceRoots, index)
+        val scanned = scan(options.sourceRoots, index)
+        val pages = options.xamlDeclarations?.let { WinRTXamlDeclarations.parse(it.readText()).pages }.orEmpty()
+        val byName = scanned.associateBy { it.sourceTypeName }
+        val connector = "Microsoft.UI.Xaml.Markup.IComponentConnector"
+        if (pages.isNotEmpty()) {
+            require(index[connector]?.kind == "Interface") { "XAML authoring requires $connector in the metadata index." }
+        }
+        pages.forEach { page ->
+            val candidate = requireNotNull(byName[page.className]) {
+                "XAML class ${page.className} must resolve to an authored Kotlin class."
+            }
+            require(candidate.winRTBaseClassName == page.baseTypeName) {
+                "XAML class ${page.className} requires base ${page.baseTypeName}, found ${candidate.winRTBaseClassName}."
+            }
+        }
+        val pageNames = pages.map { it.className }.toSet()
+        val candidates = scanned.map { candidate ->
+            if (candidate.sourceTypeName in pageNames) candidate.copy(
+                winRTInterfaceNames = (candidate.winRTInterfaceNames + connector).distinct().sorted(),
+            ) else candidate
+        }
         KotlinWinRTAuthoringCandidateFile.write(options.output, candidates)
     }
 
@@ -324,11 +345,13 @@ object KotlinWinRTAuthoringScannerCli {
         val metadataIndex: Path,
         val output: Path,
         val sourceRoots: List<Path>,
+        val xamlDeclarations: Path?,
     ) {
         companion object {
             fun parse(args: Array<String>): CliOptions {
                 var metadataIndex: Path? = null
                 var output: Path? = null
+                var xamlDeclarations: Path? = null
                 val sourceRoots = mutableListOf<Path>()
                 var index = 0
                 while (index < args.size) {
@@ -345,6 +368,10 @@ object KotlinWinRTAuthoringScannerCli {
                             sourceRoots.add(Path.of(argumentValue(args, index)))
                             index += 2
                         }
+                        "--xaml-declarations" -> {
+                            xamlDeclarations = Path.of(argumentValue(args, index))
+                            index += 2
+                        }
                         else -> error("Unknown kotlin-winrt authoring scanner argument: ${args[index]}")
                     }
                 }
@@ -352,6 +379,7 @@ object KotlinWinRTAuthoringScannerCli {
                     metadataIndex = requireNotNull(metadataIndex) { "--metadata-index is required" },
                     output = requireNotNull(output) { "--output is required" },
                     sourceRoots = sourceRoots,
+                    xamlDeclarations = xamlDeclarations,
                 )
             }
 
