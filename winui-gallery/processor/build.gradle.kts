@@ -5,8 +5,8 @@ plugins {
 kotlin { jvmToolchain(25) }
 kotlin.compilerOptions.freeCompilerArgs.add("-Xcontext-parameters")
 sourceSets.main { resources.srcDir("../catalog") }
-sourceSets.main { kotlin.srcDir("../src/commonMain/kotlin/io/github/composefluent/winrt/gallery/code") }
 dependencies {
+    implementation(project(":winui-gallery:code-document"))
     implementation("com.google.devtools.ksp:symbol-processing-api:2.3.10")
     implementation(libs.kotlinx.serialization.json)
     // K2 LightTree syntax parsing; no K1 analysis or binding context.

@@ -31,6 +31,9 @@ kotlin {
     }
     mingwX64 { binaries { executable { entryPoint = "io.github.composefluent.winrt.gallery.main" } } }
     sourceSets {
+        getByName("winuiMain").dependencies {
+            implementation(project(":winui-gallery:code-document"))
+        }
         commonTest.dependencies { implementation(kotlin("test")) }
     }
 }
@@ -49,11 +52,19 @@ dependencies {
 
 // Resolve semantic colors in the same K2 session as the application, on both targets.
 val galleryHighlightingPlugin by configurations.creating { isTransitive = false }
-dependencies { galleryHighlightingPlugin(project(":winui-gallery:processor")) }
+dependencies {
+    galleryHighlightingPlugin(project(":winui-gallery:processor"))
+    galleryHighlightingPlugin(project(mapOf(
+        "path" to ":winui-gallery:code-document",
+        "configuration" to "jvmRuntimeElements",
+    )))
+}
 tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompilationTask<*>>().configureEach {
     if (name == "compileKotlinWinuiJvm" || name == "compileKotlinMingwX64") {
         dependsOn(galleryHighlightingPlugin)
-        compilerOptions.freeCompilerArgs.add(provider { "-Xplugin=${galleryHighlightingPlugin.singleFile.absolutePath}" })
+        compilerOptions.freeCompilerArgs.addAll(provider {
+            galleryHighlightingPlugin.files.sortedBy { it.name }.map { file -> "-Xplugin=${file.absolutePath}" }
+        })
         inputs.files(galleryHighlightingPlugin)
     }
 }

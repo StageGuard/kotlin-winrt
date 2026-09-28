@@ -44,4 +44,5 @@ include(
     ":winrt-samples:winui-kmp-app",
     ":winui-gallery",
     ":winui-gallery:processor",
+    ":winui-gallery:code-document",
 )
