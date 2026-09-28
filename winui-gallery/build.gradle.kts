@@ -4,6 +4,9 @@ plugins {
     id("com.google.devtools.ksp") version "2.3.10"
 }
 
+val gallerySigningCertificateThumbprint =
+    providers.environmentVariable("WINUI_GALLERY_SIGNING_CERTIFICATE_THUMBPRINT").orNull
+
 // Navigation output contains data and factory calls, never authored WinRT classes.
 // Keep authoring/projection scans on authored source so they do not depend on KSP.
 tasks.named<io.github.composefluent.windows.toolkit.gradle.GenerateWinRTAuthoringCandidatesTask>("generateWinRTAuthoringCandidates") {
@@ -78,6 +81,10 @@ windows {
     application {
         mainClass = "io.github.composefluent.winrt.gallery.MainKt"
         minWindowsVersion = "10.0.19041.0"
+        if (!gallerySigningCertificateThumbprint.isNullOrBlank()) {
+            signPackage.set(true)
+            signingCertificateThumbprint.set(gallerySigningCertificateThumbprint)
+        }
         packagePayload("licenses/WinUI-Gallery-LICENSE.txt", "licenses/WinUI-Gallery-LICENSE.txt")
         packagePayload("licenses/JetBrains-Apache-2.0.txt", "licenses/JetBrains-Apache-2.0.txt")
         packagePayload("licenses/WinUI-Essential-LICENSE.txt", "licenses/WinUI-Essential-LICENSE.txt")

@@ -1,0 +1,208 @@
+name: Build WinUI Gallery Snapshot
+
+on:
+  push:
+    branches:
+      - master
+      - codex/ci-snapshot-publish-test
+    paths-ignore:
+      - '**/*.md'
+      - '.gitignore'
+      - 'LICENSE*'
+  workflow_dispatch:
+  schedule:
+    # Run every Sunday at 00:00 UTC.
+    - cron: '0 0 * * 0'
+
+permissions:
+  contents: read
+
+jobs:
+  build-gallery:
+    name: Build and sign WinUI Gallery snapshot packages
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          java-version: '25'
+          distribution: 'temurin'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~\.nuget\packages
+            ~\.gradle\caches\kotlin-winrt\nuget
+          key: nuget-${{ runner.os }}-Microsoft.WindowsAppSDK-2.5.1
+          restore-keys: nuget-${{ runner.os }}-
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Verify Windows SDK 10.0.26100.0
+        shell: pwsh
+        run: |
+          $sdkRoot = 'C:\Program Files (x86)\Windows Kits\10'
+          $sdkVersion = '10.0.26100.0'
+          $referencePath = Join-Path $sdkRoot "References\$sdkVersion"
+          $toolPath = Join-Path $sdkRoot "bin\$sdkVersion\x64"
+          if (-not (Test-Path $referencePath)) {
+            throw "Windows SDK $sdkVersion was not found at $referencePath."
+          }
+          foreach ($tool in @('makeappx.exe', 'makepri.exe', 'signtool.exe')) {
+            if (-not (Test-Path (Join-Path $toolPath $tool))) {
+              throw "Windows SDK tool $tool was not found under $toolPath."
+            }
+          }
+
+      - name: Set snapshot package identity and version
+        id: snapshot-meta
+        shell: pwsh
+        run: |
+          $baseVersionLine = Get-Content 'gradle.properties' |
+            Where-Object { $_ -cmatch '^\s*winrt\.baseVersion\s*=' } |
+            Select-Object -First 1
+          $baseVersion = if ($baseVersionLine) {
+            ($baseVersionLine -split '=', 2)[1].Trim()
+          } else {
+            '0.1.0'
+          }
+
+          $packageVersion = "$baseVersion-SNAPSHOT"
+          $fileVersion = $packageVersion -replace '[^A-Za-z0-9._-]', '-'
+          if ([string]::IsNullOrWhiteSpace($fileVersion)) {
+            throw 'Resolved an empty Gallery package version.'
+          }
+          Add-Content -Path $env:GITHUB_ENV -Value "WINUI_GALLERY_PACKAGE_VERSION=$fileVersion"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "version=$fileVersion"
+
+          $manifestPath = Join-Path $env:GITHUB_WORKSPACE 'winui-gallery/src/winuiMain/appxResources/AppxManifest.xml'
+          [xml]$manifest = Get-Content -Raw $manifestPath
+          $identity = $manifest.SelectSingleNode("/*[local-name()='Package']/*[local-name()='Identity']")
+          if ($null -eq $identity) {
+            throw "Could not find Package/Identity in $manifestPath."
+          }
+          $baseName = $identity.GetAttribute('Name') -replace '(?i)\.snapshot$', ''
+          $snapshotName = "$baseName.snapshot"
+          if ($snapshotName.Length -gt 50 -or $snapshotName -cnotmatch '^[A-Za-z0-9.-]+$') {
+            throw "Snapshot package identity name is invalid: $snapshotName"
+          }
+          $identity.SetAttribute('Name', $snapshotName)
+          $manifest.Save($manifestPath)
+          Write-Host "Snapshot identity: $snapshotName; versioned package filename version: $fileVersion"
+
+      - name: Import snapshot signing certificate
+        shell: pwsh
+        env:
+          WINUI_GALLERY_SIGNING_PFX_BASE64: ${{ secrets.WINUI_GALLERY_SIGNING_PFX_BASE64 }}
+          WINUI_GALLERY_SIGNING_PFX_PASSWORD: ${{ secrets.WINUI_GALLERY_SIGNING_PFX_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WINUI_GALLERY_SIGNING_PFX_BASE64) -or
+              [string]::IsNullOrWhiteSpace($env:WINUI_GALLERY_SIGNING_PFX_PASSWORD)) {
+            throw 'Set the WINUI_GALLERY_SIGNING_PFX_BASE64 and WINUI_GALLERY_SIGNING_PFX_PASSWORD repository secrets.'
+          }
+
+          $pfxPath = Join-Path $env:RUNNER_TEMP 'winui-gallery-snapshot-signing.pfx'
+          $pfxBase64 = $env:WINUI_GALLERY_SIGNING_PFX_BASE64 -replace '\s', ''
+          [System.IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($pfxBase64))
+          $pfxPassword = ConvertTo-SecureString $env:WINUI_GALLERY_SIGNING_PFX_PASSWORD -AsPlainText -Force
+          $imported = Import-PfxCertificate `
+            -FilePath $pfxPath `
+            -CertStoreLocation 'Cert:\CurrentUser\My' `
+            -Password $pfxPassword
+          $privateCertificates = @($imported | Where-Object { $_.HasPrivateKey })
+          if ($privateCertificates.Count -ne 1) {
+            throw "Expected one signing certificate with a private key in the PFX; found $($privateCertificates.Count)."
+          }
+          $certificate = $privateCertificates[0]
+          Add-Content -Path $env:GITHUB_ENV -Value "WINUI_GALLERY_SIGNING_CERTIFICATE_THUMBPRINT=$($certificate.Thumbprint)"
+
+          $manifestPath = Join-Path $env:GITHUB_WORKSPACE 'winui-gallery/src/winuiMain/appxResources/AppxManifest.xml'
+          [xml]$manifest = Get-Content -Raw $manifestPath
+          $identity = $manifest.SelectSingleNode("/*[local-name()='Package']/*[local-name()='Identity']")
+          $publisher = $identity.GetAttribute('Publisher')
+          if ($certificate.Subject -cne $publisher) {
+            throw "Signing certificate Subject '$($certificate.Subject)' must exactly match package Publisher '$publisher'."
+          }
+          if ($certificate.NotAfter.ToUniversalTime() -le [DateTime]::UtcNow) {
+            throw 'The Gallery signing certificate has expired.'
+          }
+
+          $publicCertificatePath = Join-Path $env:RUNNER_TEMP 'winui-gallery-snapshot-signing.cer'
+          Export-Certificate -Cert $certificate -FilePath $publicCertificatePath -Type CERT -Force | Out-Null
+          Add-Content -Path $env:GITHUB_ENV -Value "WINUI_GALLERY_SIGNING_PUBLIC_CERTIFICATE=$publicCertificatePath"
+
+      - name: Build JVM and MinGW packages
+        shell: pwsh
+        run: |
+          # This workflow always produces snapshot packages, including manual runs on a tag.
+          $env:GITHUB_REF_TYPE = 'branch'
+          $packageRoot = Join-Path $env:GITHUB_WORKSPACE 'winui-gallery/build/kotlin-winrt/packages'
+          $artifactRoot = Join-Path $env:RUNNER_TEMP 'winui-gallery-snapshot-artifacts'
+          $jvmArtifactDirectory = Join-Path $artifactRoot 'jvm'
+          $mingwArtifactDirectory = Join-Path $artifactRoot 'mingw'
+          New-Item -ItemType Directory -Path $jvmArtifactDirectory, $mingwArtifactDirectory -Force | Out-Null
+
+          & .\gradlew.bat :winui-gallery:signWinAppPackageWinuiJvmMain
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+          $signedPackages = @(Get-ChildItem -Path $packageRoot -Filter '*-signed.msix' -File -Recurse)
+          if ($signedPackages.Count -ne 1) {
+            throw "Expected one signed JVM package after the JVM task; found $($signedPackages.Count) under $packageRoot."
+          }
+          $jvmPackage = $signedPackages[0]
+
+          & .\gradlew.bat :winui-gallery:signWinAppPackageMingwX64MainReleaseExecutable
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+          $mingwPackages = @(
+            Get-ChildItem -Path $packageRoot -Filter '*-signed.msix' -File -Recurse |
+              Where-Object { $_.FullName -cne $jvmPackage.FullName }
+          )
+          if ($mingwPackages.Count -ne 1) {
+            throw "Expected one signed MinGW package in addition to the JVM package; found $($mingwPackages.Count)."
+          }
+          $mingwPackage = $mingwPackages[0]
+
+          $version = $env:WINUI_GALLERY_PACKAGE_VERSION
+          Copy-Item $jvmPackage.FullName (Join-Path $jvmArtifactDirectory "Kotlin-WinUI-Gallery-$version-jvm.msix")
+          Copy-Item $mingwPackage.FullName (Join-Path $mingwArtifactDirectory "Kotlin-WinUI-Gallery-$version-mingwX64.msix")
+          Copy-Item $env:WINUI_GALLERY_SIGNING_PUBLIC_CERTIFICATE (Join-Path $jvmArtifactDirectory 'winui-gallery-snapshot-signing.cer')
+          Copy-Item $env:WINUI_GALLERY_SIGNING_PUBLIC_CERTIFICATE (Join-Path $mingwArtifactDirectory 'winui-gallery-snapshot-signing.cer')
+
+      - name: Upload JVM package
+        uses: actions/upload-artifact@v4
+        with:
+          name: winui-gallery-snapshot-${{ steps.snapshot-meta.outputs.version }}-jvm
+          path: ${{ runner.temp }}/winui-gallery-snapshot-artifacts/jvm/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+      - name: Upload MinGW package
+        uses: actions/upload-artifact@v4
+        with:
+          name: winui-gallery-snapshot-${{ steps.snapshot-meta.outputs.version }}-mingwX64
+          path: ${{ runner.temp }}/winui-gallery-snapshot-artifacts/mingw/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+      - name: Remove signing material
+        if: always()
+        shell: pwsh
+        run: |
+          $thumbprint = $env:WINUI_GALLERY_SIGNING_CERTIFICATE_THUMBPRINT
+          if (-not [string]::IsNullOrWhiteSpace($thumbprint)) {
+            Get-ChildItem 'Cert:\CurrentUser\My' |
+              Where-Object { $_.Thumbprint -eq $thumbprint } |
+              Remove-Item -Force
+          }
+          Remove-Item (Join-Path $env:RUNNER_TEMP 'winui-gallery-snapshot-signing.pfx') -Force -ErrorAction SilentlyContinue
