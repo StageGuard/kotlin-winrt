@@ -7,6 +7,15 @@
       "IsSpecialSection": true,
       "Items": [
         {
+          "UniqueId": "XamlSupport",
+          "Title": "XAML + Kotlin",
+          "Subtitle": "XAML controls with Kotlin instance event handlers.",
+          "Description": "This page is loaded from its adjacent XAML file. Named controls and private event handlers are connected by the Kotlin compiler plugin.",
+          "ImagePath": "ms-appx:///Assets/ControlImages/CodeTagIcon.png",
+          "Tags": ["XAML", "Kotlin"],
+          "RelatedControls": ["Button"]
+        },
+        {
           "UniqueId": "XamlResources",
           "Title": "Resources",
           "IsNew": true,
