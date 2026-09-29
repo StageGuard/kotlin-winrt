@@ -36,6 +36,9 @@ AppBarSeparator follows the same upstream-preserving pattern: its XAML changes
 only the Kotlin class and controls namespace, and its one sample text file is
 unchanged. The JVM native route loads its CommandBar example and activates the
 window; visual and Native checks remain.
+Pivot likewise preserves the upstream XAML apart from its Kotlin type names and
+keeps the original sample text unchanged. Its JVM native route loads the Pivot
+example and activates the window; visual and Native checks remain.
 
 | Route | Group | Kotlin source | Existing sample factories | Migration |
 | --- | --- | --- | ---: | --- |
@@ -126,7 +129,7 @@ window; visual and Native checks remain.
 | TitleBar | MultipleWindows | [TitleBarPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/multiplewindows/TitleBarPage.kt) | 3 | Pending |
 | BreadcrumbBar | Navigation | [BreadcrumbBarPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/navigation/BreadcrumbBarPage.kt) | 2 | Pending |
 | NavigationView | Navigation | [NavigationViewPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/navigation/NavigationViewPage.kt) | 8 | Pending |
-| Pivot | Navigation | [PivotPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/navigation/PivotPage.kt) | 1 | Pending |
+| Pivot | Navigation | [PivotPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/navigation/PivotPage.kt) | 1 | Original XAML and sample text preserved apart from namespace mapping; JVM native page load passed; visual and Native checks pending |
 | SelectorBar | Navigation | [SelectorBarPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/navigation/SelectorBarPage.kt) | 3 | Pending |
 | TabView | Navigation | [TabViewPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/navigation/TabViewPage.kt) | 10 | Pending |
 | AnnotatedScrollBar | Scrolling | [AnnotatedScrollBarPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/scrolling/AnnotatedScrollBarPage.kt) | 1 | Pending |
@@ -168,9 +171,9 @@ window; visual and Native checks remain.
 | --- | --- | --- |
 | Application resources and startup | Main.kt / GalleryApplication | Pending |
 | Main window and navigation | MainWindow.kt / GalleryNavigationHost.kt | Pending |
-| Page headers and sample frames | ControlExample.xaml / ControlExample.kt / GalleryTheme.kt | Eight BasicInput routes and AppBarSeparator use shared XAML control; original private components and other routes pending |
+| Page headers and sample frames | ControlExample.xaml / ControlExample.kt / GalleryTheme.kt | Eight BasicInput routes, AppBarSeparator and Pivot use shared XAML control; original private components and other routes pending |
 | Settings and All routes | GallerySettingsPage.kt / navigation host | Pending |
-| Example source display and copy | processor / code-document / code UI | SampleDefinition selects separate XAML/Kotlin files on nine routes; remaining routes pending |
+| Example source display and copy | processor / code-document / code UI | SampleDefinition selects separate XAML/Kotlin files on ten routes; remaining routes pending |
 | Styles, dictionaries and templates | shared UI and relevant individual pages | Pending |
 
 This is the source inventory (122 existing annotated routes including Home). Visual baselines, feature prerequisites, and interaction acceptance remain to be captured before marking any route complete.
