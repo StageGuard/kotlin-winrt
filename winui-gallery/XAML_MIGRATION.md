@@ -50,6 +50,10 @@ Flyout preserves the upstream one-example XAML and unchanged sample text apart
 from Kotlin type names. Its confirmation button calls the Kotlin handler to
 hide the Flyout. Its JVM native route loads the example and activates the
 window; confirmation interaction, visual and Native checks remain.
+TextBox preserves the upstream four-example XAML and all four unchanged sample
+texts apart from Kotlin type names. Its JVM native route connects all four
+examples and activates the window; text interaction, visual and Native checks
+remain.
 
 | Route | Group | Kotlin source | Existing sample factories | Migration |
 | --- | --- | --- | ---: | --- |
@@ -174,7 +178,7 @@ window; confirmation interaction, visual and Native checks remain.
 | RichEditBox | Text | [RichEditBoxPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/text/RichEditBoxPage.kt) | 5 | Pending |
 | RichTextBlock | Text | [RichTextBlockPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/text/RichTextBlockPage.kt) | 4 | Pending |
 | TextBlock | Text | [TextBlockPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/text/TextBlockPage.kt) | 5 | Pending |
-| TextBox | Text | [TextBoxPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/text/TextBoxPage.kt) | 4 | Pending |
+| TextBox | Text | [TextBoxPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/text/TextBoxPage.kt) | 4 | Original XAML and four sample texts preserved apart from namespace mapping; JVM native page load passed; interaction, visual and Native checks pending |
 
 ## Shared surfaces
 
@@ -182,9 +186,9 @@ window; confirmation interaction, visual and Native checks remain.
 | --- | --- | --- |
 | Application resources and startup | Main.kt / GalleryApplication | Pending |
 | Main window and navigation | MainWindow.kt / GalleryNavigationHost.kt | Pending |
-| Page headers and sample frames | ControlExample.xaml / ControlExample.kt / GalleryTheme.kt | Eight BasicInput routes plus AppBarSeparator, Pivot, CalendarDatePicker, ToolTip and Flyout use shared XAML control; original private components and other routes pending |
+| Page headers and sample frames | ControlExample.xaml / ControlExample.kt / GalleryTheme.kt | Eight BasicInput routes plus AppBarSeparator, Pivot, CalendarDatePicker, ToolTip, Flyout and TextBox use shared XAML control; original private components and other routes pending |
 | Settings and All routes | GallerySettingsPage.kt / navigation host | Pending |
-| Example source display and copy | processor / code-document / code UI | SampleDefinition selects separate XAML/Kotlin files on thirteen routes; remaining routes pending |
+| Example source display and copy | processor / code-document / code UI | SampleDefinition selects separate XAML/Kotlin files on fourteen routes; remaining routes pending |
 | Styles, dictionaries and templates | shared UI and relevant individual pages | Pending |
 
 This is the source inventory (122 existing annotated routes including Home). Visual baselines, feature prerequisites, and interaction acceptance remain to be captured before marking any route complete.
