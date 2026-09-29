@@ -9,8 +9,10 @@ ButtonAutomationPeer invocations reaching the private Kotlin handler. This does
 not establish visual, Native, IDE, or existing-page migration acceptance.
 
 Button now uses four `ControlExample` XAML instances and four independent
-`SampleDefinition` text files. The adapted control is not yet a full copy of
-WinUI Gallery's original template. The wrapping sample uses an explicit
+`SampleDefinition` text files. The shared control retains the original header,
+error placeholder, three-column example/output/options grid, source expander,
+and adaptive layout. CommunityToolkit animations and Gallery-private presenters
+remain outside this adaptation. The wrapping sample uses an explicit
 `ControlExample.Example` element: with implicit child syntax, the native load
 completed without calling the authored `Example` setter.
 

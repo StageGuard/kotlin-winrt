@@ -6,6 +6,7 @@ import io.github.composefluent.winrt.gallery.GalleryTheme
 import io.github.composefluent.winrt.gallery.kotlinCodePreview
 import io.github.composefluent.winrt.runtime.WinRTXamlContentProperty
 import microsoft.ui.xaml.UIElement
+import microsoft.ui.xaml.Visibility
 import microsoft.ui.xaml.controls.UserControl
 
 /** Shared sample presenter following WinUI Gallery's ControlExample structure. */
@@ -17,7 +18,10 @@ internal class ControlExample : UserControl() {
     var HeaderText: String = ""
         set(value) {
             field = value
-            if (ready) headerTextPresenter.text = value
+            if (ready) {
+                headerTextPresenter.text = value
+                headerTextPresenter.visibility = if (value.isBlank()) Visibility.Collapsed else Visibility.Visible
+            }
         }
 
     var SampleDefinition: String = ""
@@ -36,22 +40,31 @@ internal class ControlExample : UserControl() {
     var Output: UIElement? = null
         set(value) {
             field = value
-            if (ready) outputPresenter.content = value
+            if (ready) {
+                outputPresenter.content = value
+                outputContainer.visibility = if (value == null) Visibility.Collapsed else Visibility.Visible
+            }
         }
 
     var Options: UIElement? = null
         set(value) {
             field = value
-            if (ready) optionsPresenter.content = value
+            if (ready) {
+                optionsPresenter.content = value
+                optionsPresenter.visibility = if (value == null) Visibility.Collapsed else Visibility.Visible
+            }
         }
 
     override fun initializeComponent() {
         super.initializeComponent()
         ready = true
         headerTextPresenter.text = HeaderText
+        headerTextPresenter.visibility = if (HeaderText.isBlank()) Visibility.Collapsed else Visibility.Visible
         examplePresenter.content = Example
         outputPresenter.content = Output
+        outputContainer.visibility = if (Output == null) Visibility.Collapsed else Visibility.Visible
         optionsPresenter.content = Options
+        optionsPresenter.visibility = if (Options == null) Visibility.Collapsed else Visibility.Visible
 
         val state = GalleryTheme.sampleBeingConstructed
         val route = state?.sourceRoute
