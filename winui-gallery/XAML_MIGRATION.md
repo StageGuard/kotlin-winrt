@@ -66,6 +66,10 @@ so the original navigation-time default date and year range are set after
 `initializeComponent()` loads the named picker. Its JVM native route connects
 both examples and activates the window; picker interaction, visual and Native
 checks remain.
+XamlStyles preserves the upstream two-example XAML and both unchanged sample
+texts apart from Kotlin type names. Its JVM native route loads the explicit
+and implicit style examples and activates the window; visual and Native checks
+remain.
 
 | Route | Group | Kotlin source | Existing sample factories | Migration |
 | --- | --- | --- | ---: | --- |
@@ -115,7 +119,7 @@ checks remain.
 | ScratchPad | FundamentalsItem | [ScratchPadPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/fundamentals/ScratchPadPage.kt) | 0 | Pending |
 | Templates | FundamentalsItem | [TemplatesPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/fundamentals/TemplatesPage.kt) | 3 | Pending |
 | XamlResources | FundamentalsItem | [XamlResourcesPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/fundamentals/XamlResourcesPage.kt) | 3 | Pending |
-| XamlStyles | FundamentalsItem | [XamlStylesPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/fundamentals/XamlStylesPage.kt) | 2 | Pending |
+| XamlStyles | FundamentalsItem | [XamlStylesPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/fundamentals/XamlStylesPage.kt) | 2 | Original XAML and two sample texts preserved apart from namespace mapping; JVM native page load passed; visual and Native checks pending |
 | Border | Layout | [BorderPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/layout/BorderPage.kt) | 1 | Pending |
 | Canvas | Layout | [CanvasPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/layout/CanvasPage.kt) | 1 | Pending |
 | Expander | Layout | [ExpanderPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/layout/ExpanderPage.kt) | 2 | Pending |
@@ -198,9 +202,9 @@ checks remain.
 | --- | --- | --- |
 | Application resources and startup | Main.kt / GalleryApplication | Pending |
 | Main window and navigation | MainWindow.kt / GalleryNavigationHost.kt | Pending |
-| Page headers and sample frames | ControlExample.xaml / ControlExample.kt / GalleryTheme.kt | Eight BasicInput routes plus AppBarSeparator, Pivot, CalendarDatePicker, DatePicker, ToolTip, Flyout, TextBox and PasswordBox use shared XAML control; original private components and other routes pending |
+| Page headers and sample frames | ControlExample.xaml / ControlExample.kt / GalleryTheme.kt | Eight BasicInput routes plus AppBarSeparator, Pivot, CalendarDatePicker, DatePicker, ToolTip, Flyout, TextBox, PasswordBox and XamlStyles use shared XAML control; original private components and other routes pending |
 | Settings and All routes | GallerySettingsPage.kt / navigation host | Pending |
-| Example source display and copy | processor / code-document / code UI | SampleDefinition selects separate XAML/Kotlin files on sixteen routes; remaining routes pending |
+| Example source display and copy | processor / code-document / code UI | SampleDefinition selects separate XAML/Kotlin files on seventeen routes; remaining routes pending |
 | Styles, dictionaries and templates | shared UI and relevant individual pages | Pending |
 
 This is the source inventory (122 existing annotated routes including Home). Visual baselines, feature prerequisites, and interaction acceptance remain to be captured before marking any route complete.
