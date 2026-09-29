@@ -124,6 +124,15 @@ internal class XamlPageBodies(private val index: WinRTXamlDeclarationIndex, priv
                                     it.name.asString() == "add${event.name}" && it.parameters.count { p -> p.kind == IrParameterKind.Regular } == 1
                                 }
                                 val delegateType = projection(event.delegateTypeName).defaultType
+                                val invoke = projection(event.delegateTypeName).functions.single { it.name.asString() == "invoke" }
+                                val handlerParameters = handler.parameters.filter { it.kind == IrParameterKind.Regular }
+                                val delegateParameters = invoke.parameters.filter { it.kind == IrParameterKind.Regular }
+                                require(!handler.isSuspend && handler.typeParameters.isEmpty() &&
+                                    handler.returnType.classFqName == invoke.returnType.classFqName &&
+                                    handlerParameters.map { it.type.classFqName } == delegateParameters.map { it.type.classFqName }) {
+                                    "${page.resourcePath}:${event.location.line}:${event.location.column}: " +
+                                        "handler ${event.handlerName} no longer matches ${event.delegateTypeName}; rebuild XAML semantic symbols"
+                                }
                                 +irCall(add.symbol).apply {
                                     dispatchReceiver = irGet(target)
                                     arguments[1] = irSamConversion(boundReference(pluginContext, handler,

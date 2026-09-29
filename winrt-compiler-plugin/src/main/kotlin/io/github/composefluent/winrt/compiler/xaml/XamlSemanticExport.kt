@@ -22,7 +22,7 @@ import java.nio.file.Path
 /** Private Kotlin handlers stay in this compile-time sidecar, never in the public WinMD ABI. */
 @OptIn(ExperimentalCompilerApi::class)
 internal object XamlSemanticOptions {
-    private val keys = listOf("xamlDeclarations", "xamlSemanticOutput", "xamlReferences", "xamlImplementation")
+    private val keys = listOf("xamlDeclarations", "xamlSemanticOutput", "xamlReferences", "xamlReferencesFile", "xamlImplementation")
         .associateWith { CompilerConfigurationKey<String>(it) }
     val options = keys.keys.map { CliOption(it, "<path>", "Kotlin XAML semantic compilation $it", false) }
 
@@ -51,9 +51,16 @@ internal object XamlSemanticOptions {
             return XamlCompilation(declarations, null)
         }
         val output = Path.of(requireNotNull(value("xamlSemanticOutput")))
-        val references = requireNotNull(value("xamlReferences")).split(File.pathSeparator).map(Path::of)
+        // Invalidate before frontend analysis too: syntax/type errors never reach IR export.
+        Files.deleteIfExists(output)
+        Files.deleteIfExists(output.resolveSibling("KotlinXaml.winmd"))
+        require(value("xamlReferences") == null || value("xamlReferencesFile") == null) {
+            "Specify either xamlReferences or xamlReferencesFile"
+        }
+        val references = value("xamlReferencesFile")?.let { Files.readAllLines(Path.of(it)).filter(String::isNotBlank) }
+            ?: requireNotNull(value("xamlReferences")).split(File.pathSeparator)
         val metadataIndex = Path.of(requireNotNull(configuration.get(KotlinWinRTCommandLineProcessor.METADATA_INDEX_KEY)))
-        return XamlCompilation(declarations, XamlSemanticExport(declarationPath, output, references, metadataIndex))
+        return XamlCompilation(declarations, XamlSemanticExport(declarationPath, output, references.map(Path::of), metadataIndex))
     }
 }
 

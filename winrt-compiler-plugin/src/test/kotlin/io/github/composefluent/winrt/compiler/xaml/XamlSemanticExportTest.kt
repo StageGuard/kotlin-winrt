@@ -35,6 +35,10 @@ class XamlSemanticExportTest {
             put("ItemSpec", file.absolutePath); put("FullPath", file.absolutePath); put("IsSystemReference", true)
         }
         val directories = references!!.split(File.pathSeparator).map(::File)
+        val referenceFile = File(root, "references.txt").apply {
+            writeText(directories.flatMap { it.listFiles()!!.filter { file -> file.extension == "winmd" } }
+                .map { it.absolutePath }.sorted().joinToString("\n"))
+        }
         val compilerInput = buildJsonObject {
             put("ProjectPath", File(root, "probe.proj").absolutePath); put("ProjectName", "probe")
             put("Language", "Kotlin"); put("LanguageSourceExtension", ".kt"); put("IsPass1", true)
@@ -125,7 +129,7 @@ class XamlSemanticExportTest {
             }
             val options = mapOf("xamlDeclarations" to input.absolutePath) + if (final)
                 mapOf("xamlImplementation" to File(root, "final.output.json").absolutePath)
-            else mapOf("metadataIndex" to index.absolutePath, "xamlSemanticOutput" to symbols.absolutePath, "xamlReferences" to references)
+            else mapOf("metadataIndex" to index.absolutePath, "xamlSemanticOutput" to symbols.absolutePath, "xamlReferencesFile" to referenceFile.absolutePath)
             val arguments = listOf("-no-stdlib", "-no-reflect", "-jvm-target", "17", "-classpath", classpath,
                 "-Xplugin=${System.getProperty("winrt.test.fullPluginJar")}", "-d", File(root, if (final) "final" else "semantic-only").absolutePath,
                 source.absolutePath, base.absolutePath, argsType.absolutePath, button.absolutePath, connector.absolutePath, uri.absolutePath) +
@@ -165,7 +169,15 @@ class XamlSemanticExportTest {
             assertFalse(java.lang.reflect.Modifier.isStatic(pageClass.getDeclaredField("myButton").modifiers))
             assertTrue(pageClass.methods.none { it.name == "setMyButton" })
         }
-        source.writeText(source.readText().replace("private fun onClick", "private suspend fun onClick"))
+        val validSource = source.readText()
+        source.writeText(validSource.replace("args: microsoft.ui.xaml.RoutedEventArgs", "args: kotlin.String"))
+        val staleFinal = compile(final = true)
+        assertNotEquals("A stale sidecar must not allow a changed handler signature", ExitCode.OK, staleFinal.first)
+        assertTrue(staleFinal.second, staleFinal.second.contains("no longer matches"))
+        source.writeText(validSource + "\nfun invalid( =\n")
+        assertNotEquals("Frontend errors must fail semantic compilation", ExitCode.OK, compile().first)
+        assertFalse("Frontend failure must invalidate a previous sidecar", symbols.exists())
+        source.writeText(validSource.replace("private fun onClick", "private suspend fun onClick"))
         assertNotEquals("suspend handlers must fail semantic export", ExitCode.OK, compile().first)
         assertFalse("Failed semantic compilation must not leave a stale sidecar", symbols.exists())
     }
