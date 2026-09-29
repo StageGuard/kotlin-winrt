@@ -89,6 +89,11 @@ WebView2 preserves the upstream one-example XAML and sample text apart from
 Kotlin type names and one trailing space. The Kotlin page retains the prior unload-time
 WebView2 cleanup. The JVM native route loads the example and activates the
 window; remote content, visual and Native checks remain.
+TimePicker preserves the upstream three-example layout and first two sample
+texts. The C# `System.DateTime.Now.TimeOfDay` bindings in the third example
+become two named pickers initialized to the same current time from Kotlin.
+The JVM native route loads all three examples and activates the window;
+picker interaction, visual and Native checks remain.
 
 | Route | Group | Kotlin source | Existing sample factories | Migration |
 | --- | --- | --- | ---: | --- |
@@ -122,7 +127,7 @@ window; remote content, visual and Native checks remain.
 | CalendarDatePicker | DateAndTime | [CalendarDatePickerPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/dateandtime/CalendarDatePickerPage.kt) | 1 | Original XAML and sample text preserved apart from namespace mapping; JVM native page load passed; visual and Native checks pending |
 | CalendarView | DateAndTime | [CalendarViewPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/dateandtime/CalendarViewPage.kt) | 1 | Pending |
 | DatePicker | DateAndTime | [DatePickerPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/dateandtime/DatePickerPage.kt) | 2 | Original XAML and two sample texts preserved apart from namespace mapping; JVM native page load passed; interaction, visual and Native checks pending |
-| TimePicker | DateAndTime | [TimePickerPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/dateandtime/TimePickerPage.kt) | 3 | Pending |
+| TimePicker | DateAndTime | [TimePickerPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/dateandtime/TimePickerPage.kt) | 3 | Original three-example XAML layout retained; C# date expression moved to Kotlin initialization; JVM native page load passed; interaction and Native checks pending |
 | Color | DesignItem | [ColorPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/design/ColorPage.kt) | 0 | Pending |
 | Geometry | DesignItem | [GeometryPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/design/GeometryPage.kt) | 1 | Pending |
 | Iconography | DesignItem | [IconographyPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/design/IconographyPage.kt) | 0 | Pending |
@@ -221,9 +226,9 @@ window; remote content, visual and Native checks remain.
 | --- | --- | --- |
 | Application resources and startup | Main.kt / GalleryApplication | Pending |
 | Main window and navigation | MainWindow.kt / GalleryNavigationHost.kt | Pending |
-| Page headers and sample frames | ControlExample.xaml / ControlExample.kt / GalleryTheme.kt | Eight BasicInput routes plus AppBarButton, AppBarSeparator, Pivot, CalendarDatePicker, DatePicker, ToolTip, Flyout, TextBox, PasswordBox, WebView2, XamlStyles, RelativePanel and XamlUICommand use shared XAML control; original private components and other routes pending |
+| Page headers and sample frames | ControlExample.xaml / ControlExample.kt / GalleryTheme.kt | Eight BasicInput routes plus AppBarButton, AppBarSeparator, Pivot, CalendarDatePicker, DatePicker, TimePicker, ToolTip, Flyout, TextBox, PasswordBox, WebView2, XamlStyles, RelativePanel and XamlUICommand use shared XAML control; original private components and other routes pending |
 | Settings and All routes | GallerySettingsPage.kt / navigation host | Pending |
-| Example source display and copy | processor / code-document / code UI | SampleDefinition selects separate XAML/Kotlin files on twenty-one routes; remaining routes pending |
+| Example source display and copy | processor / code-document / code UI | SampleDefinition selects separate XAML/Kotlin files on twenty-two routes; remaining routes pending |
 | Styles, dictionaries and templates | shared UI and relevant individual pages | Pending |
 
 This is the source inventory (122 existing annotated routes including Home). Visual baselines, feature prerequisites, and interaction acceptance remain to be captured before marking any route complete.
