@@ -61,6 +61,9 @@ class GalleryApplication : Application() {
     }
 
     private fun launchWindow(arguments: String) {
+        val launchRouteArgument = GalleryXamlValidation.routeArgument(
+            arguments.trim().trim('"').ifBlank { processArguments.firstOrNull().orEmpty().trim().trim('"') },
+        )
         println("Kotlin WinUI Gallery: loading controls resources")
         resources.mergedDictionaries.add(XamlControlsResources())
         val galleryWindow = MainWindow()
@@ -98,7 +101,7 @@ class GalleryApplication : Application() {
                 }
             }
             else -> {
-                val raw = arguments.trim().trim('"').ifBlank { processArguments.firstOrNull().orEmpty().trim().trim('"') }
+                val raw = launchRouteArgument
                 val route = if (raw.startsWith("kotlin-winui-gallery://", ignoreCase = true)) {
                     val uri = windows.foundation.Uri(raw)
                     uri.path.trim('/').ifBlank { uri.host.trim('/') }
