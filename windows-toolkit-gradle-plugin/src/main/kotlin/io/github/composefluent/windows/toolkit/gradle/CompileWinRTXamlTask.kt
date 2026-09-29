@@ -36,6 +36,9 @@ abstract class CompileWinRTXamlTask @Inject constructor(
     abstract val semanticSymbols: RegularFileProperty
     @get:InputFile @get:Optional @get:PathSensitive(PathSensitivity.NONE)
     abstract val semanticWinmd: RegularFileProperty
+
+    @get:InputFile @get:Optional @get:PathSensitive(PathSensitivity.NONE)
+    abstract val applicationHeaderWinmd: RegularFileProperty
     @get:OutputDirectory abstract val outputDirectory: DirectoryProperty
     @get:Internal val declarationsFile get() = outputDirectory.file("declarations.json")
     @get:Internal val implementationFile get() = outputDirectory.file("output.json")
@@ -74,6 +77,9 @@ abstract class CompileWinRTXamlTask @Inject constructor(
         }
         val finalPass = semanticSymbols.isPresent
         require(finalPass == semanticWinmd.isPresent) { "Final XAML pass requires both semantic symbols and WinMD." }
+        require(finalPass || applicationHeaderWinmd.isPresent) {
+            "XAML declaration pass requires the Kotlin application header WinMD."
+        }
         val input = buildJsonObject {
             put("ProjectPath", File(output, "${projectName.get()}.proj").absolutePath)
             put("ProjectName", projectName.get()); put("RootNamespace", projectName.get().replace('-', '_'))
@@ -89,6 +95,8 @@ abstract class CompileWinRTXamlTask @Inject constructor(
             if (finalPass) {
                 put("KotlinSymbols", Json.parseToJsonElement(semanticSymbols.get().asFile.readText()))
                 put("LocalAssembly", JsonArray(listOf(item(semanticWinmd.get().asFile))))
+            } else {
+                put("LocalAssembly", JsonArray(listOf(item(applicationHeaderWinmd.get().asFile))))
             }
         }
         val inputFile = File(output, "input.json").apply { writeText(input.toString()) }

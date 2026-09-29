@@ -3624,7 +3624,7 @@ private fun kotlinWinRTIncludedBuildArtifacts(project: Project, vararg moduleNam
         .distinctBy { file -> file.toPath().toAbsolutePath().normalize() }
 }
 
-private fun kotlinWinRTAuthoringScannerRuntimeClasspath(project: Project): Any {
+internal fun kotlinWinRTAuthoringScannerRuntimeClasspath(project: Project): Any {
     val kotlinCompilerVersion = project.getKotlinPluginVersion()
     val compilerRuntime = listOf(
         "org.jetbrains.kotlin.cli.jvm.compiler.KotlinCoreEnvironment",

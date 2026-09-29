@@ -31,11 +31,20 @@ the owned inspectable result. Getter outputs are owned by the caller; setter
 inputs are borrowed. Members not declared on the type delegate to its base.
 Identity-only registrations retain their existing nonconstructible behavior.
 
-This shared runtime contract is the prerequisite for compiler-generated custom
-controls such as Gallery `ControlExample`. Automatic definition generation,
-pre-analysis application property metadata, compiled bindings, and end-to-end
-Native support remain incomplete; registering a definition alone does not make
-the XamlCompiler recognize a Kotlin property.
+The Kotlin source scanner now emits an application-only WinMD before
+XamlCompiler pass 1. It recognizes adjacent same-basename Kotlin/XAML classes,
+their WinRT bases, no-argument constructors, and explicitly typed public or
+internal instance properties. An explicitly declared type is required for a
+property exposed to XAML because the first compiler pass precedes Kotlin IR.
+The scanner emits Kotlin registration sources with direct constructors and
+getter/setter calls. The page's generated load method registers all application
+types before invoking `Application.LoadComponent`. Kotlin semantic compilation
+then emits the authoritative application WinMD for pass 2.
+
+Gallery `ControlExample` migration, compiled bindings, and end-to-end Native
+support remain incomplete. Existing six Gallery XAML pages now pass the
+pre-analysis WinMD, semantic compilation, final XAML compilation, and main
+Kotlin compilation stages.
 
 The semantic compilation now exports declared public/internal instance
 properties into the application-only `KotlinXaml.winmd`. It uses Kotlin IR
@@ -43,7 +52,7 @@ types and accessor visibility, excludes generated `x:Name` properties and
 private state, and preserves nullable value types as `IReference<T>`. This
 schema is separate from authored component ABI export. The metadata writer
 owns Property/MethodSemantics encoding, following CsWinRT
-`WinRTTypeWriter.AddPropertyDefinition`. The initial XAML analysis still needs
-an application declaration input before semantic compilation; the later
-semantic WinMD alone cannot resolve that dependency. Content-property
-annotation export and generated runtime member registration are also pending.
+`WinRTTypeWriter.AddPropertyDefinition`. The initial XAML analysis consumes
+the scanner's application declaration WinMD. `@WinRTXamlContentProperty` maps
+implicit child content to an explicitly typed property in both passes and in
+the generated runtime metadata.

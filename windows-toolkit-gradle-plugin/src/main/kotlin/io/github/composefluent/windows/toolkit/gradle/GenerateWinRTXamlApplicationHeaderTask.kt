@@ -1,0 +1,71 @@
+package io.github.composefluent.windows.toolkit.gradle
+
+import org.gradle.api.DefaultTask
+import org.gradle.api.file.ConfigurableFileCollection
+import org.gradle.api.file.DirectoryProperty
+import org.gradle.api.file.FileSystemOperations
+import org.gradle.api.file.RegularFileProperty
+import org.gradle.api.provider.ListProperty
+import org.gradle.api.tasks.*
+import org.gradle.process.ExecOperations
+import java.nio.file.Files
+import javax.inject.Inject
+
+/** Provides local Kotlin type and property declarations to XamlCompiler's first pass. */
+@CacheableTask
+abstract class GenerateWinRTXamlApplicationHeaderTask @Inject constructor(
+    private val exec: ExecOperations,
+    private val fileSystem: FileSystemOperations,
+) : DefaultTask() {
+    @get:InputFiles @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val sourceRoots: ConfigurableFileCollection
+
+    @get:InputFile @get:PathSensitive(PathSensitivity.NONE)
+    abstract val metadataIndex: RegularFileProperty
+
+    @get:InputFile @get:PathSensitive(PathSensitivity.NONE)
+    abstract val preparedMetadataManifest: RegularFileProperty
+
+    @get:InputFiles @get:PathSensitive(PathSensitivity.NONE)
+    abstract val referenceFiles: ConfigurableFileCollection
+
+    @get:Classpath abstract val scannerClasspath: ConfigurableFileCollection
+    @get:Input abstract val scannerJvmArgs: ListProperty<String>
+    @get:OutputFile abstract val outputFile: RegularFileProperty
+    @get:OutputDirectory abstract val sourceOutputDirectory: DirectoryProperty
+
+    init {
+        scannerJvmArgs.convention(emptyList())
+        referenceFiles.from(preparedMetadataManifest.map { readPreparedMetadataCache(it.asFile.toPath()).files })
+    }
+
+    @TaskAction fun generate() {
+        val output = outputFile.get().asFile.toPath().toAbsolutePath().normalize()
+        Files.createDirectories(output.parent)
+        Files.deleteIfExists(output)
+        val sourceOutput = sourceOutputDirectory.get().asFile
+        fileSystem.delete { it.delete(sourceOutput) }
+        sourceOutput.mkdirs()
+        exec.javaexec { spec ->
+            spec.classpath = scannerClasspath
+            spec.mainClass.set("io.github.composefluent.winrt.compiler.KotlinWinRTAuthoringScannerCli")
+            spec.workingDir(output.parent.toFile())
+            spec.jvmArgs(scannerJvmArgs.get() + "-Djava.io.tmpdir=${output.parent}")
+            spec.args(buildList {
+                add("--xaml-header")
+                add("--metadata-index"); add(metadataIndex.get().asFile.absolutePath)
+                add("--output"); add(output.toString())
+                add("--xaml-header-sources"); add(sourceOutput.absolutePath)
+                sourceRoots.files.filter { it.exists() &&
+                    !isKotlinWindowsToolkitPluginOwnedAuthoringSourceRoot(it.toPath()) }
+                    .sortedBy { it.absolutePath }.forEach {
+                    add("--source-root"); add(it.absolutePath)
+                }
+                referenceFiles.files.sortedBy { it.absolutePath }.forEach {
+                    add("--reference"); add(it.absolutePath)
+                }
+            })
+        }
+        check(Files.isRegularFile(output)) { "Kotlin XAML application header was not produced: $output" }
+    }
+}

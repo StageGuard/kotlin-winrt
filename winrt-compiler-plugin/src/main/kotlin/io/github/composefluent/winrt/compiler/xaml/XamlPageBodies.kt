@@ -83,6 +83,11 @@ internal class XamlPageBodies(private val index: WinRTXamlDeclarationIndex, priv
                 +irReturn(irGetField(irGet(requireNotNull(constructionGetter.dispatchReceiverParameter)), constructionState))
             }
             val load = function(xamlLoadName)
+            val applicationDefinitions = requireNotNull(pluginContext.referenceClass(ClassId.topLevel(
+                FqName("io.github.composefluent.winrt.generated.xaml.KotlinXamlApplicationDefinitions")))) {
+                "XAML application definitions were not generated before Kotlin compilation"
+            }.owner
+            val registerApplicationTypes = applicationDefinitions.functions.single { it.name.asString() == "registerAll" }
             val applicationMetadata = requireNotNull(projection("Microsoft.UI.Xaml.Application").companionObject())
             val loadComponent = applicationMetadata.functions.single { it.name.asString() == "loadComponent" &&
                 it.parameters.count { p -> p.kind == IrParameterKind.Regular } == 2 }
@@ -92,6 +97,9 @@ internal class XamlPageBodies(private val index: WinRTXamlDeclarationIndex, priv
                 }
             }
             load.body = DeclarationIrBuilder(pluginContext, load.symbol).irBlockBody {
+                +irCall(registerApplicationTypes.symbol).apply {
+                    dispatchReceiver = irGetObject(applicationDefinitions.symbol)
+                }
                 +irCall(loadComponent.symbol).apply {
                     dispatchReceiver = irGetObject(applicationMetadata.symbol)
                     arguments[1] = irGet(requireNotNull(load.dispatchReceiverParameter))

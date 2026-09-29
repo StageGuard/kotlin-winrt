@@ -59,8 +59,23 @@ internal fun configureWinRTXamlPipeline(
         task.projectName.set(project.name)
         task.onlyIf { hasXaml.get() }
     }
+    val applicationHeader = project.tasks.register("generateWinRTXamlApplicationHeader",
+        GenerateWinRTXamlApplicationHeaderTask::class.java) { task ->
+        task.group = "kotlin-winrt"
+        task.description = "Exports adjacent Kotlin XAML type declarations for XamlCompiler pass 1."
+        task.sourceRoots.from(sourceRoots)
+        task.metadataIndex.set(metadataIndex)
+        task.preparedMetadataManifest.set(metadataManifest)
+        task.scannerClasspath.from(compilerPluginClasspath)
+        task.scannerClasspath.from(kotlinWinRTAuthoringScannerRuntimeClasspath(project))
+        task.scannerJvmArgs.set(listOf("-Xmx512m", "-Xss512k", "-XX:+UseSerialGC", "-XX:ReservedCodeCacheSize=32m"))
+        task.outputFile.set(project.layout.buildDirectory.file("generated/kotlin-winrt/xaml/application/KotlinXaml.winmd"))
+        task.sourceOutputDirectory.set(project.layout.buildDirectory.dir("generated/kotlin-winrt/xaml/application/src"))
+        task.onlyIf { hasXaml.get() }
+    }
     val declarations = project.tasks.register("analyzeWinRTXaml", CompileWinRTXamlTask::class.java) { task ->
         configure(task)
+        task.applicationHeaderWinmd.set(applicationHeader.flatMap { it.outputFile })
         task.description = "Analyzes XAML declarations before Kotlin authoring and semantic compilation."
         task.outputDirectory.set(project.layout.buildDirectory.dir("generated/kotlin-winrt/xaml/declarations"))
     }
@@ -102,6 +117,7 @@ internal fun configureWinRTXamlPipeline(
                 task.description = "Compiles isolated XAML semantic symbols; output classes are never packaged."
                 task.group = "kotlin-winrt"
                 task.source(business.sources)
+                task.source(applicationHeader.flatMap { it.sourceOutputDirectory })
                 task.libraries.from(business.libraries)
                 task.friendPaths.from(business.friendPaths)
                 task.pluginClasspath.from(compilerPluginClasspath)
@@ -126,6 +142,7 @@ internal fun configureWinRTXamlPipeline(
                 task.outputDirectory.set(project.layout.buildDirectory.dir("generated/kotlin-winrt/xaml/$suffix/final"))
                 task.dependsOn(semantic)
             }
+            business.source(applicationHeader.flatMap { it.sourceOutputDirectory })
             business.inputs.file(implementation.flatMap { it.implementationFile })
             business.compilerOptions.freeCompilerArgs.addAll(project.provider {
                 listOf("xamlDeclarations=${declarations.get().declarationsFile.get().asFile.absolutePath}",

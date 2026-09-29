@@ -85,6 +85,11 @@ annotation class WinRTAuthoredRuntimeClass(
     val staticFactoryInterfaceNames: Array<String> = [],
 )
 
+/** Names the Kotlin property receiving implicit XAML child content. */
+@Retention(AnnotationRetention.BINARY)
+@Target(AnnotationTarget.CLASS)
+annotation class WinRTXamlContentProperty(val name: String)
+
 @Retention(AnnotationRetention.RUNTIME)
 @Target(AnnotationTarget.CLASS)
 annotation class GeneratedWinRTExposedExternalType(

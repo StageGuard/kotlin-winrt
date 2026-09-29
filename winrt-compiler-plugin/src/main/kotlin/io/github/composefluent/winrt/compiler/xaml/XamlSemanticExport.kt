@@ -12,9 +12,11 @@ import org.jetbrains.kotlin.compiler.plugin.ExperimentalCompilerApi
 import org.jetbrains.kotlin.config.CompilerConfiguration
 import org.jetbrains.kotlin.config.CompilerConfigurationKey
 import org.jetbrains.kotlin.ir.declarations.*
+import org.jetbrains.kotlin.ir.expressions.IrConst
 import org.jetbrains.kotlin.ir.symbols.UnsafeDuringIrConstructionAPI
 import org.jetbrains.kotlin.ir.types.classFqName
 import org.jetbrains.kotlin.ir.util.fqNameWhenAvailable
+import org.jetbrains.kotlin.ir.util.parentClassOrNull
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.Path
@@ -96,9 +98,18 @@ private class XamlSemanticExport(
             require(klass.superTypes.any { type -> type.classFqName?.asString()?.let {
                 resolveIndexedWinRTTypeByProjectedName(it, types)?.qualifiedName
             } == page.baseTypeName }) { "XAML ${page.className}: expected direct base ${page.baseTypeName}" }
+            require(klass.declarations.filterIsInstance<IrConstructor>().any { constructor ->
+                constructor.visibility == org.jetbrains.kotlin.descriptors.DescriptorVisibilities.PUBLIC &&
+                    constructor.parameters.none { it.kind == IrParameterKind.Regular }
+            }) { "XAML ${page.className} requires a public zero-argument constructor" }
             authored += WinRTAuthoredRuntimeClassDescriptor(page.className, page.baseTypeName,
-                listOf("Microsoft.UI.Xaml.Markup.IComponentConnector"), isActivatable = false)
+                listOf("Microsoft.UI.Xaml.Markup.IComponentConnector"), isActivatable = true)
+            val contentProperty = klass.annotations.firstOrNull { call ->
+                call.symbol.owner.parentClassOrNull?.fqNameWhenAvailable?.asString() ==
+                    "io.github.composefluent.winrt.runtime.WinRTXamlContentProperty"
+            }?.arguments?.firstOrNull()?.let { (it as? IrConst)?.value as? String }
             applicationMembers[page.className] = xamlApplicationProperties(klass, types, applicationTypes)
+                .copy(contentProperty = contentProperty)
             val handlers = page.connections.flatMap { it.events }.map { it.handlerName }.distinct().sorted().map { name ->
                 val handler = requireNotNull(klass.declarations.filterIsInstance<IrSimpleFunction>().singleOrNull { it.name.asString() == name }) {
                     "XAML ${page.className}: missing or overloaded handler $name"
