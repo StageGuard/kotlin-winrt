@@ -149,13 +149,24 @@ internal class XamlPageBodies(private val index: WinRTXamlDeclarationIndex, priv
                                 val add = projection(event.declaringTypeName).functions.single {
                                     it.name.asString() == "add${event.name}" && it.parameters.count { p -> p.kind == IrParameterKind.Regular } == 1
                                 }
-                                val delegateType = projection(event.delegateTypeName).defaultType
-                                val invoke = projection(event.delegateTypeName).functions.single { it.name.asString() == "invoke" }
+                                val delegateType = add.parameters.single { it.kind == IrParameterKind.Regular }.type
+                                val delegateClass = requireNotNull(delegateType.classOrNull) {
+                                    "XAML requires projected delegate ${event.delegateTypeName}"
+                                }.owner
+                                val invoke = delegateClass.functions.single { it.name.asString() == "invoke" }
                                 val handlerParameters = handler.parameters.filter { it.kind == IrParameterKind.Regular }
                                 val delegateParameters = invoke.parameters.filter { it.kind == IrParameterKind.Regular }
+                                val typeArguments = (delegateType as? IrSimpleType)?.arguments.orEmpty()
+                                fun delegateParameterClassName(type: IrType): FqName? {
+                                    val parameterIndex = delegateClass.typeParameters.indexOfFirst { parameter ->
+                                        parameter.symbol == (type as? IrSimpleType)?.classifier
+                                    }
+                                    return (typeArguments.getOrNull(parameterIndex)?.typeOrNull ?: type).classFqName
+                                }
                                 require(!handler.isSuspend && handler.typeParameters.isEmpty() &&
                                     handler.returnType.classFqName == invoke.returnType.classFqName &&
-                                    handlerParameters.map { it.type.classFqName } == delegateParameters.map { it.type.classFqName }) {
+                                    handlerParameters.map { it.type.classFqName } ==
+                                    delegateParameters.map { delegateParameterClassName(it.type) }) {
                                     "${page.resourcePath}:${event.location.line}:${event.location.column}: " +
                                         "handler ${event.handlerName} no longer matches ${event.delegateTypeName}; rebuild XAML semantic symbols"
                                 }
