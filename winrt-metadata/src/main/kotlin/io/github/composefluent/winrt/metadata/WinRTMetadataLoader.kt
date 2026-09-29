@@ -2495,38 +2495,6 @@ private data class ParsedPropertySignature(
     val type: ParsedTypeSignature,
 )
 
-private const val ELEMENT_TYPE_BOOLEAN = 0x02
-private const val ELEMENT_TYPE_CHAR = 0x03
-private const val ELEMENT_TYPE_I1 = 0x04
-private const val ELEMENT_TYPE_U1 = 0x05
-private const val ELEMENT_TYPE_I2 = 0x06
-private const val ELEMENT_TYPE_U2 = 0x07
-private const val ELEMENT_TYPE_I4 = 0x08
-private const val ELEMENT_TYPE_U4 = 0x09
-private const val ELEMENT_TYPE_I8 = 0x0A
-private const val ELEMENT_TYPE_U8 = 0x0B
-private const val ELEMENT_TYPE_R4 = 0x0C
-private const val ELEMENT_TYPE_R8 = 0x0D
-private const val ELEMENT_TYPE_STRING = 0x0E
-
-private fun winRTFundamentalTypeForElementTypeMarker(marker: Int): WinRTFundamentalType? =
-    when (marker) {
-        ELEMENT_TYPE_BOOLEAN -> WinRTFundamentalType.Boolean
-        ELEMENT_TYPE_CHAR -> WinRTFundamentalType.Char
-        ELEMENT_TYPE_I1 -> WinRTFundamentalType.Int8
-        ELEMENT_TYPE_U1 -> WinRTFundamentalType.UInt8
-        ELEMENT_TYPE_I2 -> WinRTFundamentalType.Int16
-        ELEMENT_TYPE_U2 -> WinRTFundamentalType.UInt16
-        ELEMENT_TYPE_I4 -> WinRTFundamentalType.Int32
-        ELEMENT_TYPE_U4 -> WinRTFundamentalType.UInt32
-        ELEMENT_TYPE_I8 -> WinRTFundamentalType.Int64
-        ELEMENT_TYPE_U8 -> WinRTFundamentalType.UInt64
-        ELEMENT_TYPE_R4 -> WinRTFundamentalType.Float
-        ELEMENT_TYPE_R8 -> WinRTFundamentalType.Double
-        ELEMENT_TYPE_STRING -> WinRTFundamentalType.String
-        else -> null
-    }
-
 private class SignatureReader(
     private val bytes: ByteArray,
     private val typeDefNames: Array<String>,

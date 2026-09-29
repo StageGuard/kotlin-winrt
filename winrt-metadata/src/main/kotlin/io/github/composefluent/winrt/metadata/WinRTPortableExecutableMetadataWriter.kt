@@ -6,6 +6,22 @@ import java.nio.file.Files
 import java.nio.file.Path
 
 object WinRTPortableExecutableMetadataWriter {
+    /** Application-only XAML schema; never used as the exported component WinMD. */
+    fun writeXamlApplicationWinmd(
+        assemblyName: String,
+        runtimeClasses: List<WinRTAuthoredRuntimeClassDescriptor>,
+        members: Map<String, WinRTXamlApplicationTypeMembers>,
+        outputFile: Path,
+        externalTypeAssemblies: Map<String, String>,
+        valueTypeNames: Set<String> = emptySet(),
+    ) {
+        require(members.keys.all { name -> runtimeClasses.any { it.runtimeClassName == name } })
+        Files.createDirectories(outputFile.parent)
+        writeIfChanged(outputFile, WinmdBuilder(assemblyName, runtimeClasses,
+            externalTypeAssemblies = externalTypeAssemblies, applicationMembers = members,
+            valueTypeNames = valueTypeNames).build())
+    }
+
     fun writeEmptyWinmd(
         assemblyName: String,
         outputFile: Path,
@@ -51,7 +67,28 @@ private class WinmdBuilder(
     private val runtimeClasses: List<WinRTAuthoredRuntimeClassDescriptor>,
     private val interfaces: List<WinRTPortableExecutableInterfaceDescriptor> = emptyList(),
     private val externalTypeAssemblies: Map<String, String>? = null,
+    private val applicationMembers: Map<String, WinRTXamlApplicationTypeMembers> = emptyMap(),
+    private val valueTypeNames: Set<String> = emptySet(),
 ) {
+    private val properties = runtimeClasses.flatMap { type ->
+        applicationMembers[type.runtimeClassName]?.properties.orEmpty().sortedBy { it.name }
+            .map { type.runtimeClassName to it }
+    }
+    private fun hasApplicationConstructor(type: WinRTAuthoredRuntimeClassDescriptor) =
+        type.isActivatable && type.runtimeClassName in applicationMembers
+    private val accessorCount = properties.sumOf { if (it.second.isReadOnly) 1 else 2 }
+    private val methodCount = accessorCount +
+        runtimeClasses.count(::hasApplicationConstructor)
+    private val getterIds = buildMap<Pair<String, String>, Int> {
+        var next = 1
+        runtimeClasses.forEach { type ->
+            if (hasApplicationConstructor(type)) next++
+            properties.filter { it.first == type.runtimeClassName }.forEach { (owner, property) ->
+                put(owner to property.name, next)
+                next += if (property.isReadOnly) 1 else 2
+            }
+        }
+    }
     private val strings = IndexedStringHeap()
     private val blobs = IndexedBlobHeap()
     private val guid = byteArrayOf(
@@ -64,7 +101,9 @@ private class WinmdBuilder(
         val moduleTypeName = strings.index("<Module>")
         val assemblyNameIndex = strings.index(assemblyName)
         val localTypeNames = interfaces.mapTo(mutableSetOf()) { it.interfaceName }
+            .apply { addAll(runtimeClasses.map { it.runtimeClassName }) }
         val attributeTypeNames = buildSet {
+            if (applicationMembers.values.any { it.contentProperty != null }) add(XAML_CONTENT_PROPERTY)
             if (runtimeClasses.isNotEmpty() || interfaces.isNotEmpty()) {
                 add(WINDOWS_FOUNDATION_METADATA_VERSION)
             }
@@ -88,10 +127,10 @@ private class WinmdBuilder(
         }
         val typeRefs = (
             runtimeClasses.flatMap { descriptor ->
-                listOf(descriptor.baseRuntimeClassName ?: "System.Object") + descriptor.interfaceNames.filterNot(localTypeNames::contains)
+                (listOf(descriptor.baseRuntimeClassName ?: "System.Object") + descriptor.interfaceNames).filterNot(localTypeNames::contains)
             } +
                 interfaces.flatMap { descriptor -> descriptor.implementedInterfaceNames.filterNot(localTypeNames::contains) } +
-                attributeTypeNames
+                attributeTypeNames + properties.flatMap { signatureReferences(it.second.type) }.filterNot(localTypeNames::contains)
             )
             .distinct()
             .map { qualifiedName -> TypeRefRow(qualifiedName) }
@@ -154,9 +193,11 @@ private class WinmdBuilder(
         val validMask = (1L shl TABLE_MODULE) or
             (if (typeRefs.isEmpty()) 0L else 1L shl TABLE_TYPE_REF) or
             (1L shl TABLE_TYPE_DEF) or
+            (if (methodCount == 0) 0L else 1L shl TABLE_METHOD_DEF) or
             (if (interfaceImplCount() > 0) 1L shl TABLE_INTERFACE_IMPL else 0L) or
             (if (attributeMemberRefs.isEmpty()) 0L else 1L shl TABLE_MEMBER_REF) or
             (if (customAttributes.isEmpty()) 0L else 1L shl TABLE_CUSTOM_ATTRIBUTE) or
+            (if (properties.isEmpty()) 0L else (1L shl TABLE_PROPERTY_MAP) or (1L shl TABLE_PROPERTY) or (1L shl TABLE_METHOD_SEMANTICS)) or
             (1L shl TABLE_ASSEMBLY) or
             (if (assemblyRefs.isEmpty()) 0L else 1L shl TABLE_ASSEMBLY_REF)
         writer.int32(0)
@@ -171,6 +212,7 @@ private class WinmdBuilder(
             writer.int32(typeRefs.size)
         }
         writer.int32(typeDefCount())
+        if (methodCount > 0) writer.int32(methodCount)
         if (interfaceImplCount() > 0) {
             writer.int32(interfaceImplCount())
         }
@@ -179,6 +221,11 @@ private class WinmdBuilder(
         }
         if (customAttributes.isNotEmpty()) {
             writer.int32(customAttributes.size)
+        }
+        if (properties.isNotEmpty()) {
+            writer.int32(properties.map { it.first }.distinct().size)
+            writer.int32(properties.size)
+            writer.int32(accessorCount)
         }
         writer.int32(1)
         if (assemblyRefs.isNotEmpty()) writer.int32(assemblyRefs.size)
@@ -209,6 +256,7 @@ private class WinmdBuilder(
             writer.index(1)
             writer.index(1)
         }
+        var firstMethod = 1
         runtimeClasses.forEach { descriptor ->
             val namespace = descriptor.runtimeClassName.substringBeforeLast('.', missingDelimiterValue = "")
             val name = descriptor.runtimeClassName.substringAfterLast('.')
@@ -218,7 +266,25 @@ private class WinmdBuilder(
             writer.index(strings.index(namespace))
             writer.index(codedTypeDefOrRef(typeRefs, localTypeDefRowIds, baseTypeName))
             writer.index(1)
-            writer.index(1)
+            writer.index(firstMethod)
+            firstMethod += properties.filter { it.first == descriptor.runtimeClassName }.sumOf { if (it.second.isReadOnly) 1 else 2 } +
+                if (hasApplicationConstructor(descriptor)) 1 else 0
+        }
+        // CsWinRT WinRTTypeWriter.AddPropertyDefinition: accessor MethodDefs plus MethodSemantics.
+        fun method(name: String, flags: Int, signature: ByteArray) {
+            writer.int32(0) // metadata-only, no RVA
+            writer.int16(0x1003) // Runtime | InternalCall
+            writer.int16(flags)
+            writer.index(strings.index(name)); writer.index(blobs.index(signature))
+            writer.index(1) // no Param table; signatures own arity
+        }
+        runtimeClasses.forEach { type ->
+            if (hasApplicationConstructor(type)) method(".ctor", 0x1886, byteArrayOf(0x20, 0, 1))
+            properties.filter { it.first == type.runtimeClassName }.forEach { (_, property) ->
+                val signature = signature(property.type, typeRefs, localTypeDefRowIds)
+                method("get_${property.name}", 0x0886, byteArrayOf(0x20, 0) + signature)
+                if (!property.isReadOnly) method("put_${property.name}", 0x0886, byteArrayOf(0x20, 1, 1) + signature)
+            }
         }
         interfaces.forEach { descriptor ->
             val typeDefRowId = requireNotNull(localTypeDefRowIds[descriptor.interfaceName])
@@ -244,6 +310,22 @@ private class WinmdBuilder(
             writer.index((attribute.memberRefRowId shl CODED_CUSTOM_ATTRIBUTE_TYPE_TAG_BITS) or CODED_CUSTOM_ATTRIBUTE_TYPE_MEMBER_REF)
             writer.index(attribute.valueBlobIndex)
         }
+        properties.forEachIndexed { index, (owner, _) ->
+            if (index == 0 || properties[index - 1].first != owner) {
+                writer.index(localTypeDefRowIds.getValue(owner)); writer.index(index + 1)
+            }
+        }
+        properties.forEach { (_, property) ->
+            writer.int16(0); writer.index(strings.index(property.name))
+            writer.index(blobs.index(byteArrayOf(0x28, 0) + signature(property.type, typeRefs, localTypeDefRowIds)))
+        }
+        properties.forEachIndexed { index, (owner, property) ->
+            val accessorId = getterIds.getValue(owner to property.name)
+            writer.int16(2); writer.index(accessorId); writer.index(((index + 1) shl 1) or 1)
+            if (!property.isReadOnly) {
+                writer.int16(1); writer.index(accessorId + 1); writer.index(((index + 1) shl 1) or 1)
+            }
+        }
         writer.int32(0x00008004)
         writer.int16(1)
         writer.int16(0)
@@ -268,6 +350,7 @@ private class WinmdBuilder(
 
     private fun attributeMemberRefs(typeRefs: List<TypeRefRow>): List<AttributeMemberRefRow> =
         listOf(
+            XAML_CONTENT_PROPERTY to emptyList<Int>(),
             WINDOWS_FOUNDATION_METADATA_DEFAULT to emptyList<Int>(),
             WINDOWS_FOUNDATION_METADATA_OVERRIDABLE to emptyList(),
             WINDOWS_FOUNDATION_METADATA_GUID to listOf(ELEMENT_TYPE_STRING),
@@ -361,6 +444,15 @@ private class WinmdBuilder(
         }
         runtimeClasses.forEachIndexed { index, descriptor ->
             val typeDefRowId = index + 2 + interfaces.size
+            applicationMembers[descriptor.runtimeClassName]?.contentProperty?.let { content ->
+                val value = BinaryWriter().apply {
+                    int16(1); int16(1) // prolog, one named field
+                    int8(0x53); int8(ELEMENT_TYPE_STRING)
+                    serializedString("Name"); serializedString(content)
+                }.toByteArray()
+                rows += CustomAttributeRow(hasCustomAttributeToken(typeDefRowId, CODED_HAS_CUSTOM_ATTRIBUTE_TYPE_DEF),
+                    memberRefRowIds.getValue(XAML_CONTENT_PROPERTY), blobs.index(value))
+            }
             memberRefRowIds[WINDOWS_FOUNDATION_METADATA_VERSION]?.let { memberRefRowId ->
                 rows += CustomAttributeRow(
                     parentToken = hasCustomAttributeToken(
@@ -406,6 +498,43 @@ private class WinmdBuilder(
             ELEMENT_TYPE_VOID.toByte(),
             *parameterElementTypes.map(Int::toByte).toByteArray(),
         )
+
+    private fun signatureReferences(type: WinRTTypeRef): List<String> = when (type.kind) {
+        WinRTTypeRefKind.Array -> signatureReferences(requireNotNull(type.elementType))
+        WinRTTypeRefKind.Named -> {
+            val name = requireNotNull(type.qualifiedName)
+            (if (winRTFundamentalTypeForName(name) != null || isWinRTObjectTypeName(name)) emptyList() else listOf(name)) +
+                type.typeArguments.flatMap(::signatureReferences)
+        }
+        else -> error("XAML application property requires a closed type: ${type.typeName}")
+    }
+
+    private fun signature(type: WinRTTypeRef, refs: List<TypeRefRow>, locals: Map<String, Int>): ByteArray = BinaryWriter().apply {
+        require(!type.isByRef && type.requiredModifiers.isEmpty() && type.optionalModifiers.isEmpty()) {
+            "XAML application properties cannot have by-reference or modified signatures: ${type.typeName}"
+        }
+        if (type.kind == WinRTTypeRefKind.Array) {
+            require(type.arrayRank <= 1) { "Only vector XAML properties are supported" }
+            int8(0x1d); bytes(signature(requireNotNull(type.elementType), refs, locals))
+        } else {
+            require(type.kind == WinRTTypeRefKind.Named)
+            val name = requireNotNull(type.qualifiedName)
+            val primitive = winRTFundamentalTypeForName(name)
+            when {
+                primitive != null -> int8(primitive.cliElementType)
+                isWinRTObjectTypeName(name) -> int8(0x1c)
+                else -> {
+                    if (type.typeArguments.isNotEmpty()) int8(0x15)
+                    int8(if (name in valueTypeNames) 0x11 else 0x12)
+                    compressedUInt(codedTypeDefOrRef(refs, locals, name))
+                    if (type.typeArguments.isNotEmpty()) {
+                        compressedUInt(type.typeArguments.size)
+                        type.typeArguments.forEach { bytes(signature(it, refs, locals)) }
+                    }
+                }
+            }
+        }
+    }.toByteArray()
 
     private fun hasCustomAttributeToken(rowId: Int, tag: Int): Int =
         (rowId shl CODED_HAS_CUSTOM_ATTRIBUTE_TAG_BITS) or tag
@@ -599,6 +728,11 @@ private class WinmdBuilder(
         const val TABLE_MODULE = 0
         const val TABLE_TYPE_REF = 1
         const val TABLE_TYPE_DEF = 2
+        const val TABLE_METHOD_DEF = 6
+        const val TABLE_PROPERTY_MAP = 21
+        const val TABLE_PROPERTY = 23
+        const val TABLE_METHOD_SEMANTICS = 24
+        const val XAML_CONTENT_PROPERTY = "Microsoft.UI.Xaml.Markup.ContentPropertyAttribute"
         const val TABLE_INTERFACE_IMPL = 9
         const val TABLE_MEMBER_REF = 10
         const val TABLE_CUSTOM_ATTRIBUTE = 12
@@ -691,6 +825,20 @@ private class BinaryWriter {
     }
 
     fun index(value: Int) = int16(value)
+
+    fun compressedUInt(value: Int) {
+        require(value in 0..0x1fffffff)
+        when {
+            value < 0x80 -> int8(value)
+            value < 0x4000 -> { int8((value ushr 8) or 0x80); int8(value) }
+            else -> { int8((value ushr 24) or 0xc0); int8(value ushr 16); int8(value ushr 8); int8(value) }
+        }
+    }
+
+    fun serializedString(value: String) {
+        val encoded = value.toByteArray(StandardCharsets.UTF_8)
+        compressedUInt(encoded.size); bytes(encoded)
+    }
 
     fun ascii(value: String) {
         bytes(value.toByteArray(StandardCharsets.US_ASCII))

@@ -1,20 +1,23 @@
 package io.github.composefluent.winrt.metadata
 
-enum class WinRTFundamentalType {
-    Boolean,
-    Char,
-    Int8,
-    UInt8,
-    Int16,
-    UInt16,
-    Int32,
-    UInt32,
-    Int64,
-    UInt64,
-    Float,
-    Double,
-    String,
+enum class WinRTFundamentalType(val cliElementType: Int) {
+    Boolean(0x02),
+    Char(0x03),
+    Int8(0x04),
+    UInt8(0x05),
+    Int16(0x06),
+    UInt16(0x07),
+    Int32(0x08),
+    UInt32(0x09),
+    Int64(0x0a),
+    UInt64(0x0b),
+    Float(0x0c),
+    Double(0x0d),
+    String(0x0e),
 }
+
+internal fun winRTFundamentalTypeForElementTypeMarker(marker: Int): WinRTFundamentalType? =
+    WinRTFundamentalType.entries.firstOrNull { it.cliElementType == marker }
 
 fun winRTFundamentalTypeForName(typeName: String): WinRTFundamentalType? =
     when (typeName.trim().substringBefore('<').removeSuffix("?")) {
