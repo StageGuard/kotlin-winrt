@@ -81,6 +81,10 @@ and the page handler retains the upstream accessibility announcement. The
 compiler connector now accepts the projected closed `TypedEventHandler` type
 for `ExecuteRequested`. Its JVM native route loads the example and activates
 the window; command interaction, visual and Native checks remain.
+AppBarButton preserves the upstream six-example XAML and six separate sample
+texts apart from Kotlin type names. Its Kotlin click handler retains each
+button's output and accessibility announcement. The JVM native route loads
+all six examples and activates the window; interaction and Native checks remain.
 
 | Route | Group | Kotlin source | Existing sample factories | Migration |
 | --- | --- | --- | ---: | --- |
@@ -148,7 +152,7 @@ the window; command interaction, visual and Native checks remain.
 | PersonPicture | Media | [PersonPicturePage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/media/PersonPicturePage.kt) | 1 | Pending |
 | Sound | Media | [SoundPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/media/SoundPage.kt) | 3 | Pending |
 | WebView2 | Media | [WebView2Page.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/media/WebView2Page.kt) | 1 | Pending |
-| AppBarButton | MenusAndToolbars | [AppBarButtonPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/menusandtoolbars/AppBarButtonPage.kt) | 6 | Pending |
+| AppBarButton | MenusAndToolbars | [AppBarButtonPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/menusandtoolbars/AppBarButtonPage.kt) | 6 | Original XAML and six sample texts preserved apart from namespace mapping; JVM native page load passed; interaction and Native checks pending |
 | AppBarSeparator | MenusAndToolbars | [AppBarSeparatorPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/menusandtoolbars/AppBarSeparatorPage.kt) | 1 | Original XAML and sample text preserved apart from namespace mapping; JVM native page load passed; visual and Native checks pending |
 | AppBarToggleButton | MenusAndToolbars | [AppBarToggleButtonPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/menusandtoolbars/AppBarToggleButtonPage.kt) | 4 | Pending |
 | CommandBar | MenusAndToolbars | [CommandBarPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/menusandtoolbars/CommandBarPage.kt) | 1 | Pending |
@@ -213,9 +217,9 @@ the window; command interaction, visual and Native checks remain.
 | --- | --- | --- |
 | Application resources and startup | Main.kt / GalleryApplication | Pending |
 | Main window and navigation | MainWindow.kt / GalleryNavigationHost.kt | Pending |
-| Page headers and sample frames | ControlExample.xaml / ControlExample.kt / GalleryTheme.kt | Eight BasicInput routes plus AppBarSeparator, Pivot, CalendarDatePicker, DatePicker, ToolTip, Flyout, TextBox, PasswordBox, XamlStyles, RelativePanel and XamlUICommand use shared XAML control; original private components and other routes pending |
+| Page headers and sample frames | ControlExample.xaml / ControlExample.kt / GalleryTheme.kt | Eight BasicInput routes plus AppBarButton, AppBarSeparator, Pivot, CalendarDatePicker, DatePicker, ToolTip, Flyout, TextBox, PasswordBox, XamlStyles, RelativePanel and XamlUICommand use shared XAML control; original private components and other routes pending |
 | Settings and All routes | GallerySettingsPage.kt / navigation host | Pending |
-| Example source display and copy | processor / code-document / code UI | SampleDefinition selects separate XAML/Kotlin files on nineteen routes; remaining routes pending |
+| Example source display and copy | processor / code-document / code UI | SampleDefinition selects separate XAML/Kotlin files on twenty routes; remaining routes pending |
 | Styles, dictionaries and templates | shared UI and relevant individual pages | Pending |
 
 This is the source inventory (122 existing annotated routes including Home). Visual baselines, feature prerequisites, and interaction acceptance remain to be captured before marking any route complete.
