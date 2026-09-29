@@ -12,8 +12,6 @@ internal class ToggleSwitchPage : Page() {
         super.initializeComponent()
         initialized = true
         progress.isActive = workToggle.isOn
-        bindXamlExample("A simple ToggleSwitch.", simpleExample, simpleBody, simpleSource)
-        bindXamlExample("A ToggleSwitch with custom content.", workExample, workBody, workSource)
     }
 
     private fun onWorkToggled(sender: Any?, args: RoutedEventArgs) {

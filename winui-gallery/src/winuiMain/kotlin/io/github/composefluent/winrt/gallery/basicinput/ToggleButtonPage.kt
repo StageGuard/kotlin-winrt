@@ -8,7 +8,6 @@ import microsoft.ui.xaml.controls.Page
 internal class ToggleButtonPage : Page() {
     override fun initializeComponent() {
         super.initializeComponent()
-        bindXamlExample("A simple ToggleButton.", toggleExample, toggleBody, toggleSource, toggleOptions)
     }
 
     private fun onToggleClick(sender: Any?, args: RoutedEventArgs) {

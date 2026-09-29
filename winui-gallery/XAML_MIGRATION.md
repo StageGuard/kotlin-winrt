@@ -15,6 +15,9 @@ and adaptive layout. CommunityToolkit animations and Gallery-private presenters
 remain outside this adaptation. The wrapping sample uses an explicit
 `ControlExample.Example` element: with implicit child syntax, the native load
 completed without calling the authored `Example` setter.
+CheckBox, RepeatButton, ToggleButton, and ToggleSwitch also use the shared
+control with their own separate sample files. All five routes passed their
+existing JVM native interaction checks after migration.
 
 | Route | Group | Kotlin source | Existing sample factories | Migration |
 | --- | --- | --- | ---: | --- |
@@ -24,19 +27,19 @@ completed without calling the authored `Example` setter.
 | AccessibilityKeyboard | AccessibilityItem | [AccessibilityKeyboardPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/accessibility/AccessibilityKeyboardPage.kt) | 6 | Pending |
 | AccessibilityScreenReader | AccessibilityItem | [AccessibilityScreenReaderPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/accessibility/AccessibilityScreenReaderPage.kt) | 11 | Pending |
 | Button | BasicInput | [ButtonPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/basicinput/ButtonPage.kt) | 4 | Four shared XAML examples with separate source files; JVM native interaction/source checks passed; original template, visual and Native checks pending |
-| CheckBox | BasicInput | [CheckBoxPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/basicinput/CheckBoxPage.kt) | 3 | XAML + Kotlin; JVM native state/event/source checks passed; visual and Native checks pending |
+| CheckBox | BasicInput | [CheckBoxPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/basicinput/CheckBoxPage.kt) | 3 | Three shared XAML examples with separate source files; JVM native state/event/source checks passed; visual and Native checks pending |
 | ColorPicker | BasicInput | [ColorPickerPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/basicinput/ColorPickerPage.kt) | 1 | Pending |
 | ComboBox | BasicInput | [ComboBoxPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/basicinput/ComboBoxPage.kt) | 3 | Pending |
 | DropDownButton | BasicInput | [DropDownButtonPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/basicinput/DropDownButtonPage.kt) | 2 | Pending |
 | HyperlinkButton | BasicInput | [HyperlinkButtonPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/basicinput/HyperlinkButtonPage.kt) | 2 | Pending |
 | RadioButton | BasicInput | [RadioButtonPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/basicinput/RadioButtonPage.kt) | 2 | Pending |
 | RatingControl | BasicInput | [RatingControlPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/basicinput/RatingControlPage.kt) | 2 | Pending |
-| RepeatButton | BasicInput | [RepeatButtonPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/basicinput/RepeatButtonPage.kt) | 1 | XAML + Kotlin; JVM native click/disable checks passed; visual and Native checks pending |
+| RepeatButton | BasicInput | [RepeatButtonPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/basicinput/RepeatButtonPage.kt) | 1 | Shared XAML example with separate source file; JVM native click/disable checks passed; visual and Native checks pending |
 | Slider | BasicInput | [SliderPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/basicinput/SliderPage.kt) | 4 | Pending |
 | SplitButton | BasicInput | [SplitButtonPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/basicinput/SplitButtonPage.kt) | 2 | Pending |
-| ToggleButton | BasicInput | [ToggleButtonPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/basicinput/ToggleButtonPage.kt) | 1 | XAML + Kotlin; JVM native state/event/disable checks passed; visual and Native checks pending |
+| ToggleButton | BasicInput | [ToggleButtonPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/basicinput/ToggleButtonPage.kt) | 1 | Shared XAML example with separate source file; JVM native state/event/disable checks passed; visual and Native checks pending |
 | ToggleSplitButton | BasicInput | [ToggleSplitButtonPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/basicinput/ToggleSplitButtonPage.kt) | 1 | Pending |
-| ToggleSwitch | BasicInput | [ToggleSwitchPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/basicinput/ToggleSwitchPage.kt) | 2 | XAML + Kotlin; JVM native state/event/source checks passed; visual and Native checks pending |
+| ToggleSwitch | BasicInput | [ToggleSwitchPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/basicinput/ToggleSwitchPage.kt) | 2 | Two shared XAML examples with separate source files; JVM native state/event/source checks passed; visual and Native checks pending |
 | FlipView | Collections | [FlipViewPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/collections/FlipViewPage.kt) | 3 | Pending |
 | GridView | Collections | [GridViewPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/collections/GridViewPage.kt) | 3 | Pending |
 | ItemsRepeater | Collections | [ItemsRepeaterPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/collections/ItemsRepeaterPage.kt) | 6 | Pending |
@@ -147,9 +150,9 @@ completed without calling the authored `Example` setter.
 | --- | --- | --- |
 | Application resources and startup | Main.kt / GalleryApplication | Pending |
 | Main window and navigation | MainWindow.kt / GalleryNavigationHost.kt | Pending |
-| Page headers and sample frames | ControlExample.xaml / ControlExample.kt / GalleryTheme.kt | Button uses shared XAML control; original template and other routes pending |
+| Page headers and sample frames | ControlExample.xaml / ControlExample.kt / GalleryTheme.kt | Five BasicInput routes use shared XAML control; original private components and other routes pending |
 | Settings and All routes | GallerySettingsPage.kt / navigation host | Pending |
-| Example source display and copy | processor / code-document / code UI | SampleDefinition selects separate Button XAML/Kotlin files; remaining routes pending |
+| Example source display and copy | processor / code-document / code UI | SampleDefinition selects separate XAML/Kotlin files on five routes; remaining routes pending |
 | Styles, dictionaries and templates | shared UI and relevant individual pages | Pending |
 
 This is the source inventory (122 existing annotated routes including Home). Visual baselines, feature prerequisites, and interaction acceptance remain to be captured before marking any route complete.

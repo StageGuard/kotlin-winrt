@@ -10,7 +10,6 @@ internal class RepeatButtonPage : Page() {
 
     override fun initializeComponent() {
         super.initializeComponent()
-        bindXamlExample("A simple RepeatButton.", repeatExample, repeatBody, repeatSource, repeatOptions)
     }
 
     private fun onRepeatClick(sender: Any?, args: RoutedEventArgs) {

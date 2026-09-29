@@ -32,10 +32,10 @@ internal fun validateCheckBoxPage(page: CheckBoxPage) = with(page) {
     }, {
         check(allOptions.isChecked == true && listOf(option1, option2, option3).all { it.isChecked == true })
         ToggleButtonAutomationPeer(option2).toggle()
-        threeStateSource.isExpanded = true
+        threeStateExample.sourcePresenter.isExpanded = true
     }, {
         check(allOptions.isChecked == null && option2.isChecked == false)
-        check(threeStateSource.content != null)
+        check(threeStateExample.sourcePresenter.content != null)
     }))
 }
 
@@ -81,8 +81,8 @@ internal fun validateToggleSwitchPage(page: ToggleSwitchPage) = with(page) {
         check(simpleToggle.isOn && !workToggle.isOn && !progress.isActive)
         check(workToggle.offContent == "Do work" && workToggle.onContent == "Working")
         ToggleSwitchAutomationPeer(workToggle).toggle()
-        workSource.isExpanded = true
+        workExample.sourcePresenter.isExpanded = true
     }, {
-        check(workToggle.isOn && progress.isActive && workSource.content != null)
+        check(workToggle.isOn && progress.isActive && workExample.sourcePresenter.content != null)
     }))
 }

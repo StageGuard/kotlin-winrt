@@ -8,9 +8,6 @@ import microsoft.ui.xaml.controls.*
 internal class CheckBoxPage : Page() {
     override fun initializeComponent() {
         super.initializeComponent()
-        bindXamlExample("A two-state CheckBox.", twoStateExample, twoStateBody, twoStateSource)
-        bindXamlExample("A three-state CheckBox.", threeStateExample, threeStateBody, threeStateSource)
-        bindXamlExample("Using a three-state CheckBox as a Select all control.", selectAllExample, selectAllBody, selectAllSource)
     }
 
     private fun onTwoStateClick(sender: Any?, args: RoutedEventArgs) {
