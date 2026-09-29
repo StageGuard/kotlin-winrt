@@ -12,9 +12,11 @@ Button now uses four `ControlExample` XAML instances and four independent
 `SampleDefinition` text files. The shared control retains the original header,
 error placeholder, three-column example/output/options grid, source expander,
 and adaptive layout. CommunityToolkit animations and Gallery-private presenters
-remain outside this adaptation. The wrapping sample uses an explicit
-`ControlExample.Example` element: with implicit child syntax, the native load
-completed without calling the authored `Example` setter.
+remain outside this adaptation. The wrapping sample uses Gallery's implicit
+`ControlExample` content syntax after sorting authored WinMD attributes by parent;
+the native load now calls all four `Example` setters. One native run bound the
+styles source presenter to the preceding image sample; the mismatch has not
+reproduced consistently, so named-instance identity needs continued observation.
 CheckBox, RepeatButton, ToggleButton, and ToggleSwitch also use the shared
 control with their own separate sample files. All five routes passed their
 existing JVM native interaction checks after migration.
