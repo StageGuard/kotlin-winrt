@@ -16,19 +16,19 @@ not establish visual, Native, IDE, or existing-page migration acceptance.
 | AccessibilityKeyboard | AccessibilityItem | [AccessibilityKeyboardPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/accessibility/AccessibilityKeyboardPage.kt) | 6 | Pending |
 | AccessibilityScreenReader | AccessibilityItem | [AccessibilityScreenReaderPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/accessibility/AccessibilityScreenReaderPage.kt) | 11 | Pending |
 | Button | BasicInput | [ButtonPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/basicinput/ButtonPage.kt) | 4 | XAML + Kotlin; JVM native interaction/source checks passed; visual and Native checks pending |
-| CheckBox | BasicInput | [CheckBoxPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/basicinput/CheckBoxPage.kt) | 3 | Pending |
+| CheckBox | BasicInput | [CheckBoxPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/basicinput/CheckBoxPage.kt) | 3 | XAML + Kotlin; JVM native state/event/source checks passed; visual and Native checks pending |
 | ColorPicker | BasicInput | [ColorPickerPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/basicinput/ColorPickerPage.kt) | 1 | Pending |
 | ComboBox | BasicInput | [ComboBoxPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/basicinput/ComboBoxPage.kt) | 3 | Pending |
 | DropDownButton | BasicInput | [DropDownButtonPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/basicinput/DropDownButtonPage.kt) | 2 | Pending |
 | HyperlinkButton | BasicInput | [HyperlinkButtonPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/basicinput/HyperlinkButtonPage.kt) | 2 | Pending |
 | RadioButton | BasicInput | [RadioButtonPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/basicinput/RadioButtonPage.kt) | 2 | Pending |
 | RatingControl | BasicInput | [RatingControlPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/basicinput/RatingControlPage.kt) | 2 | Pending |
-| RepeatButton | BasicInput | [RepeatButtonPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/basicinput/RepeatButtonPage.kt) | 1 | Pending |
+| RepeatButton | BasicInput | [RepeatButtonPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/basicinput/RepeatButtonPage.kt) | 1 | XAML + Kotlin; JVM native click/disable checks passed; visual and Native checks pending |
 | Slider | BasicInput | [SliderPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/basicinput/SliderPage.kt) | 4 | Pending |
 | SplitButton | BasicInput | [SplitButtonPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/basicinput/SplitButtonPage.kt) | 2 | Pending |
-| ToggleButton | BasicInput | [ToggleButtonPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/basicinput/ToggleButtonPage.kt) | 1 | Pending |
+| ToggleButton | BasicInput | [ToggleButtonPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/basicinput/ToggleButtonPage.kt) | 1 | XAML + Kotlin; JVM native state/event/disable checks passed; visual and Native checks pending |
 | ToggleSplitButton | BasicInput | [ToggleSplitButtonPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/basicinput/ToggleSplitButtonPage.kt) | 1 | Pending |
-| ToggleSwitch | BasicInput | [ToggleSwitchPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/basicinput/ToggleSwitchPage.kt) | 2 | Pending |
+| ToggleSwitch | BasicInput | [ToggleSwitchPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/basicinput/ToggleSwitchPage.kt) | 2 | XAML + Kotlin; JVM native state/event/source checks passed; visual and Native checks pending |
 | FlipView | Collections | [FlipViewPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/collections/FlipViewPage.kt) | 3 | Pending |
 | GridView | Collections | [GridViewPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/collections/GridViewPage.kt) | 3 | Pending |
 | ItemsRepeater | Collections | [ItemsRepeaterPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/collections/ItemsRepeaterPage.kt) | 6 | Pending |

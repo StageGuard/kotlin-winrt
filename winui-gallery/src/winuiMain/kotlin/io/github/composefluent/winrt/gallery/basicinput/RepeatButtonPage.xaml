@@ -1,0 +1,33 @@
+<Page xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      x:Class="io.github.composefluent.winrt.gallery.basicinput.RepeatButtonPage">
+    <Page.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="../GalleryExampleResources.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Page.Resources>
+    <StackPanel>
+        <StackPanel x:Name="repeatExample" Margin="0,16,0,0">
+            <TextBlock Text="A simple RepeatButton." Style="{StaticResource GalleryExampleTitleStyle}" />
+            <Grid x:Name="repeatBody" Style="{StaticResource GalleryExampleBodyStyle}">
+                <Grid.RowDefinitions><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                <Border Padding="12" MinHeight="80">
+                    <RepeatButton x:Name="repeatButton" Content="Click and hold" Click="onRepeatClick" />
+                </Border>
+                <StackPanel Grid.Column="1" Padding="16" MaxWidth="320" Margin="0,12,12,12" CornerRadius="8"
+                            Spacing="8" Background="{ThemeResource GalleryExampleBackground}">
+                    <TextBlock Text="Output:" TextWrapping="Wrap" />
+                    <TextBlock x:Name="output" TextWrapping="Wrap" />
+                </StackPanel>
+                <Border x:Name="repeatOptions" Grid.Column="2" Padding="16" MaxWidth="320" BorderThickness="1,0,0,0"
+                        CornerRadius="0,8,0,0" Background="{ThemeResource GalleryOptionsBackground}" BorderBrush="{ThemeResource GalleryOptionsBorder}">
+                    <CheckBox x:Name="disableRepeat" Content="Disable RepeatButton" Click="onDisableClick" />
+                </Border>
+            </Grid>
+            <Expander x:Name="repeatSource" Style="{StaticResource GalleryExampleSourceStyle}" />
+        </StackPanel>
+    </StackPanel>
+</Page>
