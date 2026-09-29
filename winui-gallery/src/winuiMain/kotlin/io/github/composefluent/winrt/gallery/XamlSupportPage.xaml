@@ -3,7 +3,7 @@
       x:Class="io.github.composefluent.winrt.gallery.XamlSupportPage">
     <StackPanel Spacing="12">
         <TextBlock Text="XAML + Kotlin" FontSize="24" />
-        <TextBlock Text="The adjacent XAML file supplies this page's controls. The click handler is a private Kotlin instance method."
+        <TextBlock Text="The adjacent XAML file supplies this page's controls. The click handler is a private Kotlin instance method. No page annotation is required."
                    TextWrapping="Wrap" />
         <Button x:Name="increment" Content="Increment" Click="onIncrement" />
         <TextBlock x:Name="output" Text="Clicked 0 times" />

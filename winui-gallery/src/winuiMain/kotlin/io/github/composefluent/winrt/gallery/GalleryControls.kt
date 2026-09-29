@@ -165,7 +165,7 @@ private fun renderExample(title: String, sample: UIElement, options: UIElement?,
                 val document = checkNotNull(route?.let { GalleryCodeCatalog.document(it, title, exampleIndex) }) {
                     "No Kotlin source registered for $route example $exampleIndex"
                 }
-                content = kotlinCodePreview(document)
+                content = kotlinCodePreview(document, route?.let { GalleryCodeCatalog.xamlDocument(it) })
                 initialized = true
             }
         }

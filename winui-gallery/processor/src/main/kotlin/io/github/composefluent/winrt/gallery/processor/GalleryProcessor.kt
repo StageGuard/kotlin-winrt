@@ -125,8 +125,31 @@ private class GalleryProcessor(
         val extractor = KotlinExampleExtractor()
         val sampleExtractor = KotlinSampleSourceExtractor()
         val parser = KotlinSourceParser()
+        val xamlDocuments = linkedMapOf<String, String>()
         data class RoutePreviews(val titleIndices: Map<String, Int>, val count: Int)
         val examples = pages.mapIndexed { routeIndex, page ->
+            val pageFile = java.io.File(sources.single { it.fileName == page.source }.filePath)
+            val xamlFile = java.io.File(pageFile.parentFile, "${pageFile.nameWithoutExtension}.xaml")
+            if (xamlFile.isFile) {
+                // A migrated page's factory only constructs its code-behind class.
+                // Show that class and markup, never the obsolete code-only sample.
+                val source = texts.getValue(page.source)
+                val kotlinName = "GalleryCode${routeIndex}_0"
+                val xamlName = "GalleryXaml$routeIndex"
+                val documents = listOf(
+                    kotlinName to parser.parse(page.source, source, isScript = false),
+                    xamlName to XamlSourceParser().parse(xamlFile.name, xamlFile.readText()),
+                )
+                val origins = mapOf(kotlinName to KotlinCodeOriginData(
+                    repositoryRelativePath(pageFile.path, repositoryRoot),
+                    KotlinSourceFragment(source, IntArray(source.length) { it }),
+                ))
+                codeGenerator.createNewFile(
+                    Dependencies(true, *sources.toTypedArray()), galleryPackage, "GalleryCode$routeIndex",
+                ).bufferedWriter().use { it.write(generateCodeDocuments(documents, origins)) }
+                xamlDocuments[page.route] = xamlName
+                return@mapIndexed RoutePreviews(emptyMap(), 1)
+            }
             val origins = mutableMapOf<String, KotlinCodeOriginData>()
             fun document(name: String, fileName: String, fragment: KotlinSourceFragment): Pair<String, io.github.composefluent.winrt.gallery.code.KotlinCodeDocument> {
                 origins[name] = KotlinCodeOriginData(
@@ -177,6 +200,11 @@ private class GalleryProcessor(
                 writer.appendLine("        else -> GalleryCode${routeIndex}_${previews.count - 1}.create()")
                 writer.appendLine("      }")
                 writer.appendLine("    }")
+            }
+            writer.appendLine("    else -> null\n  }")
+            writer.appendLine("  actual fun xamlDocument(route: String): $galleryPackage.code.KotlinCodeDocument? = when (route) {")
+            xamlDocuments.forEach { (route, name) ->
+                writer.appendLine("    ${kotlinLiteral(route)} -> $name.create()")
             }
             writer.appendLine("    else -> null\n  }\n}")
         }

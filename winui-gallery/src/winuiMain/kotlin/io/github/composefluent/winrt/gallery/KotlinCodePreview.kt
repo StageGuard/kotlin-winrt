@@ -10,8 +10,11 @@ import windows.applicationmodel.datatransfer.DataPackage
 import windows.ui.text.FontStyle
 import windows.ui.viewmanagement.AccessibilitySettings
 
-/** Rendering consumes parsed spans, never recognizes Kotlin syntax or loads markup. */
-internal fun kotlinCodePreview(document: KotlinCodeDocument): UIElement = Grid().apply {
+/** Rendering consumes build-time spans; displaying XAML never executes the markup. */
+internal fun kotlinCodePreview(document: KotlinCodeDocument, xamlDocument: KotlinCodeDocument? = null): UIElement = Grid().apply {
+    val documents = listOfNotNull(xamlDocument, document)
+    var currentDocument = documents.first()
+    fun language(value: KotlinCodeDocument) = if (value.fileName.endsWith(".xaml", true)) "XAML" else "Kotlin"
     rowSpacing = 16.0
     rowDefinitions.add(autoRow())
     rowDefinitions.add(starRow())
@@ -20,16 +23,8 @@ internal fun kotlinCodePreview(document: KotlinCodeDocument): UIElement = Grid()
         fontSize = 14.0
         textWrapping = TextWrapping.NoWrap
         isTextSelectionEnabled = true
-        named(this, "Kotlin source: ${document.fileName}")
     }
     val runs = mutableListOf<Pair<Run, KotlinCodeKind>>()
-    var start = 0
-    document.spans.forEach { span ->
-        val run = Run().apply { text = document.source.substring(start, span.end) }
-        code.inlines.add(run)
-        runs += run to span.kind
-        start = span.end
-    }
     val accessibility = AccessibilitySettings()
     fun applyPalette() {
         val highContrast = accessibility.highContrast
@@ -42,10 +37,32 @@ internal fun kotlinCodePreview(document: KotlinCodeDocument): UIElement = Grid()
             run.fontStyle = if (palette.style(kind).italic) FontStyle.Italic else FontStyle.Normal
         }
     }
+    fun showDocument() {
+        code.inlines.clear()
+        runs.clear()
+        named(code, "${language(currentDocument)} source: ${currentDocument.fileName}")
+        var start = 0
+        currentDocument.spans.forEach { span ->
+            val run = Run().apply { text = currentDocument.source.substring(start, span.end) }
+            code.inlines.add(run)
+            runs += run to span.kind
+            start = span.end
+        }
+        applyPalette()
+    }
     children.add(SelectorBar().apply {
         Grid.setRow(this, 0)
         margin = Thickness(-12.0, 0.0, 0.0, 0.0)
-        items.add(SelectorBarItem().apply { text = "Kotlin"; isSelected = true })
+        val tabs = documents.map { value -> SelectorBarItem().apply { text = language(value) } }
+        tabs.forEach { items.add(it) }
+        selectedItem = tabs.first()
+        selectionChanged.add { _, _ ->
+            val index = tabs.indexOf(selectedItem)
+            if (index >= 0 && currentDocument !== documents[index]) {
+                currentDocument = documents[index]
+                showDocument()
+            }
+        }
     })
     children.add(Grid().apply {
         Grid.setRow(this, 1)
@@ -68,10 +85,10 @@ internal fun kotlinCodePreview(document: KotlinCodeDocument): UIElement = Grid()
             content = glyph("\uE8C8")
             named(this, "Copy code")
             ToolTipService.setToolTip(this, "Copy to clipboard")
-            click.add { _, _ -> Clipboard.setContent(DataPackage().apply { setText(document.source) }) }
+            click.add { _, _ -> Clipboard.setContent(DataPackage().apply { setText(currentDocument.source) }) }
         })
     })
     actualThemeChanged.add { _, _ -> applyPalette() }
     GalleryTheme.observe(this) { applyPalette() }
-    applyPalette()
+    showDocument()
 }

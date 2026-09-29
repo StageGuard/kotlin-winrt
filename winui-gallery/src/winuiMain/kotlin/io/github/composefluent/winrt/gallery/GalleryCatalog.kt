@@ -20,4 +20,5 @@ internal expect object GallerySymbols {
 
 internal expect object GalleryCodeCatalog {
     fun document(route: String, title: String, index: Int): io.github.composefluent.winrt.gallery.code.KotlinCodeDocument?
+    fun xamlDocument(route: String): io.github.composefluent.winrt.gallery.code.KotlinCodeDocument?
 }
