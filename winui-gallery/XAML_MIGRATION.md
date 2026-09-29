@@ -28,6 +28,10 @@ RadioButton also keeps the original two-example layout, including implicit
 `ControlExample` content and `x:String` items. The original substitution
 presenters are not yet part of the shared control. Its JVM native route loads
 both examples and activates the window; interactions remain to be checked.
+DropDownButton uses the [upstream WinUI Gallery files](https://github.com/microsoft/WinUI-Gallery/tree/0451d6181395b46439f0d7492b2f36b70b484837/WinUIGallery/Samples/DropDownButton):
+its XAML differs only in the Kotlin class and controls namespace, and both
+sample text files are byte-for-byte copies. The JVM native route loads both
+examples and activates the window; flyout interactions remain to be checked.
 
 | Route | Group | Kotlin source | Existing sample factories | Migration |
 | --- | --- | --- | ---: | --- |
@@ -40,7 +44,7 @@ both examples and activates the window; interactions remain to be checked.
 | CheckBox | BasicInput | [CheckBoxPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/basicinput/CheckBoxPage.kt) | 3 | Three shared XAML examples with separate source files; JVM native state/event/source checks passed; visual and Native checks pending |
 | ColorPicker | BasicInput | [ColorPickerPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/basicinput/ColorPickerPage.kt) | 1 | Pending |
 | ComboBox | BasicInput | [ComboBoxPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/basicinput/ComboBoxPage.kt) | 3 | Pending |
-| DropDownButton | BasicInput | [DropDownButtonPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/basicinput/DropDownButtonPage.kt) | 2 | Pending |
+| DropDownButton | BasicInput | [DropDownButtonPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/basicinput/DropDownButtonPage.kt) | 2 | Original XAML and sample files preserved apart from namespace mapping; JVM native page load passed; flyout, visual and Native checks pending |
 | HyperlinkButton | BasicInput | [HyperlinkButtonPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/basicinput/HyperlinkButtonPage.kt) | 2 | Two shared XAML examples with separate source files; JVM native page load passed; interaction, visual and Native checks pending |
 | RadioButton | BasicInput | [RadioButtonPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/basicinput/RadioButtonPage.kt) | 2 | Two original-layout XAML examples with separate source files; JVM native page load passed; interaction, visual and Native checks pending |
 | RatingControl | BasicInput | [RatingControlPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/basicinput/RatingControlPage.kt) | 2 | Pending |
@@ -160,9 +164,9 @@ both examples and activates the window; interactions remain to be checked.
 | --- | --- | --- |
 | Application resources and startup | Main.kt / GalleryApplication | Pending |
 | Main window and navigation | MainWindow.kt / GalleryNavigationHost.kt | Pending |
-| Page headers and sample frames | ControlExample.xaml / ControlExample.kt / GalleryTheme.kt | Seven BasicInput routes use shared XAML control; original private components and other routes pending |
+| Page headers and sample frames | ControlExample.xaml / ControlExample.kt / GalleryTheme.kt | Eight BasicInput routes use shared XAML control; original private components and other routes pending |
 | Settings and All routes | GallerySettingsPage.kt / navigation host | Pending |
-| Example source display and copy | processor / code-document / code UI | SampleDefinition selects separate XAML/Kotlin files on seven routes; remaining routes pending |
+| Example source display and copy | processor / code-document / code UI | SampleDefinition selects separate XAML/Kotlin files on eight routes; remaining routes pending |
 | Styles, dictionaries and templates | shared UI and relevant individual pages | Pending |
 
 This is the source inventory (122 existing annotated routes including Home). Visual baselines, feature prerequisites, and interaction acceptance remain to be captured before marking any route complete.
