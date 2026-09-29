@@ -2506,6 +2506,13 @@ private fun configureWinRTGeneration(
         })
     }
 
+    configureWinRTXamlPipeline(
+        project, extension, authoringSourceRoots,
+        prepareMetadataTask.flatMap { it.outputDirectory.file("kotlin-winrt-metadata/resolved-sources.tsv") },
+        prepareMetadataTask.flatMap { it.outputDirectory.file("kotlin-winrt-authoring/metadata-index.tsv") },
+        authoringCandidatesTask, compilerPluginClasspath,
+    )
+
     // KGP requests prepareKotlinIdeaImport during IDE import. Task-backed metadata must be
     // prepared through Gradle's dependency graph, never by invoking producer actions here.
     project.tasks.matching { it.name == "prepareKotlinIdeaImport" || it.name == "ideaModule" }
@@ -4733,7 +4740,7 @@ private fun configureKotlinWinRTCompilerPluginOptions(
         )
     })
     project.tasks.withType(KotlinJvmCompile::class.java).configureEach(Action<KotlinJvmCompile> { task ->
-        if (taskNameOwnsStaticProjectionSupport(task.name)) {
+        if (taskNameOwnsStaticProjectionSupport(task.name) || isXamlSemanticTask(task.name)) {
             return@Action
         }
         jvmToolchainVersion?.let { version ->
@@ -4824,7 +4831,7 @@ private fun addWinRTCompilerPluginOptions(
     )
 }
 
-private fun withoutKotlinWinRTCompilerPluginOptions(args: List<String>): List<String> {
+internal fun withoutKotlinWinRTCompilerPluginOptions(args: List<String>): List<String> {
     val filtered = ArrayList<String>(args.size)
     var index = 0
     while (index < args.size) {
