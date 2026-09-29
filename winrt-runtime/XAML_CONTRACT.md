@@ -14,3 +14,25 @@ Ownership follows `.cswinrt/src/WinRT.Runtime/ComWrappersSupport.cs` (`GetInterf
 - XamlCompiler `CSharpPagePass1.tt` guards reentrant loading before `LoadComponent`; Kotlin keeps this guard. To satisfy the approved failure contract, final generated code distinguishes loading, loaded and failed: successful repeat and synchronous reentry do nothing; failure propagates and subsequent attempts fail with the original cause rather than duplicate partially installed subscriptions. This is a narrow documented difference from the C# boolean guard. No thread-safe background XAML loading is implied.
 
 `XamlConnectorIdentityTest` verifies same outer IUnknown, same managed receiver, per-instance dispatch, borrowed target ownership and null connector output using a synthetic connector-shaped interface (its GUID is not the WinUI IID). `EventRuntimeInfrastructureCommonTest` verifies existing token/handler ownership. Native execution and real WinUI loading remain separate integration gates.
+
+## Authored XAML types
+
+`WinRTXamlTypeDefinition` and `WinRTXamlMemberDefinition` correspond to the
+`XamlUserType` activator and `XamlMember` getter/setter delegates emitted by
+XamlCompiler's `CSharpTypeInfoPass2.tt`. CsWinRT owns the underlying CCW/RCW
+identity and inspectable marshaling; Kotlin reuses those runtime responsibilities.
+Generated accessors perform direct Kotlin calls. The runtime does not reflect
+over properties, interpret markup, or duplicate value-type classification.
+
+Registered definitions extend the existing authored identity provider with
+`IsConstructible`, `ActivateInstance`, `ContentProperty`, and `GetMember`.
+Activation completes the two-phase XAML construction contract before publishing
+the owned inspectable result. Getter outputs are owned by the caller; setter
+inputs are borrowed. Members not declared on the type delegate to its base.
+Identity-only registrations retain their existing nonconstructible behavior.
+
+This shared runtime contract is the prerequisite for compiler-generated custom
+controls such as Gallery `ControlExample`. Automatic definition generation,
+pre-analysis application property metadata, compiled bindings, and end-to-end
+Native support remain incomplete; registering a definition alone does not make
+the XamlCompiler recognize a Kotlin property.
