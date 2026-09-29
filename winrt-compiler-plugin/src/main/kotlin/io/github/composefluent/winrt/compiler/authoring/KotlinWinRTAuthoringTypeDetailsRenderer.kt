@@ -1440,7 +1440,8 @@ object KotlinWinRTAuthoringTypeDetailsRenderer {
         renderRuntimeOwnedStructReturnProjection(method.returnTypeName, outExpression, valueExpression)?.let {
             return it
         }
-        val returnType = typesByName[method.returnTypeName]
+        // Nullable projection spelling does not change the WinMD identity/IID.
+        val returnType = typesByName[method.returnType.normalized().qualifiedName]
         renderDelegateReturnProjection(outExpression, valueExpression, returnType)?.let {
             return it
         }
