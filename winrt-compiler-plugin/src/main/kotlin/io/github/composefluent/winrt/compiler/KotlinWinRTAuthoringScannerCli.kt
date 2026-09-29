@@ -140,7 +140,7 @@ object KotlinWinRTAuthoringScannerCli {
         schemas: Map<String, XamlSourceMembers>,
     ) {
         Files.createDirectories(root)
-        val registrations = pages.map { (source, _, candidate) ->
+        val registrations = pages.map { (source, klass, candidate) ->
             val schema = schemas.getValue(candidate.sourceTypeName)
             val registerName = "registerKotlinWinRTXaml${candidate.className}"
             val file = root.resolve(candidate.packageName.replace('.', '/'))
@@ -156,6 +156,7 @@ object KotlinWinRTAuthoringScannerCli {
                 appendLine("      type = ${candidate.className}::class,")
                 appendLine("      name = ${candidate.sourceTypeName.kotlinLiteral()},")
                 appendLine("      baseName = ${requireNotNull(candidate.winRTBaseClassName).kotlinLiteral()},")
+                appendLine("      baseType = ${source.superTypeNames(klass).first()}::class,")
                 appendLine("      activate = { ${candidate.className}() },")
                 schema.metadata.contentProperty?.let { appendLine("      contentProperty = ${it.kotlinLiteral()},") }
                 appendLine("      members = listOf(")
@@ -163,6 +164,7 @@ object KotlinWinRTAuthoringScannerCli {
                     appendLine("        io.github.composefluent.winrt.runtime.WinRTXamlMemberDefinition(")
                     appendLine("          name = ${property.metadata.name.kotlinLiteral()},")
                     appendLine("          typeName = ${property.metadata.type.typeName.kotlinLiteral()},")
+                    appendLine("          type = ${property.kotlinType.removeSuffix("?").substringBefore('<')}::class,")
                     appendLine("          get = { (it as ${candidate.className}).${property.metadata.name} },")
                     if (!property.metadata.isReadOnly) {
                         appendLine("          set = { instance, value -> (instance as ${candidate.className}).${property.metadata.name} = value as ${property.kotlinType} },")

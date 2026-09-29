@@ -202,6 +202,9 @@ internal object XamlSystemProjectionRuntimeHooks {
             } else arg0
             val name = HString.fromHandle(nameHandle, owner = false).use { it.toKString() }
             val authored = WinUiAuthoredTypeMetadata.tryCreate(name, ::resolveWinUiXamlType)
+            if (FeatureSwitches.traceCcw) {
+                println("winrt-xaml-metadata: lookup slot=$slot name=$name authored=${!PlatformAbi.isNull(authored)}")
+            }
             if (!PlatformAbi.isNull(authored)) {
                 PlatformAbi.writePointer(arg1, authored)
                 return KnownHResults.S_OK.value

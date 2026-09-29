@@ -30,11 +30,17 @@ internal object WinUiAuthoredTypeMetadata {
     fun tryCreate(name: String, resolveType: (String) -> RawAddress): RawAddress {
         val type = types[name] ?: return PlatformAbi.nullPointer
         val definition = definitions[name]
+        if (FeatureSwitches.traceCcw) {
+            println("winrt-xaml-metadata: authored type=$name definition=${definition != null}")
+        }
         fun resolveBase(): RawAddress {
             val authored = tryCreate(type.baseName, resolveType)
-            return if (PlatformAbi.isNull(authored)) resolveType(type.baseName) else authored
+            if (!PlatformAbi.isNull(authored)) return authored
+            val sdkType = resolveType(type.baseName)
+            if (!PlatformAbi.isNull(sdkType)) return sdkType
+            return definition?.baseType?.let { createSystemType(type.baseName, it) } ?: PlatformAbi.nullPointer
         }
-        // Do not advertise a type whose native base cannot be resolved by the SDK provider.
+        // Generated XamlTypeInfo includes system-type entries when the SDK provider omits them.
         val base = resolveBase()
         if (PlatformAbi.isNull(base)) return PlatformAbi.nullPointer
         WinRTPlatformApi.releaseRaw(base)
@@ -86,6 +92,7 @@ internal object WinUiAuthoredTypeMetadata {
                         PlatformAbi.writePointer(args[0] as RawAddress, PlatformAbi.nullPointer)
                         val activate = definition?.activate
                         if (activate == null) KnownHResults.E_NOTIMPL.value else {
+                            if (FeatureSwitches.traceCcw) println("winrt-xaml-metadata: activate $name")
                             val instance = activate()
                             if (instance is WinRTXamlComponent) initializeWinRTXamlComponent(instance)
                             PlatformAbi.writePointer(args[0] as RawAddress, WinRTObjectMarshaller.fromManaged(instance))
@@ -99,6 +106,9 @@ internal object WinUiAuthoredTypeMetadata {
                     WinRTInspectableMethodDefinition(ComMethodSignatures.HResult_Ptr_Ptr) { args ->
                         val memberName = HString.fromHandle(args[0] as RawAddress, owner = false).use { it.toKString() }
                         val member = definition?.members?.get(memberName)
+                        if (FeatureSwitches.traceCcw) {
+                            println("winrt-xaml-metadata: member $name.$memberName found=${member != null}")
+                        }
                         if (definition != null && member != null) {
                             PlatformAbi.writePointer(args[1] as RawAddress, createMember(definition, member, resolveType))
                             KnownHResults.S_OK.value
@@ -127,9 +137,12 @@ internal object WinUiAuthoredTypeMetadata {
         fun output(write: (RawAddress) -> Unit) = WinRTInspectableMethodDefinition(ComMethodSignatures.HResult_Ptr) {
             write(it[0] as RawAddress); KnownHResults.S_OK.value
         }
-        fun resolve(name: String): RawAddress {
+        fun resolve(name: String, fallbackType: KClass<*>? = null): RawAddress {
             val authored = tryCreate(name, resolveType)
-            return if (PlatformAbi.isNull(authored)) resolveType(name) else authored
+            if (!PlatformAbi.isNull(authored)) return authored
+            val sdkType = resolveType(name)
+            if (!PlatformAbi.isNull(sdkType)) return sdkType
+            return fallbackType?.let { createSystemType(name, it) } ?: PlatformAbi.nullPointer
         }
         val marshaler = MarshalInspectable.any()
         val host = WinRTInspectableComObject(
@@ -141,7 +154,7 @@ internal object WinUiAuthoredTypeMetadata {
                     output { PlatformAbi.writeInt8(it, if (member.set == null) 1 else 0) },
                     output { PlatformAbi.writePointer(it, HString.create(member.name).handle) },
                     output { PlatformAbi.writePointer(it, resolve(owner.name)) },
-                    output { PlatformAbi.writePointer(it, resolve(member.typeName)) },
+                    output { PlatformAbi.writePointer(it, resolve(member.typeName, member.type)) },
                     WinRTInspectableMethodDefinition(ComMethodSignatures.HResult_Ptr_Ptr) { args ->
                         val output = args[1] as RawAddress
                         PlatformAbi.writePointer(output, PlatformAbi.nullPointer)
@@ -152,6 +165,7 @@ internal object WinUiAuthoredTypeMetadata {
                     WinRTInspectableMethodDefinition(ComMethodSignatures.HResult_Ptr_Ptr) { args ->
                         val setter = member.set
                         if (setter == null) KnownHResults.E_NOTIMPL.value else {
+                            if (FeatureSwitches.traceCcw) println("winrt-xaml-metadata: set ${owner.name}.${member.name}")
                             setter(requireNotNull(marshaler.fromAbi(args[0])), marshaler.fromAbi(args[1]))
                             KnownHResults.S_OK.value
                         }
@@ -160,5 +174,48 @@ internal object WinUiAuthoredTypeMetadata {
             )), defaultInterfaceId = WinUiXamlInterfaceIds.IXamlMember,
         )
         return host.detachReference(WinUiXamlInterfaceIds.IXamlMember)
+    }
+
+    /** XamlCompiler's XamlSystemBaseType for a projected type absent from SDK metadata providers. */
+    private fun createSystemType(name: String, type: KClass<*>): RawAddress {
+        fun pointer(value: () -> RawAddress) = WinRTInspectableMethodDefinition(ComMethodSignatures.HResult_Ptr) {
+            PlatformAbi.writePointer(it[0] as RawAddress, value()); KnownHResults.S_OK.value
+        }
+        fun boolean(value: Boolean = false) = WinRTInspectableMethodDefinition(ComMethodSignatures.HResult_Ptr) {
+            PlatformAbi.writeInt8(it[0] as RawAddress, if (value) 1 else 0); KnownHResults.S_OK.value
+        }
+        fun unavailable(signature: ComMethodSignature) = WinRTInspectableMethodDefinition(signature) {
+            KnownHResults.E_NOTIMPL.value
+        }
+        val host = WinRTInspectableComObject(
+            interfaceDefinitions = listOf(WinRTInspectableInterfaceDefinition(
+                interfaceId = WinUiXamlInterfaceIds.IXamlType,
+                methods = listOf(
+                    pointer { PlatformAbi.nullPointer }, // BaseType
+                    pointer { PlatformAbi.nullPointer }, // ContentProperty
+                    pointer { HString.create(name).handle }, // FullName
+                    boolean(), // IsArray
+                    boolean(), // IsCollection
+                    boolean(), // IsConstructible
+                    boolean(), // IsDictionary
+                    boolean(), // IsMarkupExtension
+                    boolean(), // IsBindable
+                    pointer { PlatformAbi.nullPointer }, // ItemType
+                    pointer { PlatformAbi.nullPointer }, // KeyType
+                    pointer { PlatformAbi.nullPointer }, // BoxedType
+                    WinRTInspectableMethodDefinition(ComMethodSignatures.HResult_Ptr) {
+                        TypeProjection.copyTo(type, it[0] as RawAddress); KnownHResults.S_OK.value
+                    }, // UnderlyingType
+                    unavailable(ComMethodSignatures.HResult_Ptr), // ActivateInstance
+                    unavailable(ComMethodSignatures.HResult_Ptr_Ptr), // CreateFromString
+                    unavailable(ComMethodSignatures.HResult_Ptr_Ptr), // GetMember
+                    unavailable(ComMethodSignatures.HResult_Ptr_Ptr), // AddToVector
+                    unavailable(ComMethodSignature.of(ComAbiValueKind.Pointer, ComAbiValueKind.Pointer, ComAbiValueKind.Pointer)), // AddToMap
+                    unavailable(ComMethodSignature.of()), // RunInitializer
+                ),
+            )),
+            defaultInterfaceId = WinUiXamlInterfaceIds.IXamlType,
+        )
+        return host.detachReference(WinUiXamlInterfaceIds.IXamlType)
     }
 }

@@ -135,7 +135,8 @@ internal class XamlPageBodies(private val index: WinRTXamlDeclarationIndex, priv
                 +irWhen(pluginContext.irBuiltIns.unitType, mutableListOf()).apply {
                     for (connection in page.connections.filter { it.fieldName != null || it.events.isNotEmpty() }) {
                         branches += irBranch(irEquals(irGet(parameters[0]), irInt(connection.id)), irBlock {
-                            val targetType = projection(connection.typeName).defaultType
+                            val targetType = classes[connection.typeName]?.defaultType
+                                ?: projection(connection.typeName).defaultType
                             val target = irTemporary(irCall(cast).apply {
                                 type = targetType; typeArguments[0] = targetType; arguments[0] = irGet(parameters[1])
                             })

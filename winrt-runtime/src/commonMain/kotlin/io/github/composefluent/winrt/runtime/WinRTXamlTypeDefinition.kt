@@ -7,6 +7,7 @@ class WinRTXamlTypeDefinition(
     val type: KClass<*>,
     val name: String,
     val baseName: String,
+    val baseType: KClass<*>? = null,
     val activate: (() -> Any)? = null,
     val contentProperty: String? = null,
     members: List<WinRTXamlMemberDefinition> = emptyList(),
@@ -26,6 +27,7 @@ class WinRTXamlTypeDefinition(
 class WinRTXamlMemberDefinition(
     val name: String,
     val typeName: String,
+    val type: KClass<*>? = null,
     val get: (Any) -> Any?,
     val set: ((Any, Any?) -> Unit)? = null,
     val isDependencyProperty: Boolean = false,

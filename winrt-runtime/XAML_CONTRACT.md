@@ -23,6 +23,10 @@ XamlCompiler's `CSharpTypeInfoPass2.tt`. CsWinRT owns the underlying CCW/RCW
 identity and inspectable marshaling; Kotlin reuses those runtime responsibilities.
 Generated accessors perform direct Kotlin calls. The runtime does not reflect
 over properties, interpret markup, or duplicate value-type classification.
+The generated registration includes Kotlin `KClass` values for the native base
+and member types. When the SDK metadata provider has no IXamlType for one of
+those system types, Kotlin supplies the `XamlSystemBaseType` identity and
+underlying type that XamlCompiler's C# output would put in its type table.
 
 Registered definitions extend the existing authored identity provider with
 `IsConstructible`, `ActivateInstance`, `ContentProperty`, and `GetMember`.
