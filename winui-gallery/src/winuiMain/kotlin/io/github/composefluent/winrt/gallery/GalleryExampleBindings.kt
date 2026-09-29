@@ -18,7 +18,7 @@ internal fun bindExampleSource(source: Expander, title: String) {
             val document = checkNotNull(route?.let { GalleryCodeCatalog.document(it, title, index) }) {
                 "No source registered for $route example $index"
             }
-            source.content = kotlinCodePreview(document, route?.let { GalleryCodeCatalog.xamlDocument(it) })
+            source.content = kotlinCodePreview(document, route?.let { GalleryCodeCatalog.xamlDocument(it, title, index) })
             initialized = true
         }
     }

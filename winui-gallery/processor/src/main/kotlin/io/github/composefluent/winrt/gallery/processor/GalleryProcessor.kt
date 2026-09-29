@@ -145,7 +145,7 @@ private class GalleryProcessor(
         val extractor = KotlinExampleExtractor()
         val sampleExtractor = KotlinSampleSourceExtractor()
         val parser = KotlinSourceParser()
-        val xamlDocuments = linkedMapOf<String, String>()
+        val xamlDocuments = linkedMapOf<String, Map<String, String>>()
         data class RoutePreviews(val titleIndices: Map<String, Int>, val count: Int)
         val examples = pages.mapIndexed { routeIndex, page ->
             val pageFile = java.io.File(sources.single { it.fileName == page.source }.filePath)
@@ -154,6 +154,25 @@ private class GalleryProcessor(
                 it.qualifiedName?.asString() == page.symbol
             }
             if (xamlFile.isFile || pageDeclaration is KSClassDeclaration) {
+                val definitions = java.io.File(pageFile.parentFile, "SampleDefinitions/${page.route}")
+                    .listFiles()?.filter { it.extension == "txt" }?.sortedBy { it.name }.orEmpty()
+                if (definitions.isNotEmpty()) {
+                    val parsed = definitions.map { it to GallerySampleDefinition.parse(it.readText()) }
+                    require(parsed.map { it.second.header }.distinct().size == parsed.size) {
+                        "Duplicate sample header for ${page.route}"
+                    }
+                    val documents = parsed.flatMapIndexed { index, (file, sample) -> listOf(
+                        "GalleryCode${routeIndex}_$index" to parser.parse("${file.nameWithoutExtension}.kt", sample.kotlin, isScript = true),
+                        "GalleryXaml${routeIndex}_$index" to XamlSourceParser().parse("${file.nameWithoutExtension}.xaml", sample.xaml),
+                    ) }
+                    codeGenerator.createNewFile(
+                        Dependencies(true, *sources.toTypedArray()), galleryPackage, "GalleryCode$routeIndex",
+                    ).bufferedWriter().use { it.write(generateCodeDocuments(documents, emptyMap())) }
+                    xamlDocuments[page.route] = parsed.mapIndexed { index, (_, sample) ->
+                        sample.header to "GalleryXaml${routeIndex}_$index"
+                    }.toMap()
+                    return@mapIndexed RoutePreviews(parsed.mapIndexed { index, (_, sample) -> sample.header to index }.toMap(), parsed.size)
+                }
                 // Class registrations show the complete code-behind, with adjacent markup when present.
                 val source = texts.getValue(page.source)
                 val kotlinName = "GalleryCode${routeIndex}_0"
@@ -169,7 +188,7 @@ private class GalleryProcessor(
                 codeGenerator.createNewFile(
                     Dependencies(true, *sources.toTypedArray()), galleryPackage, "GalleryCode$routeIndex",
                 ).bufferedWriter().use { it.write(generateCodeDocuments(documents, origins)) }
-                if (xamlFile.isFile) xamlDocuments[page.route] = xamlName
+                if (xamlFile.isFile) xamlDocuments[page.route] = mapOf("" to xamlName)
                 return@mapIndexed RoutePreviews(emptyMap(), 1)
             }
             val origins = mutableMapOf<String, KotlinCodeOriginData>()
@@ -224,9 +243,13 @@ private class GalleryProcessor(
                 writer.appendLine("    }")
             }
             writer.appendLine("    else -> null\n  }")
-            writer.appendLine("  actual fun xamlDocument(route: String): $galleryPackage.code.KotlinCodeDocument? = when (route) {")
-            xamlDocuments.forEach { (route, name) ->
-                writer.appendLine("    ${kotlinLiteral(route)} -> $name.create()")
+            writer.appendLine("  actual fun xamlDocument(route: String, title: String, index: Int): $galleryPackage.code.KotlinCodeDocument? = when (route) {")
+            xamlDocuments.forEach { (route, documents) ->
+                writer.appendLine("    ${kotlinLiteral(route)} -> when (title) {")
+                documents.forEach { (title, name) -> writer.appendLine("      ${kotlinLiteral(title)} -> $name.create()") }
+                writer.appendLine("      else -> when (index) {")
+                documents.values.forEachIndexed { index, name -> writer.appendLine("        $index -> $name.create()") }
+                writer.appendLine("        else -> null\n      }\n    }")
             }
             writer.appendLine("    else -> null\n  }\n}")
         }

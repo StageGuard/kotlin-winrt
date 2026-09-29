@@ -31,7 +31,7 @@ abstract class GalleryXamlSourceArguments : org.gradle.process.CommandLineArgume
 
 val galleryXamlSourceArguments = objects.newInstance(GalleryXamlSourceArguments::class.java).apply {
     sourceRoot.set(layout.projectDirectory.dir("src/winuiMain/kotlin"))
-    sources.from(sourceRoot.map { it.asFileTree.matching { include("**/*.xaml") } })
+    sources.from(sourceRoot.map { it.asFileTree.matching { include("**/*.xaml", "**/SampleDefinitions/**/*.txt") } })
 }
 
 val gallerySigningCertificateThumbprint =
