@@ -42,6 +42,10 @@ example and activates the window; visual and Native checks remain.
 CalendarDatePicker also preserves the upstream one-example XAML and sample text
 apart from the Kotlin type names. Its JVM native route loads the picker and
 activates the window; visual and Native checks remain.
+ToolTip preserves the upstream three-example XAML and all three sample text
+files apart from Kotlin type names. Its JVM native route loads all three
+examples and activates the window; tooltip interaction, visual and Native
+checks remain.
 
 | Route | Group | Kotlin source | Existing sample factories | Migration |
 | --- | --- | --- | ---: | --- |
@@ -147,7 +151,7 @@ activates the window; visual and Native checks remain.
 | InfoBar | StatusAndInfo | [InfoBarPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/statusandinfo/InfoBarPage.kt) | 3 | Pending |
 | ProgressBar | StatusAndInfo | [ProgressBarPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/statusandinfo/ProgressBarPage.kt) | 2 | Pending |
 | ProgressRing | StatusAndInfo | [ProgressRingPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/statusandinfo/ProgressRingPage.kt) | 2 | Pending |
-| ToolTip | StatusAndInfo | [ToolTipPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/statusandinfo/ToolTipPage.kt) | 3 | Pending |
+| ToolTip | StatusAndInfo | [ToolTipPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/statusandinfo/ToolTipPage.kt) | 3 | Original XAML and three sample texts preserved apart from namespace mapping; JVM native page load passed; tooltip interaction, visual and Native checks pending |
 | Acrylic | Styles | [AcrylicPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/styles/AcrylicPage.kt) | 3 | Pending |
 | AnimatedIcon | Styles | [AnimatedIconPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/styles/AnimatedIconPage.kt) | 2 | Pending |
 | CompactSizing | Styles | [CompactSizingPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/styles/CompactSizingPage.kt) | 1 | Pending |
@@ -174,9 +178,9 @@ activates the window; visual and Native checks remain.
 | --- | --- | --- |
 | Application resources and startup | Main.kt / GalleryApplication | Pending |
 | Main window and navigation | MainWindow.kt / GalleryNavigationHost.kt | Pending |
-| Page headers and sample frames | ControlExample.xaml / ControlExample.kt / GalleryTheme.kt | Eight BasicInput routes plus AppBarSeparator, Pivot and CalendarDatePicker use shared XAML control; original private components and other routes pending |
+| Page headers and sample frames | ControlExample.xaml / ControlExample.kt / GalleryTheme.kt | Eight BasicInput routes plus AppBarSeparator, Pivot, CalendarDatePicker and ToolTip use shared XAML control; original private components and other routes pending |
 | Settings and All routes | GallerySettingsPage.kt / navigation host | Pending |
-| Example source display and copy | processor / code-document / code UI | SampleDefinition selects separate XAML/Kotlin files on eleven routes; remaining routes pending |
+| Example source display and copy | processor / code-document / code UI | SampleDefinition selects separate XAML/Kotlin files on twelve routes; remaining routes pending |
 | Styles, dictionaries and templates | shared UI and relevant individual pages | Pending |
 
 This is the source inventory (122 existing annotated routes including Home). Visual baselines, feature prerequisites, and interaction acceptance remain to be captured before marking any route complete.
