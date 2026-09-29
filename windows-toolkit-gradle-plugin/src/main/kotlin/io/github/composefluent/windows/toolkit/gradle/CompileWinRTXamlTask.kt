@@ -66,7 +66,10 @@ abstract class CompileWinRTXamlTask @Inject constructor(
             refs.map { it.absolutePath }.sorted().joinToString("\n"))
         fun item(file: File, link: String? = null) = buildJsonObject {
             put("ItemSpec", file.absolutePath); put("FullPath", file.absolutePath)
-            put("IsSystemReference", true)
+            // Unlike MSBuild's Windows.winmd facade input, prepared metadata contains
+            // individual SDK contracts. SortReferenceAssemblies defers system references
+            // in pass 1, which would hide Foundation's IReference<T> from the schema.
+            // Supply the complete resolved reference set to both compiler passes.
             if (link != null) { put("MSBuild_Link", link); put("MSBuild_TargetPath", link) }
         }
         val finalPass = semanticSymbols.isPresent

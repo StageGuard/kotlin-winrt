@@ -46,13 +46,15 @@ class CompileWinRTXamlTaskTest {
         val sources = File(root, "src").apply { mkdirs() }
         val page = File(sources, "pages/MainPage.xaml").apply {
             parentFile.mkdirs()
-            writeText("""<Page xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" x:Class="sample.MainPage"><Button x:Name="button"/></Page>""")
+            writeText("""<Page xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" x:Class="sample.MainPage"><StackPanel><CheckBox x:Name="checked" IsChecked="True"/><CheckBox IsChecked="False"/><CheckBox IsThreeState="True" IsChecked="{x:Null}"/></StackPanel></Page>""")
         }
         File(page.parentFile, "MainPage.kt").writeText("package sample; class MainPage")
         fun encoded(value: String) = Base64.getUrlEncoder().withoutPadding().encodeToString(value.toByteArray())
         val manifest = File(root, "resolved.tsv").apply {
             writeText("kotlin-winrt-prepared-metadata-v1\n" + refs!!.split(File.pathSeparator).flatMap {
-                File(it).listFiles()!!.filter { file -> file.extension == "winmd" }
+                // Installed SDKs provide split contracts without the Windows.winmd facade.
+                // XamlCompiler must still resolve IReference<Boolean> during pass 1.
+                File(it).listFiles()!!.filter { file -> file.extension == "winmd" && !file.name.equals("Windows.winmd", true) }
             }.joinToString("\n") { "file\tWindowsSdk\t${encoded("fixture")}\t${encoded(it.absolutePath)}" })
         }
         val task = project.tasks.create("analyze", CompileWinRTXamlTask::class.java)
