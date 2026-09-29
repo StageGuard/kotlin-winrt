@@ -7,7 +7,9 @@ import microsoft.windows.appnotifications.AppNotificationActivatedEventArgs
 import windows.applicationmodel.activation.ProtocolActivatedEventArgs
 import microsoft.ui.xaml.Application
 import microsoft.ui.xaml.LaunchActivatedEventArgs
+import microsoft.ui.xaml.ResourceDictionary
 import microsoft.ui.xaml.controls.XamlControlsResources
+import windows.foundation.Uri
 
 import microsoft.ui.windowing.OverlappedPresenter
 import microsoft.ui.windowing.OverlappedPresenterState
@@ -66,6 +68,9 @@ class GalleryApplication : Application() {
         )
         println("Kotlin WinUI Gallery: loading controls resources")
         resources.mergedDictionaries.add(XamlControlsResources())
+        resources.mergedDictionaries.add(ResourceDictionary().apply {
+            source = Uri("ms-appx:///io/github/composefluent/winrt/gallery/GalleryExampleResources.xaml")
+        })
         val galleryWindow = MainWindow()
         window = galleryWindow
         val appWindow = checkNotNull(galleryWindow.appWindow)

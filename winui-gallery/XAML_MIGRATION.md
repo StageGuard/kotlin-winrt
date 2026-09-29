@@ -54,6 +54,12 @@ TextBox preserves the upstream four-example XAML and all four unchanged sample
 texts apart from Kotlin type names. Its JVM native route connects all four
 examples and activates the window; text interaction, visual and Native checks
 remain.
+PasswordBox preserves the upstream three-example XAML apart from Kotlin type
+names. Its two purely declarative sample files are unchanged, while the C#
+handler excerpt in the reveal-mode sample becomes Kotlin. The original
+`OutputTextBlockStyle` is now available from the app's shared XAML resources.
+Its JVM native route connects all three examples and activates the window;
+password and reveal interactions, visual and Native checks remain.
 
 | Route | Group | Kotlin source | Existing sample factories | Migration |
 | --- | --- | --- | ---: | --- |
@@ -174,7 +180,7 @@ remain.
 | StoragePickers | System | [StoragePickersPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/system/StoragePickersPage.kt) | 5 | Pending |
 | AutoSuggestBox | Text | [AutoSuggestBoxPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/text/AutoSuggestBoxPage.kt) | 2 | Pending |
 | NumberBox | Text | [NumberBoxPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/text/NumberBoxPage.kt) | 3 | Pending |
-| PasswordBox | Text | [PasswordBoxPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/text/PasswordBoxPage.kt) | 3 | Pending |
+| PasswordBox | Text | [PasswordBoxPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/text/PasswordBoxPage.kt) | 3 | Original XAML preserved apart from namespace mapping; three separate samples and Kotlin handlers; JVM native page load passed; interaction, visual and Native checks pending |
 | RichEditBox | Text | [RichEditBoxPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/text/RichEditBoxPage.kt) | 5 | Pending |
 | RichTextBlock | Text | [RichTextBlockPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/text/RichTextBlockPage.kt) | 4 | Pending |
 | TextBlock | Text | [TextBlockPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/text/TextBlockPage.kt) | 5 | Pending |
@@ -186,9 +192,9 @@ remain.
 | --- | --- | --- |
 | Application resources and startup | Main.kt / GalleryApplication | Pending |
 | Main window and navigation | MainWindow.kt / GalleryNavigationHost.kt | Pending |
-| Page headers and sample frames | ControlExample.xaml / ControlExample.kt / GalleryTheme.kt | Eight BasicInput routes plus AppBarSeparator, Pivot, CalendarDatePicker, ToolTip, Flyout and TextBox use shared XAML control; original private components and other routes pending |
+| Page headers and sample frames | ControlExample.xaml / ControlExample.kt / GalleryTheme.kt | Eight BasicInput routes plus AppBarSeparator, Pivot, CalendarDatePicker, ToolTip, Flyout, TextBox and PasswordBox use shared XAML control; original private components and other routes pending |
 | Settings and All routes | GallerySettingsPage.kt / navigation host | Pending |
-| Example source display and copy | processor / code-document / code UI | SampleDefinition selects separate XAML/Kotlin files on fourteen routes; remaining routes pending |
+| Example source display and copy | processor / code-document / code UI | SampleDefinition selects separate XAML/Kotlin files on fifteen routes; remaining routes pending |
 | Styles, dictionaries and templates | shared UI and relevant individual pages | Pending |
 
 This is the source inventory (122 existing annotated routes including Home). Visual baselines, feature prerequisites, and interaction acceptance remain to be captured before marking any route complete.
