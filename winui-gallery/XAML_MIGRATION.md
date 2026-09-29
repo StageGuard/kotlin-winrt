@@ -94,6 +94,10 @@ texts. The C# `System.DateTime.Now.TimeOfDay` bindings in the third example
 become two named pickers initialized to the same current time from Kotlin.
 The JVM native route loads all three examples and activates the window;
 picker interaction, visual and Native checks remain.
+AppBarToggleButton preserves the upstream four-example XAML and four separate
+sample texts apart from Kotlin type names. Its Kotlin click handler retains
+the original three-state output text. The JVM native route loads all four
+examples and activates the window; interaction and Native checks remain.
 
 | Route | Group | Kotlin source | Existing sample factories | Migration |
 | --- | --- | --- | ---: | --- |
@@ -163,7 +167,7 @@ picker interaction, visual and Native checks remain.
 | WebView2 | Media | [WebView2Page.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/media/WebView2Page.kt) | 1 | Original XAML and sample text preserved apart from namespace mapping and one trailing space; JVM native page load passed; remote content and Native checks pending |
 | AppBarButton | MenusAndToolbars | [AppBarButtonPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/menusandtoolbars/AppBarButtonPage.kt) | 6 | Original XAML and six sample texts preserved apart from namespace mapping; JVM native page load passed; interaction and Native checks pending |
 | AppBarSeparator | MenusAndToolbars | [AppBarSeparatorPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/menusandtoolbars/AppBarSeparatorPage.kt) | 1 | Original XAML and sample text preserved apart from namespace mapping; JVM native page load passed; visual and Native checks pending |
-| AppBarToggleButton | MenusAndToolbars | [AppBarToggleButtonPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/menusandtoolbars/AppBarToggleButtonPage.kt) | 4 | Pending |
+| AppBarToggleButton | MenusAndToolbars | [AppBarToggleButtonPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/menusandtoolbars/AppBarToggleButtonPage.kt) | 4 | Original XAML and four sample texts preserved apart from namespace mapping; JVM native page load passed; interaction and Native checks pending |
 | CommandBar | MenusAndToolbars | [CommandBarPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/menusandtoolbars/CommandBarPage.kt) | 1 | Pending |
 | CommandBarFlyout | MenusAndToolbars | [CommandBarFlyoutPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/menusandtoolbars/CommandBarFlyoutPage.kt) | 1 | Pending |
 | MenuBar | MenusAndToolbars | [MenuBarPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/menusandtoolbars/MenuBarPage.kt) | 3 | Pending |
@@ -226,9 +230,9 @@ picker interaction, visual and Native checks remain.
 | --- | --- | --- |
 | Application resources and startup | Main.kt / GalleryApplication | Pending |
 | Main window and navigation | MainWindow.kt / GalleryNavigationHost.kt | Pending |
-| Page headers and sample frames | ControlExample.xaml / ControlExample.kt / GalleryTheme.kt | Eight BasicInput routes plus AppBarButton, AppBarSeparator, Pivot, CalendarDatePicker, DatePicker, TimePicker, ToolTip, Flyout, TextBox, PasswordBox, WebView2, XamlStyles, RelativePanel and XamlUICommand use shared XAML control; original private components and other routes pending |
+| Page headers and sample frames | ControlExample.xaml / ControlExample.kt / GalleryTheme.kt | Eight BasicInput routes plus AppBarButton, AppBarSeparator, AppBarToggleButton, Pivot, CalendarDatePicker, DatePicker, TimePicker, ToolTip, Flyout, TextBox, PasswordBox, WebView2, XamlStyles, RelativePanel and XamlUICommand use shared XAML control; original private components and other routes pending |
 | Settings and All routes | GallerySettingsPage.kt / navigation host | Pending |
-| Example source display and copy | processor / code-document / code UI | SampleDefinition selects separate XAML/Kotlin files on twenty-two routes; remaining routes pending |
+| Example source display and copy | processor / code-document / code UI | SampleDefinition selects separate XAML/Kotlin files on twenty-three routes; remaining routes pending |
 | Styles, dictionaries and templates | shared UI and relevant individual pages | Pending |
 
 This is the source inventory (122 existing annotated routes including Home). Visual baselines, feature prerequisites, and interaction acceptance remain to be captured before marking any route complete.
