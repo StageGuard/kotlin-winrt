@@ -32,6 +32,10 @@ DropDownButton uses the [upstream WinUI Gallery files](https://github.com/micros
 its XAML differs only in the Kotlin class and controls namespace, and both
 sample text files are byte-for-byte copies. The JVM native route loads both
 examples and activates the window; flyout interactions remain to be checked.
+AppBarSeparator follows the same upstream-preserving pattern: its XAML changes
+only the Kotlin class and controls namespace, and its one sample text file is
+unchanged. The JVM native route loads its CommandBar example and activates the
+window; visual and Native checks remain.
 
 | Route | Group | Kotlin source | Existing sample factories | Migration |
 | --- | --- | --- | ---: | --- |
@@ -100,7 +104,7 @@ examples and activates the window; flyout interactions remain to be checked.
 | Sound | Media | [SoundPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/media/SoundPage.kt) | 3 | Pending |
 | WebView2 | Media | [WebView2Page.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/media/WebView2Page.kt) | 1 | Pending |
 | AppBarButton | MenusAndToolbars | [AppBarButtonPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/menusandtoolbars/AppBarButtonPage.kt) | 6 | Pending |
-| AppBarSeparator | MenusAndToolbars | [AppBarSeparatorPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/menusandtoolbars/AppBarSeparatorPage.kt) | 1 | Pending |
+| AppBarSeparator | MenusAndToolbars | [AppBarSeparatorPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/menusandtoolbars/AppBarSeparatorPage.kt) | 1 | Original XAML and sample text preserved apart from namespace mapping; JVM native page load passed; visual and Native checks pending |
 | AppBarToggleButton | MenusAndToolbars | [AppBarToggleButtonPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/menusandtoolbars/AppBarToggleButtonPage.kt) | 4 | Pending |
 | CommandBar | MenusAndToolbars | [CommandBarPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/menusandtoolbars/CommandBarPage.kt) | 1 | Pending |
 | CommandBarFlyout | MenusAndToolbars | [CommandBarFlyoutPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/menusandtoolbars/CommandBarFlyoutPage.kt) | 1 | Pending |
@@ -164,9 +168,9 @@ examples and activates the window; flyout interactions remain to be checked.
 | --- | --- | --- |
 | Application resources and startup | Main.kt / GalleryApplication | Pending |
 | Main window and navigation | MainWindow.kt / GalleryNavigationHost.kt | Pending |
-| Page headers and sample frames | ControlExample.xaml / ControlExample.kt / GalleryTheme.kt | Eight BasicInput routes use shared XAML control; original private components and other routes pending |
+| Page headers and sample frames | ControlExample.xaml / ControlExample.kt / GalleryTheme.kt | Eight BasicInput routes and AppBarSeparator use shared XAML control; original private components and other routes pending |
 | Settings and All routes | GallerySettingsPage.kt / navigation host | Pending |
-| Example source display and copy | processor / code-document / code UI | SampleDefinition selects separate XAML/Kotlin files on eight routes; remaining routes pending |
+| Example source display and copy | processor / code-document / code UI | SampleDefinition selects separate XAML/Kotlin files on nine routes; remaining routes pending |
 | Styles, dictionaries and templates | shared UI and relevant individual pages | Pending |
 
 This is the source inventory (122 existing annotated routes including Home). Visual baselines, feature prerequisites, and interaction acceptance remain to be captured before marking any route complete.
