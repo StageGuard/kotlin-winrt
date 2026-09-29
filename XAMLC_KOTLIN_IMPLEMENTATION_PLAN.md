@@ -286,13 +286,13 @@ class MainPage : Page() {
 | `GalleryPageHost.kt`、`GalleryNavigationHost.kt`、`GalleryPageHeader.kt`、公共 ExamplePage/示例容器 | 接入新页面实例和 XAML 公共布局；保留现有 route、导航语义和主题行为 |
 | `GalleryAnnotations.kt`、`GalleryCatalog.kt`、`winui-gallery/processor` | 保留现有导航与示例注册契约；补充 XAML/Kotlin 两份源码的发现与展示，不将 KSP 用作 XAML 编译器 |
 | `fundamentals`、`collections`、`styles` 等分类 | 逐项列明资源、样式、模板、绑定、自定义控件等必要上游能力，再按依赖顺序迁移 |
-| `code`、现有源码展开/复制功能 | 展示实际 `.xaml` 与 Kotlin 后置代码，正确切换、复制与着色，禁止继续展示已删除的纯代码版本 |
+| `code`、现有源码展开/复制功能 | 按上游 `ControlExample.SampleDefinition` 独立组织每个 example 的 XAML/Kotlin 片段，正确切换、复制与着色；不得给每个 example 重复展示整页文件，不需要 Kotlin 的示例仅显示 XAML |
 | `winui-gallery/build.gradle.kts`、`src/winuiMain/appxResources`、`README.md` | 接入 XAML 构建、XBF/PRI 和打包，更新使用说明及实际验证状态 |
 
 ### 每页迁移规则（Luna 按此逐页执行）
 
 - [ ] 迁移矩阵至少包含：route、现有工厂/类文件、目标 XAML/类名、原有示例和交互、上游能力依赖、迁移状态、JVM/Native 验收状态。记录在本地执行状态文档中，所有现有页面均须覆盖。
-- [ ] 把静态可视树、布局、样式和资源声明移入 XAML；Kotlin 保留事件处理、状态、数据、导航及确实需要过程式 API 的行为。程序化动画、系统集成或刻意演示动态创建的局部代码可以保留，但逐项说明原因，不能用来保留整页纯代码布局。
+- [ ] 尽量完整保留 WinUI Gallery 上游 XAML 的静态可视树、布局、样式、资源与 `ControlExample` 组织方式，只修改 Kotlin 类型/处理函数映射等必要适配；缺少自定义控件或绑定能力时先补上游支持，不把展开包装布局作为最终方案。Kotlin 保留事件处理、状态、数据、导航及确实需要过程式 API 的行为。程序化动画、系统集成或刻意演示动态创建的局部代码可以保留，但逐项说明原因，不能用来保留整页纯代码布局。
 - [ ] 为函数式页面引入与 `.xaml` 同主名的实际 code-behind 类，选择满足现有宿主契约的 Page/UserControl 等根类型。`@GalleryPage` 同时支持无参数构造的 `UIElement` 子类，直接注册页面类并由 KSP 生成构造调用，不要求额外的包装工厂；保留已有函数注册兼容，迁移后的旧工厂不得继续重复构建同一可视树。
 - [ ] 现有公共容器需要 XAML 自定义类型支持时，先补全 authoring/metadata/generator 契约，不在 Gallery 写自定义 XAML 加载器或手工 vtable。
 - [ ] 不改 route、分组、标题、示例数和数据语义来减少迁移工作；不为所有页面新增 `@XamlPage`。Gallery 原有导航注解可保留，它们不承担 XAML 关联责任。
