@@ -70,6 +70,11 @@ XamlStyles preserves the upstream two-example XAML and both unchanged sample
 texts apart from Kotlin type names. Its JVM native route loads the explicit
 and implicit style examples and activates the window; visual and Native checks
 remain.
+RelativePanel preserves the upstream one-example XAML and unchanged sample
+text apart from Kotlin type names and its unused `ExampleHeight="Auto"`
+attribute. The upstream ControlExample declares that property but its XAML
+does not read it. Its JVM native route loads the four rectangles and activates
+the window; layout visual and Native checks remain.
 
 | Route | Group | Kotlin source | Existing sample factories | Migration |
 | --- | --- | --- | ---: | --- |
@@ -124,7 +129,7 @@ remain.
 | Canvas | Layout | [CanvasPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/layout/CanvasPage.kt) | 1 | Pending |
 | Expander | Layout | [ExpanderPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/layout/ExpanderPage.kt) | 2 | Pending |
 | Grid | Layout | [GridPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/layout/GridPage.kt) | 1 | Pending |
-| RelativePanel | Layout | [RelativePanelPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/layout/RelativePanelPage.kt) | 1 | Pending |
+| RelativePanel | Layout | [RelativePanelPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/layout/RelativePanelPage.kt) | 1 | Original XAML preserved apart from namespace mapping and unused ExampleHeight; sample text unchanged; JVM native page load passed; visual and Native checks pending |
 | SplitView | Layout | [SplitViewPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/layout/SplitViewPage.kt) | 1 | Pending |
 | StackPanel | Layout | [StackPanelPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/layout/StackPanelPage.kt) | 1 | Pending |
 | VariableSizedWrapGrid | Layout | [VariableSizedWrapGridPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/layout/VariableSizedWrapGridPage.kt) | 1 | Pending |
@@ -202,9 +207,9 @@ remain.
 | --- | --- | --- |
 | Application resources and startup | Main.kt / GalleryApplication | Pending |
 | Main window and navigation | MainWindow.kt / GalleryNavigationHost.kt | Pending |
-| Page headers and sample frames | ControlExample.xaml / ControlExample.kt / GalleryTheme.kt | Eight BasicInput routes plus AppBarSeparator, Pivot, CalendarDatePicker, DatePicker, ToolTip, Flyout, TextBox, PasswordBox and XamlStyles use shared XAML control; original private components and other routes pending |
+| Page headers and sample frames | ControlExample.xaml / ControlExample.kt / GalleryTheme.kt | Eight BasicInput routes plus AppBarSeparator, Pivot, CalendarDatePicker, DatePicker, ToolTip, Flyout, TextBox, PasswordBox, XamlStyles and RelativePanel use shared XAML control; original private components and other routes pending |
 | Settings and All routes | GallerySettingsPage.kt / navigation host | Pending |
-| Example source display and copy | processor / code-document / code UI | SampleDefinition selects separate XAML/Kotlin files on seventeen routes; remaining routes pending |
+| Example source display and copy | processor / code-document / code UI | SampleDefinition selects separate XAML/Kotlin files on eighteen routes; remaining routes pending |
 | Styles, dictionaries and templates | shared UI and relevant individual pages | Pending |
 
 This is the source inventory (122 existing annotated routes including Home). Visual baselines, feature prerequisites, and interaction acceptance remain to be captured before marking any route complete.
