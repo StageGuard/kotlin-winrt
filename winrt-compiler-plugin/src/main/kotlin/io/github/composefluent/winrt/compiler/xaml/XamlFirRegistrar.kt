@@ -14,9 +14,12 @@ import org.jetbrains.kotlin.name.*
 internal object XamlDeclarationKey : GeneratedDeclarationKey()
 internal val xamlConnectorId = ClassId.topLevel(FqName("microsoft.ui.xaml.markup.IComponentConnector"))
 internal val xamlStateId = ClassId.topLevel(FqName("io.github.composefluent.winrt.runtime.WinRTXamlLoadState"))
+internal val xamlComponentId = ClassId.topLevel(FqName("io.github.composefluent.winrt.runtime.WinRTXamlComponent"))
 internal val xamlStateName = Name.identifier("_kotlinXamlState")
+internal val xamlConstructionStateName = Name.identifier("_kotlinXamlConstructionState")
+internal val xamlConstructionName = Name.identifier("_kotlinXamlCompleteConstruction")
 internal val xamlLoadName = Name.identifier("_kotlinXamlLoad")
-internal val xamlInitializeName = Name.identifier("initializeComponent")
+internal val xamlInitializeName = Name.identifier("_kotlinXamlInitialize")
 internal val xamlConnectName = Name.identifier("connect")
 internal val xamlBindingName = Name.identifier("getBindingConnector")
 
@@ -38,7 +41,7 @@ private class XamlDeclarations(session: FirSession, private val pages: Map<Class
     override fun getCallableNamesForClass(classSymbol: FirClassSymbol<*>, context: MemberGenerationContext): Set<Name> {
         val page = pages[classSymbol.classId] ?: return emptySet()
         return page.connections.mapNotNull { it.fieldName?.let(Name::identifier) }.toSet() +
-            setOf(xamlStateName, xamlLoadName, xamlInitializeName, xamlConnectName, xamlBindingName)
+            setOf(xamlStateName, xamlConstructionStateName, xamlConstructionName, xamlLoadName, xamlInitializeName, xamlConnectName, xamlBindingName)
     }
 
     override fun generateProperties(callableId: CallableId, context: MemberGenerationContext?): List<FirPropertySymbol> {
@@ -46,9 +49,10 @@ private class XamlDeclarations(session: FirSession, private val pages: Map<Class
         val page = pages[owner.classId] ?: return emptyList()
         val name = callableId.callableName
         val element = page.connections.singleOrNull { it.fieldName == name.asString() }
-        val type = if (name == xamlStateName) xamlStateId else element?.typeName?.let(::xamlProjectionClassId) ?: return emptyList()
+        val state = name == xamlStateName || name == xamlConstructionStateName
+        val type = if (state) xamlStateId else element?.typeName?.let(::xamlProjectionClassId) ?: return emptyList()
         return listOf(createMemberProperty(owner, XamlDeclarationKey, name, type.createConeType(session)) {
-            if (name == xamlStateName) visibility = Visibilities.Private
+            if (state) visibility = Visibilities.Private
         }.symbol)
     }
 
@@ -56,11 +60,12 @@ private class XamlDeclarations(session: FirSession, private val pages: Map<Class
         val owner = context?.owner ?: return emptyList()
         if (owner.classId !in pages) return emptyList()
         val name = callableId.callableName
-        if (name !in setOf(xamlLoadName, xamlInitializeName, xamlConnectName, xamlBindingName)) return emptyList()
+        if (name !in setOf(xamlLoadName, xamlInitializeName, xamlConstructionName, xamlConnectName, xamlBindingName)) return emptyList()
         val result = if (name == xamlBindingName) xamlConnectorId.createConeType(session, nullable = true)
             else session.builtinTypes.unitType.coneType
         return listOf(createMemberFunction(owner, XamlDeclarationKey, name, result) {
             if (name == xamlLoadName) visibility = Visibilities.Private
+            if (name == xamlInitializeName || name == xamlConstructionName) status { isOverride = true }
             if (name == xamlConnectName || name == xamlBindingName) {
                 status { isOverride = true }
                 valueParameter(Name.identifier("connectionId"), session.builtinTypes.intType.coneType)
@@ -74,6 +79,7 @@ private class XamlSupertypes(session: FirSession, private val pages: Set<ClassId
     override fun needTransformSupertypes(declaration: FirClassLikeDeclaration) = declaration.symbol.classId in pages
     override fun computeAdditionalSupertypes(classLikeDeclaration: FirClassLikeDeclaration,
         resolvedSupertypes: List<FirResolvedTypeRef>, typeResolver: TypeResolveService): List<ConeKotlinType> =
-        if (resolvedSupertypes.any { it.coneType.classId == xamlConnectorId }) emptyList()
-        else listOf(xamlConnectorId.createConeType(session))
+        listOf(xamlConnectorId, xamlComponentId)
+            .filterNot { id -> resolvedSupertypes.any { it.coneType.classId == id } }
+            .map { it.createConeType(session) }
 }

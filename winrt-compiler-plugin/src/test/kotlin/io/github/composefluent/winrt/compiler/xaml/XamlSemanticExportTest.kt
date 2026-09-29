@@ -67,24 +67,49 @@ class XamlSemanticExportTest {
                 "Microsoft.UI.Xaml.RoutedEventArgs\tRuntimeClass\t\tSystem.Object\n") }
         val source = File(root, "MainPage.kt").apply { writeText("""
             package probe
-            class MainPage(initializeNow: Boolean = false) : microsoft.ui.xaml.controls.Page() {
-                init { if (initializeNow) initializeComponent() }
+            class MainPage(failConstruction: Boolean = false) : microsoft.ui.xaml.controls.Page() {
+                var constructed = false
+                var tag = "primary"
+                var initializedTag = ""
+                var initializationCount = 0
+                init { check(!failConstruction) { "constructor failed" }; constructed = true }
+                constructor(tag: String) : this() { this.tag = tag }
+                override fun initializeComponent() {
+                    check(constructed)
+                    super.initializeComponent()
+                    val connected = myButton
+                    super.initializeComponent()
+                    check(connected === myButton)
+                    initializedTag = tag
+                    initializationCount++
+                    check(tag != "failHook") { "hook failed" }
+                }
                 private fun onClick(sender: Any?, args: microsoft.ui.xaml.RoutedEventArgs) { myButton.text += "clicked" }
             }
             fun exercise(): String {
                 val first = MainPage()
-                try { first.myButton; error("missing initialization must fail") } catch (_: IllegalArgumentException) {}
+                check(first.initializationCount == 1)
                 first.initializeComponent()
                 first.myButton.raise()
                 first.initializeComponent()
                 first.myButton.raise()
-                val second = MainPage()
+                val factory: () -> MainPage = ::MainPage
+                val second = factory()
                 second.initializeComponent()
                 second.myButton.raise()
                 check(first.getBindingConnector(0, null) == null)
-                val inConstructor = MainPage(true)
-                inConstructor.myButton.raise()
-                check(inConstructor.myButton.text == "clicked")
+                val secondary = MainPage("secondary")
+                check(secondary.initializedTag == "secondary")
+                check(secondary.initializationCount == 1)
+                check(first.initializationCount == 3 && second.initializationCount == 2)
+                val loads = microsoft.ui.xaml.Application.loads
+                try { MainPage(true); error("constructor must fail") } catch (error: IllegalStateException) {
+                    check(error.message == "constructor failed")
+                }
+                check(microsoft.ui.xaml.Application.loads == loads)
+                try { MainPage("failHook"); error("hook must fail") } catch (error: IllegalStateException) {
+                    check(error.message == "hook failed")
+                }
                 return first.myButton.text + ":" + second.myButton.text
             }
         """.trimIndent()) }
@@ -108,7 +133,9 @@ class XamlSemanticExportTest {
             class RoutedEventArgs
             fun interface RoutedEventHandler { fun invoke(sender: Any?, args: RoutedEventArgs) }
             class Application { companion object Metadata {
+                var loads = 0
                 fun loadComponent(page: Any, uri: windows.foundation.Uri) {
+                    loads++
                     check(uri.value == "ms-appx:///MainPage.xaml")
                     (page as microsoft.ui.xaml.markup.IComponentConnector).connect($buttonId, microsoft.ui.xaml.controls.Button())
                 }
@@ -161,15 +188,60 @@ class XamlSemanticExportTest {
         assertFalse(rewritten.contains("Click=\"onClick\""))
         val (finalResult, finalDiagnostics) = compile(final = true)
         assertEquals(finalDiagnostics, ExitCode.OK, finalResult)
-        URLClassLoader(arrayOf(File(root, "final").toURI().toURL()), javaClass.classLoader).use { loader ->
+        val consumerSource = File(root, "Consumer.kt").apply { writeText("""
+            package consumer
+            import probe.MainPage
+            fun exercise(): String {
+                val direct = probe.MainPage("external")
+                val factory: (String) -> probe.MainPage = ::MainPage
+                val referenced = factory("reference")
+                check(direct.initializationCount == 1 && referenced.initializationCount == 1)
+                return direct.initializedTag + ":" + referenced.initializedTag
+            }
+        """.trimIndent()) }
+        // A separate consumer has no XAML declaration input; the serialized managed interface
+        // must suffice to preserve construction behavior for direct calls and references.
+        val consumerClasspath = listOf(File(root, "final")) + listOf(Unit::class.java, WinRTXamlLoadState::class.java).map {
+            File(it.protectionDomain.codeSource.location.toURI())
+        }
+        val consumerDiagnostics = ByteArrayOutputStream()
+        val consumerResult = PrintStream(consumerDiagnostics).use { stream -> K2JVMCompiler().exec(stream,
+            "-no-stdlib", "-no-reflect", "-jvm-target", "17", "-classpath", consumerClasspath.joinToString(File.pathSeparator),
+            "-Xplugin=${System.getProperty("winrt.test.fullPluginJar")}", "-d", File(root, "consumer").absolutePath,
+            consumerSource.absolutePath)
+        }
+        assertEquals(consumerDiagnostics.toString(), ExitCode.OK, consumerResult)
+        URLClassLoader(arrayOf(File(root, "final").toURI().toURL(), File(root, "consumer").toURI().toURL()), javaClass.classLoader).use { loader ->
             assertEquals("clickedclicked:clicked", loader.loadClass("probe.MainPageKt").getMethod("exercise").invoke(null))
             val pageClass = loader.loadClass("probe.MainPage")
             assertTrue(java.lang.reflect.Modifier.isPrivate(pageClass.getDeclaredMethod("onClick",
                 Any::class.java, loader.loadClass("microsoft.ui.xaml.RoutedEventArgs")).modifiers))
             assertFalse(java.lang.reflect.Modifier.isStatic(pageClass.getDeclaredField("myButton").modifiers))
             assertTrue(pageClass.methods.none { it.name == "setMyButton" })
+            assertEquals("external:reference", loader.loadClass("consumer.ConsumerKt").getMethod("exercise").invoke(null))
         }
         val validSource = source.readText()
+        source.writeText("""
+            package probe
+            class MainPage : microsoft.ui.xaml.controls.Page() {
+                private fun onClick(sender: Any?, args: microsoft.ui.xaml.RoutedEventArgs) { myButton.text += "clicked" }
+            }
+            fun exerciseDefault(): String {
+                val factory: () -> MainPage = ::MainPage
+                val page = factory()
+                val button = page.myButton
+                page.initializeComponent()
+                check(button === page.myButton)
+                check(microsoft.ui.xaml.Application.loads == 1)
+                button.raise()
+                return button.text
+            }
+        """.trimIndent())
+        val (defaultResult, defaultDiagnostics) = compile(final = true)
+        assertEquals(defaultDiagnostics, ExitCode.OK, defaultResult)
+        URLClassLoader(arrayOf(File(root, "final").toURI().toURL()), javaClass.classLoader).use { loader ->
+            assertEquals("clicked", loader.loadClass("probe.MainPageKt").getMethod("exerciseDefault").invoke(null))
+        }
         source.writeText(validSource.replace("args: microsoft.ui.xaml.RoutedEventArgs", "args: kotlin.String"))
         val staleFinal = compile(final = true)
         assertNotEquals("A stale sidecar must not allow a changed handler signature", ExitCode.OK, staleFinal.first)

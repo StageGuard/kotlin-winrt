@@ -3,6 +3,7 @@ package io.github.composefluent.winrt.compiler
 import io.github.composefluent.winrt.compiler.xaml.XamlSemanticOptions
 import io.github.composefluent.winrt.compiler.xaml.XamlFirRegistrar
 import io.github.composefluent.winrt.compiler.xaml.XamlPageBodies
+import io.github.composefluent.winrt.compiler.xaml.XamlConstruction
 import org.jetbrains.kotlin.fir.extensions.FirExtensionRegistrarAdapter
 
 import io.github.composefluent.winrt.compiler.callsites.WinRTProjectionSupportLayout
@@ -287,6 +288,7 @@ class KotlinWinRTCompilerPluginRegistrar : CompilerPluginRegistrar() {
                 projectionSupportMode = configuration.get(KotlinWinRTCommandLineProcessor.PROJECTION_SUPPORT_MODE_KEY),
             ),
         )
+        IrGenerationExtension.registerExtension(XamlConstruction())
     }
 }
 

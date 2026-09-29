@@ -63,7 +63,7 @@ G1 只验证编译器工具能力，不设计 WinRT 语义，不把探针中的�
 - **实例状态**：生成真实实例字段。初版命名元素对用户只读，内部连接器写入；加载前访问抛出包含页面/元素名的明确错误。不使用全局 Map，不对生成属性开放无约束 setter。
 - **类成员增强**：FIR 生成用户可见声明和必要接口，IR 补实现。无注解筛选以输入索引匹配 ClassId；不要用运行时反射扫描页面。
 - **事件**：初版仅普通实例处理函数，不支持重载歧义、泛型/suspend 处理函数或 `x:Bind` 事件表达式。签名必须与实际投影 delegate 兼容；支持 private，生成桥接留在用户类中。
-- **初始化**：第一版采用用户在页面自身安全初始化位置显式调用生成的 `initializeComponent()`，加载状态由生成实现维护。自动构造插入留到独立生命周期设计，第一版不要实现。
+- **初始化**：按用户追加要求对齐现代 C++/WinRT 的两阶段构造。编译器插件在完整 Kotlin 构造调用返回后调用 `initializeComponent()`，不能插入基类构造阶段；用户覆盖该方法并先调用 `super.initializeComponent()`，随后访问命名控件，不增加另一套初始化钩子。
 - **失败语义**：加载或连接失败沿用现有异常/HRESULT 边界；不得吞掉失败或把失败后的对象标成成功加载。重入和失败后再次调用行为先按参考路径确定，再实现并验证。
 - **身份**：连接器并入页面已有 CCW；辅助状态对象可以存在，但不能作为页面的替代 COM 对象。
 - **第一版产物**：类内部声明/实现由插件生成；外部 `.kt` 仅用于独立辅助代码。XamlCompiler 输出稳定描述供插件消费，不输出第二份同名用户类。
@@ -108,8 +108,9 @@ G1 只验证编译器工具能力，不设计 WinRT 语义，不把探针中的�
 package sample.views
 
 class MainPage : Page() {
-    init {
-        initializeComponent()
+    override fun initializeComponent() {
+        super.initializeComponent()
+        // XAML 已加载，可访问命名控件；不在 init 中手动加载。
     }
 
     private fun onClick(sender: Any?, args: RoutedEventArgs) {
@@ -222,7 +223,7 @@ class MainPage : Page() {
 - [ ] 在现有 IR 管线为 FIR 生成声明补字段、访问器和方法体；给生成声明使用可识别 origin/key，确保重复运行和不同插件不会互相覆盖。
 - [ ] 对 private 事件处理函数生成位于用户类内部的调用桥接，或在同类生成方法体内直接调用正确 IR symbol；不扩大用户成员可见性，不使用反射绕过。
 - [ ] 接入现有 authoring 信息收集顺序，使新增接口和成员可被后续 CCW 描述看到；明确 FIR 元数据、IR 与 WinMD 输出之间的时序。
-- [ ] 第一版采用用户在页面自身安全初始化位置显式调用 `initializeComponent()`；核实此前现有 runtime/composition 已建立回调所需身份，禁止自动插入基类构造阶段。示例的 `init` 位置只有在该契约验证后才可作为最终用法。
+- [ ] 构造后自动调用 `initializeComponent()`；核实 runtime/composition 已建立回调所需身份，禁止在基类或尚未完成的派生构造阶段加载 XAML。验证普通调用、构造函数引用、次构造函数、跨模块消费、authoring 激活、初始化异常与生成加载逻辑的幂等性；示例覆盖 `initializeComponent()` 并先调用 `super.initializeComponent()`。
 - [ ] JVM 与 Native 共享生成语义；平台限制放到现有 target adaptation。生成实现不得依赖 JVM 反射或仅写 `.class` 的旁路作为永久架构。
 
 验收：用户 Kotlin 函数能引用 XAML 生成成员，private 事件桥接能编译，无注解、无生成基类、无 Kotlin fork；生成器回归证明原有 C#/C++ 相关行为未被破坏。

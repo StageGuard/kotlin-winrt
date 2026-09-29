@@ -19,11 +19,11 @@ internal class XamlSupportPage : Page() {
     private var clicks = 0
     private var verified = false
 
-    init {
-        initializeComponent()
+    override fun initializeComponent() {
+        super.initializeComponent()
         check(output.text == "Clicked 0 times")
         val originalOutput = output
-        initializeComponent()
+        super.initializeComponent()
         check(originalOutput.nativeObject.sameIdentity(output.nativeObject))
         // CsWinRT ComWrappersHelper.Init retains the nondelegating inner as NativeObject.
         // Authored interfaces belong to the controlling outer used at the ABI boundary.

@@ -28,11 +28,11 @@ internal class XamlPageBodies(private val index: WinRTXamlDeclarationIndex, priv
             val properties = klass.declarations.filterIsInstance<IrProperty>().filter {
                 (it.origin as? IrDeclarationOrigin.GeneratedByPlugin)?.pluginKey == XamlDeclarationKey
             }.associateBy { it.name.asString() }
-            // FIR appends generated declarations. Initialize plugin fields before user init blocks,
-            // otherwise init { initializeComponent() } sees null state or later clears connected fields.
+            // FIR appends generated declarations. Keep instance state ahead of user initializers;
+            // loading itself occurs only at the completed construction call boundary.
             klass.declarations.removeAll(properties.values.toSet())
             klass.declarations.addAll(0, properties.values)
-            val functions = listOf(xamlInitializeName, xamlLoadName, xamlConnectName, xamlBindingName).map(::function)
+            val functions = listOf(xamlInitializeName, xamlConstructionName, xamlLoadName, xamlConnectName, xamlBindingName).map(::function)
             if (semanticOnly) {
                 val error = pluginContext.referenceFunctions(CallableId(FqName("kotlin"), Name.identifier("error"))).single()
                 for (method in functions + properties.values.mapNotNull { it.getter }) {
@@ -73,6 +73,15 @@ internal class XamlPageBodies(private val index: WinRTXamlDeclarationIndex, priv
             stateGetter.body = DeclarationIrBuilder(pluginContext, stateGetter.symbol).irBlockBody {
                 +irReturn(irGetField(irGet(requireNotNull(stateGetter.dispatchReceiverParameter)), state))
             }
+            val constructionProperty = properties.getValue(xamlConstructionStateName.asString())
+            val constructionState = requireNotNull(constructionProperty.backingField)
+            constructionState.initializer = DeclarationIrBuilder(pluginContext, constructionState.symbol).run {
+                irExprBody(irCallConstructor(stateClass.constructors.single().symbol, emptyList()))
+            }
+            val constructionGetter = requireNotNull(constructionProperty.getter)
+            constructionGetter.body = DeclarationIrBuilder(pluginContext, constructionGetter.symbol).irBlockBody {
+                +irReturn(irGetField(irGet(requireNotNull(constructionGetter.dispatchReceiverParameter)), constructionState))
+            }
             val load = function(xamlLoadName)
             val applicationMetadata = requireNotNull(projection("Microsoft.UI.Xaml.Application").companionObject())
             val loadComponent = applicationMetadata.functions.single { it.name.asString() == "loadComponent" &&
@@ -97,6 +106,14 @@ internal class XamlPageBodies(private val index: WinRTXamlDeclarationIndex, priv
                 +irCall(stateLoad.symbol).apply {
                     dispatchReceiver = irGetField(irGet(requireNotNull(initialize.dispatchReceiverParameter)), state)
                     arguments[1] = boundReference(pluginContext, load, irGet(requireNotNull(initialize.dispatchReceiverParameter)))
+                }
+            }
+            val complete = function(xamlConstructionName)
+            val userInitialize = klass.functions.single { it.name.asString() == "initializeComponent" }
+            complete.body = DeclarationIrBuilder(pluginContext, complete.symbol).irBlockBody {
+                +irCall(stateLoad.symbol).apply {
+                    dispatchReceiver = irGetField(irGet(requireNotNull(complete.dispatchReceiverParameter)), constructionState)
+                    arguments[1] = boundReference(pluginContext, userInitialize, irGet(requireNotNull(complete.dispatchReceiverParameter)))
                 }
             }
             val binding = function(xamlBindingName)
