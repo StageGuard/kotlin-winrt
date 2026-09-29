@@ -2,6 +2,8 @@ package io.github.composefluent.winrt.gallery.processor
 
 import com.google.devtools.ksp.processing.*
 import com.google.devtools.ksp.symbol.*
+import com.google.devtools.ksp.getAllSuperTypes
+import com.google.devtools.ksp.getConstructors
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 
@@ -60,7 +62,25 @@ private class GalleryProcessor(
                     failed = true
                     continue
                 }
-                if (kind in setOf("GalleryPage", "GallerySample") && !homePage && (declaration !is KSFunctionDeclaration ||
+                val pageClass = kind == "GalleryPage" && declaration is KSClassDeclaration
+                if (pageClass) {
+                    val page = declaration as KSClassDeclaration
+                    val accessibleConstructor = page.getConstructors().any {
+                        it.parameters.isEmpty() && Modifier.PRIVATE !in it.modifiers && Modifier.PROTECTED !in it.modifiers
+                    }
+                    val isElement = page.getAllSuperTypes().any {
+                        it.declaration.qualifiedName?.asString() == "microsoft.ui.xaml.UIElement"
+                    }
+                    if (page.classKind != ClassKind.CLASS || Modifier.ABSTRACT in page.modifiers ||
+                        Modifier.SEALED in page.modifiers || Modifier.INNER in page.modifiers ||
+                        Modifier.PRIVATE in page.modifiers || page.typeParameters.isNotEmpty() ||
+                        !accessibleConstructor || !isElement) {
+                        logger.error("@GalleryPage requires an accessible, concrete, non-generic UIElement subclass with a zero-parameter constructor", symbol)
+                        failed = true
+                        continue
+                    }
+                }
+                if (kind in setOf("GalleryPage", "GallerySample") && !homePage && !pageClass && (declaration !is KSFunctionDeclaration ||
                         (kind == "GalleryPage" && declaration.parameters.isNotEmpty()) || declaration.extensionReceiver != null ||
                         declaration.typeParameters.isNotEmpty() || Modifier.SUSPEND in declaration.modifiers ||
                         Modifier.PRIVATE in declaration.modifiers)) {
@@ -130,16 +150,18 @@ private class GalleryProcessor(
         val examples = pages.mapIndexed { routeIndex, page ->
             val pageFile = java.io.File(sources.single { it.fileName == page.source }.filePath)
             val xamlFile = java.io.File(pageFile.parentFile, "${pageFile.nameWithoutExtension}.xaml")
-            if (xamlFile.isFile) {
-                // A migrated page's factory only constructs its code-behind class.
-                // Show that class and markup, never the obsolete code-only sample.
+            val pageDeclaration = sources.single { it.fileName == page.source }.declarations.firstOrNull {
+                it.qualifiedName?.asString() == page.symbol
+            }
+            if (xamlFile.isFile || pageDeclaration is KSClassDeclaration) {
+                // Class registrations show the complete code-behind, with adjacent markup when present.
                 val source = texts.getValue(page.source)
                 val kotlinName = "GalleryCode${routeIndex}_0"
                 val xamlName = "GalleryXaml$routeIndex"
-                val documents = listOf(
-                    kotlinName to parser.parse(page.source, source, isScript = false),
-                    xamlName to XamlSourceParser().parse(xamlFile.name, xamlFile.readText()),
-                )
+                val documents = buildList {
+                    add(kotlinName to parser.parse(page.source, source, isScript = false))
+                    if (xamlFile.isFile) add(xamlName to XamlSourceParser().parse(xamlFile.name, xamlFile.readText()))
+                }
                 val origins = mapOf(kotlinName to KotlinCodeOriginData(
                     repositoryRelativePath(pageFile.path, repositoryRoot),
                     KotlinSourceFragment(source, IntArray(source.length) { it }),
@@ -147,7 +169,7 @@ private class GalleryProcessor(
                 codeGenerator.createNewFile(
                     Dependencies(true, *sources.toTypedArray()), galleryPackage, "GalleryCode$routeIndex",
                 ).bufferedWriter().use { it.write(generateCodeDocuments(documents, origins)) }
-                xamlDocuments[page.route] = xamlName
+                if (xamlFile.isFile) xamlDocuments[page.route] = xamlName
                 return@mapIndexed RoutePreviews(emptyMap(), 1)
             }
             val origins = mutableMapOf<String, KotlinCodeOriginData>()
