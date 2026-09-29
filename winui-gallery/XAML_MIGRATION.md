@@ -46,6 +46,10 @@ ToolTip preserves the upstream three-example XAML and all three sample text
 files apart from Kotlin type names. Its JVM native route loads all three
 examples and activates the window; tooltip interaction, visual and Native
 checks remain.
+Flyout preserves the upstream one-example XAML and unchanged sample text apart
+from Kotlin type names. Its confirmation button calls the Kotlin handler to
+hide the Flyout. Its JVM native route loads the example and activates the
+window; confirmation interaction, visual and Native checks remain.
 
 | Route | Group | Kotlin source | Existing sample factories | Migration |
 | --- | --- | --- | ---: | --- |
@@ -86,7 +90,7 @@ checks remain.
 | Spacing | DesignItem | [SpacingPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/design/SpacingPage.kt) | 0 | Pending |
 | Typography | DesignItem | [TypographyPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/design/TypographyPage.kt) | 1 | Pending |
 | ContentDialog | DialogsAndFlyouts | [ContentDialogPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/dialogsandflyouts/ContentDialogPage.kt) | 2 | Pending |
-| Flyout | DialogsAndFlyouts | [FlyoutPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/dialogsandflyouts/FlyoutPage.kt) | 1 | Pending |
+| Flyout | DialogsAndFlyouts | [FlyoutPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/dialogsandflyouts/FlyoutPage.kt) | 1 | Original XAML and sample text preserved apart from namespace mapping; JVM native page load passed; interaction, visual and Native checks pending |
 | Popup | DialogsAndFlyouts | [PopupPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/dialogsandflyouts/PopupPage.kt) | 1 | Pending |
 | TeachingTip | DialogsAndFlyouts | [TeachingTipPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/dialogsandflyouts/TeachingTipPage.kt) | 3 | Pending |
 | Binding | FundamentalsItem | [BindingPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/fundamentals/BindingPage.kt) | 7 | Pending |
@@ -178,9 +182,9 @@ checks remain.
 | --- | --- | --- |
 | Application resources and startup | Main.kt / GalleryApplication | Pending |
 | Main window and navigation | MainWindow.kt / GalleryNavigationHost.kt | Pending |
-| Page headers and sample frames | ControlExample.xaml / ControlExample.kt / GalleryTheme.kt | Eight BasicInput routes plus AppBarSeparator, Pivot, CalendarDatePicker and ToolTip use shared XAML control; original private components and other routes pending |
+| Page headers and sample frames | ControlExample.xaml / ControlExample.kt / GalleryTheme.kt | Eight BasicInput routes plus AppBarSeparator, Pivot, CalendarDatePicker, ToolTip and Flyout use shared XAML control; original private components and other routes pending |
 | Settings and All routes | GallerySettingsPage.kt / navigation host | Pending |
-| Example source display and copy | processor / code-document / code UI | SampleDefinition selects separate XAML/Kotlin files on twelve routes; remaining routes pending |
+| Example source display and copy | processor / code-document / code UI | SampleDefinition selects separate XAML/Kotlin files on thirteen routes; remaining routes pending |
 | Styles, dictionaries and templates | shared UI and relevant individual pages | Pending |
 
 This is the source inventory (122 existing annotated routes including Home). Visual baselines, feature prerequisites, and interaction acceptance remain to be captured before marking any route complete.
