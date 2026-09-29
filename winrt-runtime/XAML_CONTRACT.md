@@ -36,3 +36,14 @@ controls such as Gallery `ControlExample`. Automatic definition generation,
 pre-analysis application property metadata, compiled bindings, and end-to-end
 Native support remain incomplete; registering a definition alone does not make
 the XamlCompiler recognize a Kotlin property.
+
+The semantic compilation now exports declared public/internal instance
+properties into the application-only `KotlinXaml.winmd`. It uses Kotlin IR
+types and accessor visibility, excludes generated `x:Name` properties and
+private state, and preserves nullable value types as `IReference<T>`. This
+schema is separate from authored component ABI export. The metadata writer
+owns Property/MethodSemantics encoding, following CsWinRT
+`WinRTTypeWriter.AddPropertyDefinition`. The initial XAML analysis still needs
+an application declaration input before semantic compilation; the later
+semantic WinMD alone cannot resolve that dependency. Content-property
+annotation export and generated runtime member registration are also pending.

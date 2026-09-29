@@ -82,6 +82,8 @@ private class XamlSemanticExport(
             file.declarations.filterIsInstance<IrClass>().map { it to file }
         }
         val authored = mutableListOf<WinRTAuthoredRuntimeClassDescriptor>()
+        val applicationMembers = mutableMapOf<String, WinRTXamlApplicationTypeMembers>()
+        val applicationTypes = declarations.pages.mapTo(mutableSetOf()) { it.className }
         val pages = declarations.pages.sortedBy { it.className }.map { page ->
             val (klass, file) = requireNotNull(classes.singleOrNull { it.first.fqNameWhenAvailable?.asString() == page.className }) {
                 "XAML ${page.resourcePath}: missing top-level Kotlin class ${page.className}"
@@ -96,6 +98,7 @@ private class XamlSemanticExport(
             } == page.baseTypeName }) { "XAML ${page.className}: expected direct base ${page.baseTypeName}" }
             authored += WinRTAuthoredRuntimeClassDescriptor(page.className, page.baseTypeName,
                 listOf("Microsoft.UI.Xaml.Markup.IComponentConnector"), isActivatable = false)
+            applicationMembers[page.className] = xamlApplicationProperties(klass, types, applicationTypes)
             val handlers = page.connections.flatMap { it.events }.map { it.handlerName }.distinct().sorted().map { name ->
                 val handler = requireNotNull(klass.declarations.filterIsInstance<IrSimpleFunction>().singleOrNull { it.name.asString() == name }) {
                     "XAML ${page.className}: missing or overloaded handler $name"
@@ -128,9 +131,11 @@ private class XamlSemanticExport(
             put("Pages", JsonArray(pages))
         }
         Files.createDirectories(output.toAbsolutePath().parent)
-        WinRTPortableExecutableMetadataWriter.writeAuthoredWinmd(
-            "KotlinXaml", authored, output.resolveSibling("KotlinXaml.winmd"),
+        WinRTPortableExecutableMetadataWriter.writeXamlApplicationWinmd(
+            "KotlinXaml", authored, applicationMembers, output.resolveSibling("KotlinXaml.winmd"),
             WinRTMetadataLoader.loadTypeAssemblyNames(references),
+            types.values.filter { it.kind == WinRTTypeKind.Enum.name || it.kind == WinRTTypeKind.Struct.name }
+                .mapTo(mutableSetOf()) { it.qualifiedName },
         )
         Files.writeString(output, symbols.toString())
     }
