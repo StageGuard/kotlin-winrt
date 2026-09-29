@@ -39,6 +39,9 @@ window; visual and Native checks remain.
 Pivot likewise preserves the upstream XAML apart from its Kotlin type names and
 keeps the original sample text unchanged. Its JVM native route loads the Pivot
 example and activates the window; visual and Native checks remain.
+CalendarDatePicker also preserves the upstream one-example XAML and sample text
+apart from the Kotlin type names. Its JVM native route loads the picker and
+activates the window; visual and Native checks remain.
 
 | Route | Group | Kotlin source | Existing sample factories | Migration |
 | --- | --- | --- | ---: | --- |
@@ -69,7 +72,7 @@ example and activates the window; visual and Native checks remain.
 | ListView | Collections | [ListViewPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/collections/ListViewPage.kt) | 10 | Pending |
 | PullToRefresh | Collections | [PullToRefreshPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/collections/PullToRefreshPage.kt) | 2 | Pending |
 | TreeView | Collections | [TreeViewPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/collections/TreeViewPage.kt) | 4 | Pending |
-| CalendarDatePicker | DateAndTime | [CalendarDatePickerPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/dateandtime/CalendarDatePickerPage.kt) | 1 | Pending |
+| CalendarDatePicker | DateAndTime | [CalendarDatePickerPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/dateandtime/CalendarDatePickerPage.kt) | 1 | Original XAML and sample text preserved apart from namespace mapping; JVM native page load passed; visual and Native checks pending |
 | CalendarView | DateAndTime | [CalendarViewPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/dateandtime/CalendarViewPage.kt) | 1 | Pending |
 | DatePicker | DateAndTime | [DatePickerPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/dateandtime/DatePickerPage.kt) | 2 | Pending |
 | TimePicker | DateAndTime | [TimePickerPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/dateandtime/TimePickerPage.kt) | 3 | Pending |
@@ -171,9 +174,9 @@ example and activates the window; visual and Native checks remain.
 | --- | --- | --- |
 | Application resources and startup | Main.kt / GalleryApplication | Pending |
 | Main window and navigation | MainWindow.kt / GalleryNavigationHost.kt | Pending |
-| Page headers and sample frames | ControlExample.xaml / ControlExample.kt / GalleryTheme.kt | Eight BasicInput routes, AppBarSeparator and Pivot use shared XAML control; original private components and other routes pending |
+| Page headers and sample frames | ControlExample.xaml / ControlExample.kt / GalleryTheme.kt | Eight BasicInput routes plus AppBarSeparator, Pivot and CalendarDatePicker use shared XAML control; original private components and other routes pending |
 | Settings and All routes | GallerySettingsPage.kt / navigation host | Pending |
-| Example source display and copy | processor / code-document / code UI | SampleDefinition selects separate XAML/Kotlin files on ten routes; remaining routes pending |
+| Example source display and copy | processor / code-document / code UI | SampleDefinition selects separate XAML/Kotlin files on eleven routes; remaining routes pending |
 | Styles, dictionaries and templates | shared UI and relevant individual pages | Pending |
 
 This is the source inventory (122 existing annotated routes including Home). Visual baselines, feature prerequisites, and interaction acceptance remain to be captured before marking any route complete.
