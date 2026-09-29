@@ -8,6 +8,12 @@ independent named fields on two instances, idempotent initialization, and two re
 ButtonAutomationPeer invocations reaching the private Kotlin handler. This does
 not establish visual, Native, IDE, or existing-page migration acceptance.
 
+Button now uses four `ControlExample` XAML instances and four independent
+`SampleDefinition` text files. The adapted control is not yet a full copy of
+WinUI Gallery's original template. The wrapping sample uses an explicit
+`ControlExample.Example` element: with implicit child syntax, the native load
+completed without calling the authored `Example` setter.
+
 | Route | Group | Kotlin source | Existing sample factories | Migration |
 | --- | --- | --- | ---: | --- |
 | Home |  | [MainWindow.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/MainWindow.kt) | 0 | Pending |
@@ -15,7 +21,7 @@ not establish visual, Native, IDE, or existing-page migration acceptance.
 | AccessibilityColorContrast | AccessibilityItem | [AccessibilityColorContrastPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/accessibility/AccessibilityColorContrastPage.kt) | 0 | Pending |
 | AccessibilityKeyboard | AccessibilityItem | [AccessibilityKeyboardPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/accessibility/AccessibilityKeyboardPage.kt) | 6 | Pending |
 | AccessibilityScreenReader | AccessibilityItem | [AccessibilityScreenReaderPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/accessibility/AccessibilityScreenReaderPage.kt) | 11 | Pending |
-| Button | BasicInput | [ButtonPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/basicinput/ButtonPage.kt) | 4 | XAML + Kotlin; JVM native interaction/source checks passed; visual and Native checks pending |
+| Button | BasicInput | [ButtonPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/basicinput/ButtonPage.kt) | 4 | Four shared XAML examples with separate source files; JVM native interaction/source checks passed; original template, visual and Native checks pending |
 | CheckBox | BasicInput | [CheckBoxPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/basicinput/CheckBoxPage.kt) | 3 | XAML + Kotlin; JVM native state/event/source checks passed; visual and Native checks pending |
 | ColorPicker | BasicInput | [ColorPickerPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/basicinput/ColorPickerPage.kt) | 1 | Pending |
 | ComboBox | BasicInput | [ComboBoxPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/basicinput/ComboBoxPage.kt) | 3 | Pending |
@@ -139,9 +145,9 @@ not establish visual, Native, IDE, or existing-page migration acceptance.
 | --- | --- | --- |
 | Application resources and startup | Main.kt / GalleryApplication | Pending |
 | Main window and navigation | MainWindow.kt / GalleryNavigationHost.kt | Pending |
-| Page headers and sample frames | GalleryPageHeader.kt / GalleryControls.kt / GalleryTheme.kt | Pending |
+| Page headers and sample frames | ControlExample.xaml / ControlExample.kt / GalleryTheme.kt | Button uses shared XAML control; original template and other routes pending |
 | Settings and All routes | GallerySettingsPage.kt / navigation host | Pending |
-| Example source display and copy | processor / code-document / code UI | Pending |
+| Example source display and copy | processor / code-document / code UI | SampleDefinition selects separate Button XAML/Kotlin files; remaining routes pending |
 | Styles, dictionaries and templates | shared UI and relevant individual pages | Pending |
 
 This is the source inventory (122 existing annotated routes including Home). Visual baselines, feature prerequisites, and interaction acceptance remain to be captured before marking any route complete.

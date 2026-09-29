@@ -8,10 +8,6 @@ import microsoft.ui.xaml.controls.Page
 internal class ButtonPage : Page() {
     override fun initializeComponent() {
         super.initializeComponent()
-        bindXamlExample("A simple Button with text content.", textExample, textBody, textSource, textOptions)
-        bindXamlExample("A Button with image content.", imageExample, imageBody, imageSource)
-        bindXamlExample("Buttons with built-in styles.", stylesExample, stylesBody, stylesSource)
-        bindXamlExample("Buttons with long content.", longExample, longBody, longSource)
     }
 
     private fun onStandardClick(sender: Any?, args: RoutedEventArgs) {

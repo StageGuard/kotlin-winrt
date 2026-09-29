@@ -146,6 +146,7 @@ private class GalleryProcessor(
         val sampleExtractor = KotlinSampleSourceExtractor()
         val parser = KotlinSourceParser()
         val xamlDocuments = linkedMapOf<String, Map<String, String>>()
+        val sampleDefinitions = linkedMapOf<String, Triple<String, String, String>>()
         data class RoutePreviews(val titleIndices: Map<String, Int>, val count: Int)
         val examples = pages.mapIndexed { routeIndex, page ->
             val pageFile = java.io.File(sources.single { it.fileName == page.source }.filePath)
@@ -165,6 +166,12 @@ private class GalleryProcessor(
                         "GalleryCode${routeIndex}_$index" to parser.parse("${file.nameWithoutExtension}.kt", sample.kotlin, isScript = true),
                         "GalleryXaml${routeIndex}_$index" to XamlSourceParser().parse("${file.nameWithoutExtension}.xaml", sample.xaml),
                     ) }
+                    parsed.forEachIndexed { index, (file, sample) ->
+                        val name = file.name.replace(Regex("^\\d+-"), "")
+                        val path = "${page.route}\\$name"
+                        require(path !in sampleDefinitions) { "Duplicate sample definition $path" }
+                        sampleDefinitions[path] = Triple(sample.header, "GalleryCode${routeIndex}_$index", "GalleryXaml${routeIndex}_$index")
+                    }
                     codeGenerator.createNewFile(
                         Dependencies(true, *sources.toTypedArray()), galleryPackage, "GalleryCode$routeIndex",
                     ).bufferedWriter().use { it.write(generateCodeDocuments(documents, emptyMap())) }
@@ -251,7 +258,13 @@ private class GalleryProcessor(
                 documents.values.forEachIndexed { index, name -> writer.appendLine("        $index -> $name.create()") }
                 writer.appendLine("        else -> null\n      }\n    }")
             }
-            writer.appendLine("    else -> null\n  }\n}")
+            writer.appendLine("    else -> null\n  }")
+            writer.appendLine("  actual fun sampleDefinition(path: String): GallerySampleCode? = when (path.replace('/', '\\\\')) {")
+            sampleDefinitions.forEach { (path, document) ->
+                writer.appendLine("    ${kotlinLiteral(path)} -> GallerySampleCode(${kotlinLiteral(document.first)}, ${document.second}.create(), ${document.third}.create())")
+            }
+            writer.appendLine("    else -> null\n  }")
+            writer.appendLine("}")
         }
     }
 }

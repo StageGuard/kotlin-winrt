@@ -17,7 +17,7 @@ internal fun validateButtonPage(page: ButtonPage) = with(page) {
         ButtonAutomationPeer(standardButton).invoke()
         ButtonAutomationPeer(imageButton).invoke()
         ToggleButtonAutomationPeer(disableButton).toggle()
-        textSource.isExpanded = true
+        textExample.sourcePresenter.isExpanded = true
     }, verify = {
         check(textOutput.text == "You clicked: Standard XAML button")
         check(imageOutput.text == "You clicked: Image button")
@@ -27,7 +27,7 @@ internal fun validateButtonPage(page: ButtonPage) = with(page) {
         check(wrappedFirst.maxWidth == 240.0 && wrappedSecond.maxWidth == 240.0)
         check(checkNotNull(wrappedFirst.content).asWinRT<TextBlock>().textWrapping == TextWrapping.WrapWholeWords)
         check(checkNotNull(imageButton.content).asWinRT<Image>().source != null)
-        check(textSource.content != null)
+        check(textExample.sourcePresenter.content != null)
         check(checkNotNull(GalleryCodeCatalog.xamlDocument("Button")).source.contains("Click=\"onStandardClick\""))
         check(checkNotNull(GalleryCodeCatalog.document("Button", "", 0)).source.contains("private fun onStandardClick"))
         val textMarkup = checkNotNull(GalleryCodeCatalog.xamlDocument("Button", "A simple Button with text content.", 0)).source
@@ -35,8 +35,8 @@ internal fun validateButtonPage(page: ButtonPage) = with(page) {
         check("imageButton" !in textMarkup && "<Page" !in textMarkup)
         check("Slices.png" in imageMarkup && "standardButton" !in imageMarkup)
         check("onImageClick" !in checkNotNull(GalleryCodeCatalog.document("Button", "", 0)).source)
-        stylesSource.isExpanded = true
-        val tabs = checkNotNull(stylesSource.content).asWinRT<Grid>().children[0].asWinRT<SelectorBar>()
+        stylesExample.sourcePresenter.isExpanded = true
+        val tabs = checkNotNull(stylesExample.sourcePresenter.content).asWinRT<Grid>().children[0].asWinRT<SelectorBar>()
         check(tabs.items.size == 1 && tabs.items[0].text == "XAML")
     })
 }

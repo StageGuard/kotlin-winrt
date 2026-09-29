@@ -21,4 +21,11 @@ internal expect object GallerySymbols {
 internal expect object GalleryCodeCatalog {
     fun document(route: String, title: String, index: Int): io.github.composefluent.winrt.gallery.code.KotlinCodeDocument?
     fun xamlDocument(route: String, title: String = "", index: Int = 0): io.github.composefluent.winrt.gallery.code.KotlinCodeDocument?
+    fun sampleDefinition(path: String): GallerySampleCode?
 }
+
+internal data class GallerySampleCode(
+    val header: String,
+    val kotlin: io.github.composefluent.winrt.gallery.code.KotlinCodeDocument,
+    val xaml: io.github.composefluent.winrt.gallery.code.KotlinCodeDocument?,
+)
