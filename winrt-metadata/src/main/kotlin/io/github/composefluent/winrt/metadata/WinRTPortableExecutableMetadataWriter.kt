@@ -188,8 +188,10 @@ private class WinmdBuilder(
         }
         val assemblyRefs = typeAssemblies.values.filterNotNull().distinct().sorted()
         val attributeMemberRefs = attributeMemberRefs(typeRefs)
-        val customAttributes = typeDefCustomAttributes(attributeMemberRefs, localTypeDefRowIds) +
-            interfaceImplCustomAttributes(attributeMemberRefs, localTypeDefRowIds)
+        // The sorted table mask below requires HasCustomAttribute parents to be in coded-index order.
+        // InterfaceImpl row IDs can sort before later TypeDefs even though their rows are emitted later.
+        val customAttributes = (typeDefCustomAttributes(attributeMemberRefs, localTypeDefRowIds) +
+            interfaceImplCustomAttributes(attributeMemberRefs, localTypeDefRowIds)).sortedBy { it.parentToken }
         val validMask = (1L shl TABLE_MODULE) or
             (if (typeRefs.isEmpty()) 0L else 1L shl TABLE_TYPE_REF) or
             (1L shl TABLE_TYPE_DEF) or
