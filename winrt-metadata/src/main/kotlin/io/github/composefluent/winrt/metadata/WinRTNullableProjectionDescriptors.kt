@@ -12,6 +12,15 @@ internal fun WinRTEventDefinition.withNullableEventContract(ownerTypeName: Strin
 }
 
 internal fun WinRTMethodDefinition.withNullableReturnContract(ownerTypeName: String): WinRTMethodDefinition {
+    // Gallery's StringOrIntTemplateSelector returns null for unmatched items.
+    // CsWinRT MarshalInterface<T>.FromAbi (WinRT.Runtime/Marshalers.cs) preserves
+    // a zero ABI pointer. Normalize before planning so base calls and authored
+    // overrides expose the same nullable contract on JVM and Native.
+    if (ownerTypeName.substringBeforeLast('.') in setOf("Microsoft.UI.Xaml.Controls", "Windows.UI.Xaml.Controls") &&
+        ownerTypeName.substringAfterLast('.') in setOf("DataTemplateSelector", "IDataTemplateSelector", "IDataTemplateSelectorOverrides", "IDataTemplateSelectorOverrides2") &&
+        name in setOf("SelectTemplate", "SelectTemplateCore")) {
+        return copy(returnTypeName = returnTypeName.removeSuffix("?") + "?")
+    }
     // XamlCompiler CSharpPagePass2.tt returns null when there is no binding scope.
     // CsWinRT MarshalInterface<T>.FromAbi preserves that null across the ABI.
     if (ownerTypeName == "Microsoft.UI.Xaml.Markup.IComponentConnector" && name == "GetBindingConnector") {
