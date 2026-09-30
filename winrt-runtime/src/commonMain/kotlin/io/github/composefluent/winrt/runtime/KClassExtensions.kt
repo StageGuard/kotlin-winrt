@@ -52,7 +52,7 @@ internal fun isAssignableFrom(targetType: KClass<*>, candidateType: KClass<*>): 
 // ---------------------------------------------------------------------------
 
 internal fun isPrimitiveWinRTType(type: KClass<*>): Boolean =
-    type.registeredWinRTType()?.let { it.isWindowsRuntimeType && !it.isRuntimeClass && it.guid == null } == true
+    WinRTTypeClassifier.classify(type)?.isTypeNamePrimitive == true
 
 internal fun typeName(type: KClass<*>): String =
     type.qualifiedName ?: type.simpleName ?: "<anonymous>"
