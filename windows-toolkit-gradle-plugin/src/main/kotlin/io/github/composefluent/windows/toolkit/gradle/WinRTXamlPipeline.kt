@@ -7,6 +7,7 @@ import org.gradle.api.provider.Provider
 import org.gradle.api.tasks.TaskProvider
 import org.jetbrains.kotlin.gradle.plugin.KotlinApiPlugin
 import org.jetbrains.kotlin.gradle.plugin.KotlinJvmFactory
+import org.jetbrains.kotlin.gradle.dsl.KotlinMultiplatformExtension
 import org.jetbrains.kotlin.gradle.tasks.KotlinJvmCompile
 import java.io.File
 
@@ -79,7 +80,16 @@ internal fun configureWinRTXamlPipeline(
         task.description = "Analyzes XAML declarations before Kotlin authoring and semantic compilation."
         task.outputDirectory.set(project.layout.buildDirectory.dir("generated/kotlin-winrt/xaml/declarations"))
     }
+    // TypeDetails are emitted in winuiMain. Their template implementation must live
+    // in that same fragment, so common WinUI code can see it on JVM and Native.
+    project.extensions.findByType(KotlinMultiplatformExtension::class.java)?.sourceSets
+        ?.matching { it.name == "winuiMain" }?.configureEach {
+            it.kotlin.srcDir(applicationHeader.flatMap { task -> task.sourceOutputDirectory })
+        }
     candidates.configure { task ->
+        task.xamlSupportSources.from(hasXaml.flatMap { enabled ->
+            if (enabled) applicationHeader.flatMap { it.sourceOutputDirectory } else project.providers.provider { null }
+        })
         task.xamlDeclarations.set(hasXaml.flatMap { enabled ->
             if (enabled) declarations.flatMap { it.declarationsFile } else project.providers.provider { null }
         })
@@ -108,6 +118,7 @@ internal fun configureWinRTXamlPipeline(
                     listOf("xamlDeclarations=${declarations.get().declarationsFile.get().asFile.absolutePath}",
                         "metadataIndex=${metadataIndex.get().asFile.absolutePath}",
                         "xamlSemanticOutput=${symbols.get().asFile.absolutePath}",
+                        "xamlApplicationHeader=${applicationHeader.get().outputFile.get().asFile.absolutePath}",
                         "xamlReferencesFile=${declarations.get().outputDirectory.file("references.txt").get().asFile.absolutePath}")
                         .flatMap { listOf("-P", "plugin:io.github.composefluent.winrt.compiler:$it") }
                 })
@@ -142,6 +153,14 @@ internal fun configureWinRTXamlPipeline(
                 task.outputDirectory.set(project.layout.buildDirectory.dir("generated/kotlin-winrt/xaml/$suffix/final"))
                 task.dependsOn(semantic)
             }
+            // KSP contributes source directories to this compilation. Preserve
+            // their producer edge for both XAML passes, including targeted runs
+            // that reuse an already completed semantic compilation.
+            val sourceGeneration = project.tasks.matching {
+                it.name == "ksp" + business.name.removePrefix("compile")
+            }
+            semantic.configure { it.dependsOn(sourceGeneration) }
+            implementation.configure { it.dependsOn(sourceGeneration) }
             business.source(applicationHeader.flatMap { it.sourceOutputDirectory })
             business.inputs.file(implementation.flatMap { it.implementationFile })
             business.compilerOptions.freeCompilerArgs.addAll(project.provider {

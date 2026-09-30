@@ -33,6 +33,42 @@ data class WinRTXamlConnectionDeclaration(
     @SerialName("FieldName") val fieldName: String?,
     @SerialName("Location") val location: WinRTXamlSourceLocation,
     @SerialName("Events") val events: List<WinRTXamlEventDeclaration>,
+    @SerialName("ElementName") val elementName: String? = null,
+    @SerialName("ScopeId") val scopeId: Int = 0,
+    @SerialName("IsScopeRoot") val isScopeRoot: Boolean = false,
+    @SerialName("IsTemplateChild") val isTemplateChild: Boolean = false,
+    @SerialName("DataTypeName") val dataTypeName: String? = null,
+    @SerialName("Bindings") val bindings: List<WinRTXamlBindingDeclaration> = emptyList(),
+)
+
+@Serializable
+data class WinRTXamlBindingDeclaration(
+    @SerialName("Name") val name: String,
+    @SerialName("DeclaringTypeName") val declaringTypeName: String,
+    @SerialName("TypeName") val typeName: String,
+    @SerialName("Mode") val mode: String,
+    @SerialName("Expression") val expression: WinRTXamlBindingExpression,
+    @SerialName("Location") val location: WinRTXamlSourceLocation,
+    @SerialName("IsAttachable") val isAttachable: Boolean = false,
+    @SerialName("IsEvent") val isEvent: Boolean = false,
+    @SerialName("BindBack") val bindBack: WinRTXamlBindingExpression? = null,
+    @SerialName("Converter") val converter: String? = null,
+    @SerialName("ConverterParameter") val converterParameter: String? = null,
+    @SerialName("ConverterLanguage") val converterLanguage: String? = null,
+    @SerialName("FallbackValue") val fallbackValue: WinRTXamlBindingExpression? = null,
+    @SerialName("TargetNullValue") val targetNullValue: WinRTXamlBindingExpression? = null,
+    @SerialName("UpdateSourceTrigger") val updateSourceTrigger: String? = null,
+)
+
+/** Syntax exported by XamlCompiler's BindingPath parser; it is never interpreted at runtime. */
+@Serializable
+data class WinRTXamlBindingExpression(
+    @SerialName("Kind") val kind: String,
+    @SerialName("Name") val name: String? = null,
+    @SerialName("TypeName") val typeName: String? = null,
+    @SerialName("Value") val value: String? = null,
+    @SerialName("Receiver") val receiver: WinRTXamlBindingExpression? = null,
+    @SerialName("Arguments") val arguments: List<WinRTXamlBindingExpression> = emptyList(),
 )
 
 @Serializable
@@ -51,9 +87,9 @@ data class WinRTXamlSourceLocation(
 )
 
 object WinRTXamlDeclarations {
-    const val SCHEMA_VERSION = 1
+    const val SCHEMA_VERSION = 2
     private val json = Json { encodeDefaults = true }
-    private val supportedFeatures = setOf("named-elements", "events")
+    private val supportedFeatures = setOf("named-elements", "events", "compiled-bindings", "templates")
 
     /** Never accept a partial/stale index from a compiler invocation that reported an error. */
     fun readCompilerOutput(path: Path): WinRTXamlDeclarationIndex {
@@ -71,7 +107,7 @@ object WinRTXamlDeclarations {
 
     fun parse(text: String): WinRTXamlDeclarationIndex {
         val element = json.parseToJsonElement(text)
-        require(element.jsonObject["SchemaVersion"]?.jsonPrimitive?.intOrNull == SCHEMA_VERSION) {
+        require(element.jsonObject["SchemaVersion"]?.jsonPrimitive?.intOrNull in 1..SCHEMA_VERSION) {
             "Unsupported Kotlin XAML declaration schema; expected $SCHEMA_VERSION."
         }
         return json.decodeFromJsonElement<WinRTXamlDeclarationIndex>(element).also(::validate)
@@ -85,6 +121,7 @@ object WinRTXamlDeclarations {
                 features = page.features.sorted(),
                 connections = page.connections.sortedBy { it.id }.map { connection -> connection.copy(
                     events = connection.events.sortedBy { it.name },
+                    bindings = connection.bindings.sortedBy { it.name },
                 ) },
             ) },
         ))
@@ -95,7 +132,7 @@ object WinRTXamlDeclarations {
         .joinToString("") { "%02x".format(it) }
 
     private fun validate(index: WinRTXamlDeclarationIndex) {
-        require(index.schemaVersion == SCHEMA_VERSION) { "Unsupported Kotlin XAML schema ${index.schemaVersion}." }
+        require(index.schemaVersion in 1..SCHEMA_VERSION) { "Unsupported Kotlin XAML schema ${index.schemaVersion}." }
         require(index.pages.map { it.className }.distinct().size == index.pages.size) { "Duplicate x:Class." }
         val paths = index.resources + index.pages.map { it.resourcePath }
         paths.forEach(::validateResourcePath)
@@ -104,10 +141,12 @@ object WinRTXamlDeclarations {
             require(page.className.isNotBlank() && page.baseTypeName.isNotBlank()) { "Missing XAML class or base type." }
             require(page.features.all { it in supportedFeatures }) { "Unsupported Kotlin XAML features: ${page.features - supportedFeatures}" }
             require(page.connections.map { it.id }.distinct().size == page.connections.size) { "Duplicate connection ID in ${page.resourcePath}." }
-            val fields = page.connections.mapNotNull { it.fieldName }
+            val fields = page.connections.filterNot { it.isTemplateChild }.mapNotNull { it.fieldName }
             require(fields.distinct().size == fields.size) { "Duplicate x:Name in ${page.resourcePath}." }
             require(fields.isEmpty() || "named-elements" in page.features) { "Missing named-elements feature." }
             require(page.connections.all { it.events.isEmpty() } || "events" in page.features) { "Missing events feature." }
+            require(page.connections.all { it.bindings.isEmpty() } ||
+                (index.schemaVersion >= 2 && "compiled-bindings" in page.features)) { "Missing compiled-bindings feature." }
             for (connection in page.connections) {
                 require(connection.id > 0 && connection.typeName.isNotBlank()) { "Invalid XAML connection in ${page.resourcePath}." }
                 require(connection.fieldName == null || connection.fieldName.isNotBlank()) { "Empty x:Name." }
@@ -117,8 +156,28 @@ object WinRTXamlDeclarations {
                     require(listOf(event.name, event.handlerName, event.declaringTypeName, event.delegateTypeName).all(String::isNotBlank)) { "Incomplete XAML event in ${page.resourcePath}." }
                     validateLocation(event.location)
                 }
+                require(connection.bindings.map { it.name }.distinct().size == connection.bindings.size) { "Duplicate compiled binding." }
+                for (binding in connection.bindings) {
+                    require(listOf(binding.name, binding.declaringTypeName, binding.typeName).all(String::isNotBlank) &&
+                        binding.mode in setOf("OneTime", "OneWay", "TwoWay")) { "Incomplete compiled binding in ${page.resourcePath}." }
+                    require(connection.scopeId > 0) { "Compiled binding has no scope in ${page.resourcePath}." }
+                    validateExpression(binding.expression)
+                    listOfNotNull(binding.bindBack, binding.fallbackValue, binding.targetNullValue).forEach(::validateExpression)
+                    validateLocation(binding.location)
+                }
             }
         }
+    }
+
+    private fun validateExpression(expression: WinRTXamlBindingExpression) {
+        require(expression.kind in setOf("root", "member", "call", "static", "cast", "index", "attached", "literal")) {
+            "Unsupported compiled binding expression ${expression.kind}."
+        }
+        if (expression.kind in setOf("member", "call", "attached")) require(!expression.name.isNullOrBlank()) { "Binding member has no name." }
+        if (expression.kind in setOf("static", "cast", "attached", "literal")) require(!expression.typeName.isNullOrBlank()) { "Binding expression has no type." }
+        if (expression.kind in setOf("member", "call", "cast", "index", "attached")) require(expression.receiver != null) { "Binding expression has no receiver." }
+        expression.receiver?.let(::validateExpression)
+        expression.arguments.forEach(::validateExpression)
     }
 
     private fun validateLocation(location: WinRTXamlSourceLocation) {

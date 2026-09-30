@@ -14,9 +14,15 @@ internal object WinUiAuthoredTypeMetadata {
     private data class Type(val type: KClass<*>, val name: String, val baseName: String)
     private val types = ConcurrentCacheMap<String, Type>()
     private val definitions = ConcurrentCacheMap<String, WinRTXamlTypeDefinition>()
+    private val definitionsByType = ConcurrentCacheMap<KClass<*>, WinRTXamlTypeDefinition>()
+    private val collectionDefinitions = ConcurrentCacheMap<String, WinRTXamlCollectionDefinition>()
 
     fun registerDefinition(definition: WinRTXamlTypeDefinition) {
         definitions.putIfAbsent(definition.name, definition)
+        definitionsByType.putIfAbsent(definition.type, definition)
+        definition.members.values.forEach { member ->
+            member.collection?.let { collectionDefinitions.putIfAbsent(member.typeName, it) }
+        }
     }
 
     fun register(type: KClass<*>, name: String, baseName: String) {
@@ -24,10 +30,32 @@ internal object WinUiAuthoredTypeMetadata {
         types.putIfAbsent(name, Type(type, name, baseName))
     }
 
-    fun clearForTests() { types.clear(); definitions.clear() }
+    fun clearForTests() {
+        types.clear(); definitions.clear(); definitionsByType.clear(); collectionDefinitions.clear()
+    }
+
+    /** Reuses generated accessors for CsWinRT's source-generated ICustomProperty path.
+     * No reflection or platform-specific property discovery is required. */
+    fun customProperty(source: Any, name: String): microsoft.ui.xaml.data.ICustomProperty? {
+        var definition = definitionsByType[source::class]
+        while (definition != null) {
+            val member = definition.members[name]
+            if (member != null) return WinRTBindableCustomProperty(
+                canRead = true, canWrite = member.set != null, name = name, type = member.type,
+                getValueCallback = { member.get(requireNotNull(it)) },
+                setValueCallback = member.set?.let { setter -> { target, value -> setter(requireNotNull(target), value) } },
+            )
+            definition = definitions[definition.baseName]
+        }
+        return null
+    }
 
     /** Returns an owned IXamlType pointer, or null when this is not an authored type. */
     fun tryCreate(name: String, resolveType: (String) -> RawAddress): RawAddress {
+        // XBF refers to member types by name before asking IXamlMember.Type.
+        // Generated XamlTypeInfo registers closed collection types in the same
+        // lookup table as authored classes, preserving their typed Add helper.
+        collectionDefinitions[name]?.let { return createCollectionType(name, it, resolveType) }
         val type = types[name] ?: return PlatformAbi.nullPointer
         val definition = definitions[name]
         if (FeatureSwitches.traceCcw) {
@@ -154,7 +182,9 @@ internal object WinUiAuthoredTypeMetadata {
                     output { PlatformAbi.writeInt8(it, if (member.set == null) 1 else 0) },
                     output { PlatformAbi.writePointer(it, HString.create(member.name).handle) },
                     output { PlatformAbi.writePointer(it, resolve(owner.name)) },
-                    output { PlatformAbi.writePointer(it, resolve(member.typeName, member.type)) },
+                    output { PlatformAbi.writePointer(it, member.collection?.let { collection ->
+                        createCollectionType(member.typeName, collection, resolveType)
+                    } ?: resolve(member.typeName, member.type)) },
                     WinRTInspectableMethodDefinition(ComMethodSignatures.HResult_Ptr_Ptr) { args ->
                         val output = args[1] as RawAddress
                         PlatformAbi.writePointer(output, PlatformAbi.nullPointer)
@@ -174,6 +204,44 @@ internal object WinUiAuthoredTypeMetadata {
             )), defaultInterfaceId = WinUiXamlInterfaceIds.IXamlMember,
         )
         return host.detachReference(WinUiXamlInterfaceIds.IXamlMember)
+    }
+
+    private fun createCollectionType(name: String, collection: WinRTXamlCollectionDefinition,
+        resolveType: (String) -> RawAddress): RawAddress {
+        fun output(write: (RawAddress) -> Unit) = WinRTInspectableMethodDefinition(ComMethodSignatures.HResult_Ptr) {
+            write(it[0] as RawAddress); KnownHResults.S_OK.value
+        }
+        fun pointer(value: () -> RawAddress) = output { PlatformAbi.writePointer(it, value()) }
+        fun boolean(value: Boolean = false) = output { PlatformAbi.writeInt8(it, if (value) 1 else 0) }
+        fun unavailable(signature: ComMethodSignature) = WinRTInspectableMethodDefinition(signature) { KnownHResults.E_NOTIMPL.value }
+        fun itemType(): RawAddress {
+            val authored = tryCreate(collection.itemTypeName, resolveType)
+            if (!PlatformAbi.isNull(authored)) return authored
+            val projected = resolveType(collection.itemTypeName)
+            return if (!PlatformAbi.isNull(projected)) projected else createSystemType(collection.itemTypeName, collection.itemType)
+        }
+        val marshaler = MarshalInspectable.any()
+        val host = WinRTInspectableComObject(interfaceDefinitions = listOf(WinRTInspectableInterfaceDefinition(
+            interfaceId = WinUiXamlInterfaceIds.IXamlType,
+            methods = listOf(
+                pointer { PlatformAbi.nullPointer }, // BaseType
+                pointer { PlatformAbi.nullPointer }, // ContentProperty
+                pointer { HString.create(name).handle },
+                boolean(), boolean(true), boolean(), boolean(), boolean(), boolean(),
+                pointer(::itemType), pointer { PlatformAbi.nullPointer }, pointer { PlatformAbi.nullPointer },
+                output { TypeProjection.copyMetadataNameTo(name, it) },
+                unavailable(ComMethodSignatures.HResult_Ptr), // ActivateInstance
+                unavailable(ComMethodSignatures.HResult_Ptr_Ptr), // CreateFromString
+                unavailable(ComMethodSignatures.HResult_Ptr_Ptr), // GetMember
+                WinRTInspectableMethodDefinition(ComMethodSignatures.HResult_Ptr_Ptr) { args ->
+                    collection.add(requireNotNull(marshaler.fromAbi(args[0])), marshaler.fromAbi(args[1]))
+                    KnownHResults.S_OK.value
+                },
+                unavailable(ComMethodSignature.of(ComAbiValueKind.Pointer, ComAbiValueKind.Pointer, ComAbiValueKind.Pointer)),
+                WinRTInspectableMethodDefinition(ComMethodSignature.of()) { KnownHResults.S_OK.value },
+            ),
+        )), defaultInterfaceId = WinUiXamlInterfaceIds.IXamlType)
+        return host.detachReference(WinUiXamlInterfaceIds.IXamlType)
     }
 
     /** XamlCompiler's XamlSystemBaseType for a projected type absent from SDK metadata providers. */

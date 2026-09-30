@@ -90,7 +90,7 @@ internal fun extractXamlCompiler(archive: Path, target: Path, version: String) {
 
 internal fun validateXamlCompilerPackage(root: Path, version: String) {
     val manifest = Json.parseToJsonElement(Files.readString(root.resolve("kotlin-xamlc.json")).removePrefix("\uFEFF")).jsonObject
-    require(manifest["schemaVersion"]?.jsonPrimitive?.int == 1 && manifest["protocolVersion"]?.jsonPrimitive?.int == 1) {
+    require(manifest["schemaVersion"]?.jsonPrimitive?.int == 1 && manifest["protocolVersion"]?.jsonPrimitive?.int in 1..2) {
         "Unsupported Kotlin XamlCompiler package or protocol version."
     }
     require(manifest["version"]?.jsonPrimitive?.content == version && manifest["host"]?.jsonPrimitive?.content == "win-x64") {

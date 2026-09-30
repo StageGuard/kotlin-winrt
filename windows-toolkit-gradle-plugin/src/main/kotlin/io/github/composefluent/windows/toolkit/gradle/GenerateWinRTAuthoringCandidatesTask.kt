@@ -44,6 +44,11 @@ abstract class GenerateWinRTAuthoringCandidatesTask @Inject constructor(
     @get:PathSensitive(PathSensitivity.RELATIVE)
     abstract val sourceRoots: ConfigurableFileCollection
 
+    @get:InputFiles
+    @get:Optional
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val xamlSupportSources: ConfigurableFileCollection
+
     @get:Classpath
     abstract val scannerClasspath: ConfigurableFileCollection
 
@@ -62,9 +67,8 @@ abstract class GenerateWinRTAuthoringCandidatesTask @Inject constructor(
         val output = outputFile.get().asFile.toPath().toAbsolutePath().normalize()
         Files.createDirectories(output.parent)
         val temporaryOutput = output.resolveSibling(".${output.fileName}.tmp")
-        val roots = sourceRoots.files
+        val roots = (sourceRoots.files.filterNot { isKotlinWindowsToolkitPluginOwnedAuthoringSourceRoot(it.toPath()) } + xamlSupportSources.files)
             .map { file -> file.toPath().toAbsolutePath().normalize() }
-            .filterNot(::isKotlinWindowsToolkitPluginOwnedAuthoringSourceRoot)
             .filter { path -> Files.exists(path) }
         if (roots.isEmpty()) {
             GradleFileOperations.writeStringIfChanged(output, "")

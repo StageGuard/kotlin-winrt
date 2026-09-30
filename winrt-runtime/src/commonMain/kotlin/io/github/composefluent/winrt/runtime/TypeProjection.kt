@@ -58,6 +58,12 @@ internal object TypeProjection {
         PlatformAbi.writeInt32(destination, LAYOUT.field("kind").offsetBytes, abi.kind)
     }
 
+    /** Generated XAML schema can retain a closed generic identity after KClass erasure. */
+    fun copyMetadataNameTo(name: String, destination: RawAddress) {
+        PlatformAbi.writePointer(destination, LAYOUT.field("name").offsetBytes, HString.create(name).handle)
+        PlatformAbi.writeInt32(destination, LAYOUT.field("kind").offsetBytes, WinRTTypeKind.Metadata.ordinal)
+    }
+
     fun fromAbi(source: RawAddress): KClass<*>? =
         fromAbi(
             TypeAbi(

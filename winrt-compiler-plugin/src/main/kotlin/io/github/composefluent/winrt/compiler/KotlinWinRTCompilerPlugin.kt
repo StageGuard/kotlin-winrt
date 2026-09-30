@@ -428,7 +428,7 @@ class KotlinWinRTIrGenerationExtension(
                 return@forEach
             }
             val authoredType = authoredTypeFor(klass, winRTTypes, isEffectivelyPublic(context), sourceSubtypedNames) ?: return@forEach
-            validateAuthoredType(klass, authoredType, pluginContext.afterK2, reportError)
+            validateAuthoredType(klass, authoredType, pluginContext.afterK2, winRTTypes, reportError)
         }
     }
 
@@ -833,6 +833,7 @@ class KotlinWinRTIrGenerationExtension(
         klass: IrClass,
         authoredType: KotlinWinRTAuthoredTypeCandidate,
         afterK2: Boolean,
+        winRTTypes: Map<String, IndexedWinRTType>,
         report: (String) -> Unit,
     ) {
         if (!afterK2) {
@@ -865,7 +866,7 @@ class KotlinWinRTIrGenerationExtension(
             report("WinRT authored class ${authoredType.sourceTypeName} must be final.")
         }
         validateAuthoredConstructors(klass, authoredType, report)
-        validateAuthoredMemberTypes(klass, authoredType, report)
+        validateAuthoredMemberTypes(klass, authoredType, winRTTypes, report)
     }
 
     @OptIn(UnsafeDuringIrConstructionAPI::class)
@@ -892,8 +893,18 @@ class KotlinWinRTIrGenerationExtension(
     private fun validateAuthoredMemberTypes(
         klass: IrClass,
         authoredType: KotlinWinRTAuthoredTypeCandidate,
+        winRTTypes: Map<String, IndexedWinRTType>,
         report: (String) -> Unit,
     ) {
+        fun implementsProjectedInterface(function: IrSimpleFunction, visited: MutableSet<IrSimpleFunction> = mutableSetOf()): Boolean {
+            if (!visited.add(function)) return false
+            return function.overriddenSymbols.any { symbol ->
+                val method = symbol.owner
+                val ownerName = (method.parent as? IrClass)?.fqNameWhenAvailable?.asString()
+                val metadata = ownerName?.let { resolveIndexedWinRTTypeByProjectedName(it, winRTTypes) }
+                metadata?.kind == "Interface" || implementsProjectedInterface(method, visited)
+            }
+        }
         val publicFunctions = klass.declarations.filterIsInstance<IrSimpleFunction>()
             .filter { function ->
                 function.visibility == DescriptorVisibilities.PUBLIC &&
@@ -902,7 +913,10 @@ class KotlinWinRTIrGenerationExtension(
             }
         publicFunctions
             .groupBy { function -> function.name.asString() }
-            .filterValues { overloads -> overloads.size > 1 }
+            // These methods retain their SDK interface slots and metadata, as in
+            // CsWinRT's interface implementation path. Only newly exported
+            // overloads require new DefaultOverload metadata.
+            .filterValues { overloads -> overloads.size > 1 && !overloads.all(::implementsProjectedInterface) }
             .keys
             .forEach { memberName ->
                 report(

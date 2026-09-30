@@ -1404,7 +1404,9 @@ private object CustomPropertyProviderDefinitionHolder {
                         signature = ComMethodSignature.of(ComAbiValueKind.Pointer, ComAbiValueKind.Pointer),
                     ) { managedValue, rawArgs ->
                         val provider = explicitOrBindableCustomPropertyProvider(requireNotNull(managedValue))
-                        val property = provider?.getCustomProperty(decodeBorrowedString(rawArgs[0] as RawAddress))
+                        val name = decodeBorrowedString(rawArgs[0] as RawAddress)
+                        val property = provider?.getCustomProperty(name)
+                            ?: WinUiAuthoredTypeMetadata.customProperty(requireNotNull(managedValue), name)
                         (rawArgs[1] as RawAddress).writeReturnedPointer(propertyPointer(property))
                         KnownHResults.S_OK.value
                     },

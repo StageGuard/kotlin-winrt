@@ -31,9 +31,18 @@ class WinRTXamlMemberDefinition(
     val get: (Any) -> Any?,
     val set: ((Any, Any?) -> Unit)? = null,
     val isDependencyProperty: Boolean = false,
+    val collection: WinRTXamlCollectionDefinition? = null,
 ) {
     init { require(name.isNotBlank() && typeName.isNotBlank()) }
 }
+
+/** CSharpTypeInfoPass2's ItemType and CollectionAdd, with generated typed Add calls. */
+class WinRTXamlCollectionDefinition(
+    val type: KClass<*>,
+    val itemTypeName: String,
+    val itemType: KClass<*>,
+    val add: (Any, Any?) -> Unit,
+)
 
 fun registerWinRTXamlTypeDefinition(definition: WinRTXamlTypeDefinition) {
     Projections.registerAuthoredRuntimeClassType(definition.type, definition.name, definition.baseName)

@@ -159,11 +159,11 @@ fun isWinRTGuidTypeName(typeName: String): Boolean =
         else -> false
     }
 
-fun isWinRTTypeTypeName(typeName: String): Boolean =
-    when (typeName.trim().substringBefore('<').removeSuffix("?")) {
-        "Type", "System.Type" -> true
-        else -> false
-    }
+fun isWinRTTypeTypeName(typeName: String): Boolean {
+    val name = typeName.trim().substringBefore('<').removeSuffix("?")
+    return name == "Type" || name == "System.Type" ||
+        MAPPED_TYPES[name]?.mappedQualifiedName == "System.Type"
+}
 
 internal fun WinRTProjectionCategory.toAbiCategory(): WinRTAbiTypeCategory =
     when (this) {

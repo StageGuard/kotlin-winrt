@@ -26,6 +26,8 @@ abstract class CompileWinRTXamlTask @Inject constructor(
     abstract val preparedMetadataManifest: RegularFileProperty
     @get:InputFiles @get:PathSensitive(PathSensitivity.NONE)
     abstract val referenceFiles: ConfigurableFileCollection
+    @get:InputFiles @get:PathSensitive(PathSensitivity.NONE)
+    abstract val windowsSdkFacadeFiles: ConfigurableFileCollection
     @get:InputDirectory @get:PathSensitive(PathSensitivity.RELATIVE)
     abstract val compilerDirectory: DirectoryProperty
     @get:InputDirectory @get:PathSensitive(PathSensitivity.RELATIVE)
@@ -46,6 +48,9 @@ abstract class CompileWinRTXamlTask @Inject constructor(
     init {
         minimumWindowsVersion.convention("10.0.19041.0")
         referenceFiles.from(preparedMetadataManifest.map { readPreparedMetadataCache(it.asFile.toPath()).files })
+        windowsSdkFacadeFiles.from(referenceFiles.elements.map { references ->
+            windowsSdkUnionMetadataFiles(references.map { it.asFile })
+        })
     }
 
     @TaskAction fun compile() {
@@ -89,7 +94,7 @@ abstract class CompileWinRTXamlTask @Inject constructor(
             put("GenXbfPath", genXbfDirectory.get().asFile.absolutePath)
             put("SavedStateFile", File(output, "state.xml").absolutePath)
             put("ReferenceAssemblies", JsonArray(refs.map { item(it) }))
-            put("ReferenceAssemblyPaths", JsonArray((refs.map { it.parentFile } +
+            put("ReferenceAssemblyPaths", JsonArray((refs.map { it.parentFile } + windowsSdkFacadeFiles.files.map { it.parentFile } +
                 File(System.getenv("WINDIR"), "Microsoft.NET/Framework64/v4.0.30319")).distinct().map { item(it) }))
             put("XamlPages", JsonArray(sources.toSortedMap().map { (path, file) -> item(file, path) }))
             if (finalPass) {

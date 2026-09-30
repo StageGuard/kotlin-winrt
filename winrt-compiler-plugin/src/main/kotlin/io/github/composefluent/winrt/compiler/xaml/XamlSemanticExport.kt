@@ -24,7 +24,7 @@ import java.nio.file.Path
 /** Private Kotlin handlers stay in this compile-time sidecar, never in the public WinMD ABI. */
 @OptIn(ExperimentalCompilerApi::class)
 internal object XamlSemanticOptions {
-    private val keys = listOf("xamlDeclarations", "xamlSemanticOutput", "xamlReferences", "xamlReferencesFile", "xamlImplementation")
+    private val keys = listOf("xamlDeclarations", "xamlSemanticOutput", "xamlReferences", "xamlReferencesFile", "xamlApplicationHeader", "xamlImplementation")
         .associateWith { CompilerConfigurationKey<String>(it) }
     val options = keys.keys.map { CliOption(it, "<path>", "Kotlin XAML semantic compilation $it", false) }
 
@@ -45,7 +45,7 @@ internal object XamlSemanticOptions {
             val actual = WinRTXamlDeclarations.readCompilerOutput(Path.of(finalPath))
             val plan = Json.parseToJsonElement(Files.readString(Path.of(finalPath))).jsonObject
                 .getValue("KotlinImplementation").jsonObject
-            require(plan.getValue("SchemaVersion").jsonPrimitive.int == 1 &&
+            require(plan.getValue("SchemaVersion").jsonPrimitive.int in 1..WinRTXamlDeclarations.SCHEMA_VERSION &&
                 plan.getValue("DeclarationFingerprint").jsonPrimitive.content == WinRTXamlDeclarations.fingerprint(declarations) &&
                 WinRTXamlDeclarations.canonicalText(actual) == WinRTXamlDeclarations.canonicalText(declarations)) {
                 "XAML final plan does not match declaration input"
@@ -62,7 +62,8 @@ internal object XamlSemanticOptions {
         val references = value("xamlReferencesFile")?.let { Files.readAllLines(Path.of(it)).filter(String::isNotBlank) }
             ?: requireNotNull(value("xamlReferences")).split(File.pathSeparator)
         val metadataIndex = Path.of(requireNotNull(configuration.get(KotlinWinRTCommandLineProcessor.METADATA_INDEX_KEY)))
-        return XamlCompilation(declarations, XamlSemanticExport(declarationPath, output, references.map(Path::of), metadataIndex))
+        return XamlCompilation(declarations, XamlSemanticExport(declarationPath, output, references.map(Path::of), metadataIndex,
+            value("xamlApplicationHeader")?.let(Path::of)))
     }
 }
 
@@ -74,6 +75,7 @@ private class XamlSemanticExport(
     private val output: Path,
     private val references: List<Path>,
     private val metadataIndex: Path,
+    private val applicationHeader: Path?,
 ) : IrGenerationExtension {
     override fun generate(moduleFragment: IrModuleFragment, pluginContext: IrPluginContext) {
         Files.deleteIfExists(output)
@@ -83,9 +85,10 @@ private class XamlSemanticExport(
         val classes = moduleFragment.files.flatMap { file ->
             file.declarations.filterIsInstance<IrClass>().map { it to file }
         }
-        val authored = mutableListOf<WinRTAuthoredRuntimeClassDescriptor>()
+        val authored = mutableListOf<WinRTXamlApplicationTypeDescriptor>()
         val applicationMembers = mutableMapOf<String, WinRTXamlApplicationTypeMembers>()
-        val applicationTypes = declarations.pages.mapTo(mutableSetOf()) { it.className }
+        val headerTypes = applicationHeader?.let { WinRTMetadataLoader.load(it).namespaces.flatMap { it.types } }.orEmpty()
+        val applicationTypes = (declarations.pages.map { it.className } + headerTypes.map { it.qualifiedName }).toSet()
         val pages = declarations.pages.sortedBy { it.className }.map { page ->
             val (klass, file) = requireNotNull(classes.singleOrNull { it.first.fqNameWhenAvailable?.asString() == page.className }) {
                 "XAML ${page.resourcePath}: missing top-level Kotlin class ${page.className}"
@@ -102,7 +105,7 @@ private class XamlSemanticExport(
                 constructor.visibility == org.jetbrains.kotlin.descriptors.DescriptorVisibilities.PUBLIC &&
                     constructor.parameters.none { it.kind == IrParameterKind.Regular }
             }) { "XAML ${page.className} requires a public zero-argument constructor" }
-            authored += WinRTAuthoredRuntimeClassDescriptor(page.className, page.baseTypeName,
+            authored += WinRTXamlApplicationTypeDescriptor(page.className, page.baseTypeName,
                 listOf("Microsoft.UI.Xaml.Markup.IComponentConnector"), isActivatable = true)
             val contentProperty = klass.annotations.firstOrNull { call ->
                 call.symbol.owner.parentClassOrNull?.fqNameWhenAvailable?.asString() ==
@@ -135,14 +138,23 @@ private class XamlSemanticExport(
             }
             buildJsonObject { put("ClassName", page.className); put("Handlers", JsonArray(handlers)) }
         }
+        headerTypes.filterNot { type -> declarations.pages.any { it.className == type.qualifiedName } }
+            .sortedBy { it.qualifiedName }.forEach { type ->
+                val klass = requireNotNull(classes.singleOrNull { it.first.fqNameWhenAvailable?.asString() == type.qualifiedName }) {
+                    "XAML application type ${type.qualifiedName} is missing from Kotlin semantic compilation"
+                }.first
+                authored += WinRTXamlApplicationTypeDescriptor(type.qualifiedName, type.baseTypeName,
+                    type.implementedInterfaces.map { it.interfaceName }, type.activation.isActivatable)
+                applicationMembers[type.qualifiedName] = xamlApplicationProperties(klass, types, applicationTypes)
+            }
         val symbols = buildJsonObject {
-            put("SchemaVersion", 1)
+            put("SchemaVersion", declarations.schemaVersion)
             put("DeclarationFingerprint", WinRTXamlDeclarations.fingerprint(declarations))
             put("Declarations", Json.parseToJsonElement(WinRTXamlDeclarations.canonicalText(declarations)))
             put("Pages", JsonArray(pages))
         }
         Files.createDirectories(output.toAbsolutePath().parent)
-        WinRTPortableExecutableMetadataWriter.writeXamlApplicationWinmd(
+        WinRTPortableExecutableMetadataWriter.writeXamlSchemaWinmd(
             "KotlinXaml", authored, applicationMembers, output.resolveSibling("KotlinXaml.winmd"),
             WinRTMetadataLoader.loadTypeAssemblyNames(references),
             types.values.filter { it.kind == WinRTTypeKind.Enum.name || it.kind == WinRTTypeKind.Struct.name }

@@ -29,10 +29,12 @@ internal fun xamlApplicationProperties(
         if (name == "kotlin.Array") return WinRTTypeRef.array(arguments.single())
         val primitive = winRTFundamentalTypeForName(name.removePrefix("kotlin."))
         val indexed = resolveIndexedWinRTTypeByProjectedName(name, types)
+        val collection = winRTCollectionAbiNameForKotlinType(name)
         val metadataName = when {
             primitive != null -> primitive.toKotlinProjectionTypeName()
             name == "kotlin.Any" -> "System.Object"
             name in applicationTypes -> name
+            collection != null -> "$collection`${arguments.size}"
             indexed != null -> indexed.qualifiedName.substringBefore('`') +
                 if (arguments.isEmpty()) "" else "`${arguments.size}"
             else -> error("XAML property type $name has no WinRT metadata projection")

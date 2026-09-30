@@ -15,9 +15,27 @@ object WinRTPortableExecutableMetadataWriter {
         externalTypeAssemblies: Map<String, String>,
         valueTypeNames: Set<String> = emptySet(),
     ) {
+        writeXamlSchemaWinmd(assemblyName, runtimeClasses.map {
+            WinRTXamlApplicationTypeDescriptor(it.runtimeClassName, it.baseRuntimeClassName,
+                it.interfaceNames, it.isActivatable)
+        }, members, outputFile, externalTypeAssemblies, valueTypeNames)
+    }
+
+    /** Plain Kotlin data models participate in XAML schema without becoming exported WinRT components. */
+    fun writeXamlSchemaWinmd(
+        assemblyName: String,
+        runtimeClasses: List<WinRTXamlApplicationTypeDescriptor>,
+        members: Map<String, WinRTXamlApplicationTypeMembers>,
+        outputFile: Path,
+        externalTypeAssemblies: Map<String, String>,
+        valueTypeNames: Set<String> = emptySet(),
+    ) {
         require(members.keys.all { name -> runtimeClasses.any { it.runtimeClassName == name } })
         Files.createDirectories(outputFile.parent)
-        writeIfChanged(outputFile, WinmdBuilder(assemblyName, runtimeClasses,
+        writeIfChanged(outputFile, WinmdBuilder(assemblyName, runtimeClasses.map {
+            WinmdClass(it.runtimeClassName, it.baseRuntimeClassName, it.interfaceNames,
+                isActivatable = it.isActivatable)
+        },
             externalTypeAssemblies = externalTypeAssemblies, applicationMembers = members,
             valueTypeNames = valueTypeNames).build())
     }
@@ -37,7 +55,7 @@ object WinRTPortableExecutableMetadataWriter {
         externalTypeAssemblies: Map<String, String>? = null,
     ) {
         Files.createDirectories(outputFile.parent)
-        writeIfChanged(outputFile, WinmdBuilder(assemblyName, runtimeClasses, externalTypeAssemblies = externalTypeAssemblies).build())
+        writeIfChanged(outputFile, WinmdBuilder(assemblyName, runtimeClasses.map(::WinmdClass), externalTypeAssemblies = externalTypeAssemblies).build())
     }
 
     fun writeProjectionFixtureWinmd(
@@ -47,7 +65,7 @@ object WinRTPortableExecutableMetadataWriter {
         outputFile: Path,
     ) {
         Files.createDirectories(outputFile.parent)
-        writeIfChanged(outputFile, WinmdBuilder(assemblyName, runtimeClasses, interfaces).build())
+        writeIfChanged(outputFile, WinmdBuilder(assemblyName, runtimeClasses.map(::WinmdClass), interfaces).build())
     }
 
     private fun writeIfChanged(outputFile: Path, content: ByteArray) {
@@ -62,9 +80,31 @@ data class WinRTPortableExecutableInterfaceDescriptor(
     val implementedInterfaceNames: List<String> = emptyList(),
 )
 
+data class WinRTXamlApplicationTypeDescriptor(
+    val runtimeClassName: String,
+    val baseRuntimeClassName: String? = null,
+    val interfaceNames: List<String> = emptyList(),
+    val isActivatable: Boolean = true,
+)
+
+private data class WinmdClass(
+    val runtimeClassName: String,
+    val baseRuntimeClassName: String? = null,
+    val interfaceNames: List<String> = emptyList(),
+    val overridableInterfaceNames: List<String> = emptyList(),
+    val isActivatable: Boolean = true,
+    val isSealed: Boolean = true,
+    val activatableFactoryInterfaceName: String? = null,
+    val staticFactoryInterfaceNames: List<String> = emptyList(),
+) {
+    constructor(type: WinRTAuthoredRuntimeClassDescriptor) : this(type.runtimeClassName,
+        type.baseRuntimeClassName, type.interfaceNames, type.overridableInterfaceNames,
+        type.isActivatable, type.isSealed, type.activatableFactoryInterfaceName, type.staticFactoryInterfaceNames)
+}
+
 private class WinmdBuilder(
     private val assemblyName: String,
-    private val runtimeClasses: List<WinRTAuthoredRuntimeClassDescriptor>,
+    private val runtimeClasses: List<WinmdClass>,
     private val interfaces: List<WinRTPortableExecutableInterfaceDescriptor> = emptyList(),
     private val externalTypeAssemblies: Map<String, String>? = null,
     private val applicationMembers: Map<String, WinRTXamlApplicationTypeMembers> = emptyMap(),
@@ -74,7 +114,7 @@ private class WinmdBuilder(
         applicationMembers[type.runtimeClassName]?.properties.orEmpty().sortedBy { it.name }
             .map { type.runtimeClassName to it }
     }
-    private fun hasApplicationConstructor(type: WinRTAuthoredRuntimeClassDescriptor) =
+    private fun hasApplicationConstructor(type: WinmdClass) =
         type.isActivatable && type.runtimeClassName in applicationMembers
     private val accessorCount = properties.sumOf { if (it.second.isReadOnly) 1 else 2 }
     private val methodCount = accessorCount +
@@ -183,7 +223,9 @@ private class WinmdBuilder(
         // CsWinRT WinRTTypeWriter.GetTypeReference owns one AssemblyRef per declaring assembly.
         val typeAssemblies = typeRefs.associate { ref -> ref.qualifiedName to
             if (ref.namespace == "System") "mscorlib" else externalTypeAssemblies?.let {
-                requireNotNull(it[ref.qualifiedName]) { "Missing declaring assembly for ${ref.qualifiedName}" }
+                requireNotNull(it[ref.qualifiedName] ?: it[ref.qualifiedName.substringBefore('`')]) {
+                    "Missing declaring assembly for ${ref.qualifiedName}"
+                }
             }
         }
         val assemblyRefs = typeAssemblies.values.filterNotNull().distinct().sorted()

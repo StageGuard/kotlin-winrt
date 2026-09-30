@@ -32,7 +32,10 @@ internal class XamlPageBodies(private val index: WinRTXamlDeclarationIndex, priv
             // loading itself occurs only at the completed construction call boundary.
             klass.declarations.removeAll(properties.values.toSet())
             klass.declarations.addAll(0, properties.values)
-            val functions = listOf(xamlInitializeName, xamlConstructionName, xamlLoadName, xamlConnectName, xamlBindingName).map(::function)
+            val functions = (listOf(xamlInitializeName, xamlConstructionName, xamlLoadName, xamlConnectName, xamlBindingName) +
+                if (page.hasCompiledBindings()) listOf(xamlUpdateBindingsName, xamlBindingsChangedName, xamlBindingsLoadingName,
+                    xamlBindingsUnloadedName, xamlRefreshBindingsName) + page.bindBackNames() +
+                    (if (page.hasTemplateScopes()) xamlScopeNames else emptySet()) else emptyList()).map(::function)
             if (semanticOnly) {
                 val error = pluginContext.referenceFunctions(CallableId(FqName("kotlin"), Name.identifier("error"))).single()
                 for (method in functions + properties.values.mapNotNull { it.getter }) {
@@ -40,6 +43,7 @@ internal class XamlPageBodies(private val index: WinRTXamlDeclarationIndex, priv
                         +irCall(error).apply { arguments[0] = irString("XAML semantic-only artifact must not be executed") }
                     }
                 }
+                if (page.hasCompiledBindings()) XamlCompiledBindingBodies(pluginContext, classes).generate(klass, page, properties)
                 continue
             }
             fun runtime(name: String) = pluginContext.referenceFunctions(
@@ -48,8 +52,8 @@ internal class XamlPageBodies(private val index: WinRTXamlDeclarationIndex, priv
                 "XAML requires generated projection $name"
             }.owner
             val requireElement = runtime("requireXamlNamedElement")
-            for (connection in page.connections.filter { it.fieldName != null }) {
-                val property = properties.getValue(connection.fieldName!!)
+            for (connection in page.connections.filter { it.storageName() != null }) {
+                val property = properties.getValue(connection.storageName()!!)
                 val field = requireNotNull(property.backingField)
                 val getter = requireNotNull(property.getter)
                 field.type = getter.returnType.makeNullable()
@@ -60,9 +64,22 @@ internal class XamlPageBodies(private val index: WinRTXamlDeclarationIndex, priv
                         type = getter.returnType
                         typeArguments[0] = getter.returnType
                         arguments[0] = irGetField(irGet(requireNotNull(getter.dispatchReceiverParameter)), field)
-                        arguments[1] = irString(page.className); arguments[2] = irString(requireNotNull(connection.fieldName))
+                        arguments[1] = irString(page.className); arguments[2] = irString(connection.elementName ?: connection.storageName()!!)
                     })
                 }
+            }
+            if (page.hasCompiledBindings()) {
+                val bindingProperty = properties.getValue(xamlBindingStateName.asString())
+                val bindingField = requireNotNull(bindingProperty.backingField)
+                val bindingClass = requireNotNull(pluginContext.referenceClass(xamlBindingStateId)).owner
+                bindingField.initializer = DeclarationIrBuilder(pluginContext, bindingField.symbol).run {
+                    irExprBody(irCallConstructor(bindingClass.constructors.single().symbol, emptyList()))
+                }
+                val getter = requireNotNull(bindingProperty.getter)
+                getter.body = DeclarationIrBuilder(pluginContext, getter.symbol).irBlockBody {
+                    +irReturn(irGetField(irGet(requireNotNull(getter.dispatchReceiverParameter)), bindingField))
+                }
+                XamlCompiledBindingBodies(pluginContext, classes).generate(klass, page, properties)
             }
             val state = requireNotNull(properties.getValue(xamlStateName.asString()).backingField)
             val stateClass = requireNotNull(pluginContext.referenceClass(xamlStateId)).owner
@@ -107,6 +124,11 @@ internal class XamlPageBodies(private val index: WinRTXamlDeclarationIndex, priv
                         arguments[0] = irString("ms-appx:///" + page.resourcePath)
                     }
                 }
+                if (page.hasCompiledBindings()) {
+                    val bindings = XamlCompiledBindingBodies(pluginContext, classes)
+                    +bindings.lifecycleSubscription(this, klass, page, function(xamlBindingsLoadingName), irGet(requireNotNull(load.dispatchReceiverParameter)), true)
+                    +bindings.lifecycleSubscription(this, klass, page, function(xamlBindingsUnloadedName), irGet(requireNotNull(load.dispatchReceiverParameter)), false)
+                }
             }
             val initialize = function(xamlInitializeName)
             val stateLoad = stateClass.functions.single { it.name.asString() == "load" }
@@ -126,21 +148,43 @@ internal class XamlPageBodies(private val index: WinRTXamlDeclarationIndex, priv
             }
             val binding = function(xamlBindingName)
             check(binding.returnType.isNullable()) { "IComponentConnector projection must have nullable GetBindingConnector" }
-            binding.body = DeclarationIrBuilder(pluginContext, binding.symbol).irBlockBody { +irReturn(irNull(binding.returnType)) }
+            binding.body = DeclarationIrBuilder(pluginContext, binding.symbol).irBlockBody {
+                +irReturn(irWhen(binding.returnType, mutableListOf()).apply {
+                    val connectionId = binding.parameters.first { it.kind == IrParameterKind.Regular }
+                    page.connections.filter { it.isScopeRoot && !it.isTemplateChild }.forEach { root ->
+                        branches += irBranch(irEquals(irGet(connectionId), irInt(root.id)),
+                            irImplicitCast(irGet(requireNotNull(binding.dispatchReceiverParameter)), binding.returnType))
+                    }
+                    if (page.hasTemplateScopes()) {
+                        val connector = requireNotNull(pluginContext.referenceClass(ClassId.topLevel(
+                            FqName("io.github.composefluent.winrt.generated.xaml.KotlinXamlBindingScopeConnector")))).owner
+                        val target = binding.parameters.last { it.kind == IrParameterKind.Regular }
+                        page.connections.filter { it.isScopeRoot && it.isTemplateChild }.forEach { root ->
+                            branches += irBranch(irEquals(irGet(connectionId), irInt(root.id)),
+                                irCallConstructor(connector.constructors.single().symbol, emptyList()).apply {
+                                    arguments[0] = irGet(requireNotNull(binding.dispatchReceiverParameter))
+                                    arguments[1] = irInt(root.scopeId); arguments[2] = irGet(target)
+                                    arguments[3] = irBoolean(root.typeName == "Microsoft.UI.Xaml.ControlTemplate")
+                                })
+                        }
+                    }
+                    branches += irElseBranch(irNull(binding.returnType))
+                })
+            }
 
             val connect = function(xamlConnectName)
             val parameters = connect.parameters.filter { it.kind == IrParameterKind.Regular }
             val cast = runtime("asWinRT")
             connect.body = DeclarationIrBuilder(pluginContext, connect.symbol).irBlockBody {
                 +irWhen(pluginContext.irBuiltIns.unitType, mutableListOf()).apply {
-                    for (connection in page.connections.filter { it.fieldName != null || it.events.isNotEmpty() }) {
+                    for (connection in page.connections.filter { it.storageName() != null || it.events.isNotEmpty() }) {
                         branches += irBranch(irEquals(irGet(parameters[0]), irInt(connection.id)), irBlock {
                             val targetType = classes[connection.typeName]?.defaultType
                                 ?: projection(connection.typeName).defaultType
                             val target = irTemporary(irCall(cast).apply {
                                 type = targetType; typeArguments[0] = targetType; arguments[0] = irGet(parameters[1])
                             })
-                            connection.fieldName?.let { fieldName ->
+                            connection.storageName()?.let { fieldName ->
                                 +irSetField(irGet(requireNotNull(connect.dispatchReceiverParameter)),
                                     requireNotNull(properties.getValue(fieldName).backingField), irGet(target))
                             }
@@ -176,6 +220,10 @@ internal class XamlPageBodies(private val index: WinRTXamlDeclarationIndex, priv
                                         irGet(requireNotNull(connect.dispatchReceiverParameter))), delegateType)
                                 }
                             }
+                            for (event in connection.bindings.filter { it.isEvent && !connection.isTemplateChild }) {
+                                +XamlCompiledBindingBodies(pluginContext, classes).eventSubscription(this, klass, event,
+                                    irGet(requireNotNull(connect.dispatchReceiverParameter)), irGet(target))
+                            }
                             +irUnit()
                         })
                     }
@@ -184,11 +232,16 @@ internal class XamlPageBodies(private val index: WinRTXamlDeclarationIndex, priv
         }
     }
 
-    private fun boundReference(context: IrPluginContext, function: IrSimpleFunction, receiver: IrExpression): IrExpression {
-        val signature = function.parameters.filter { it.kind == IrParameterKind.Regular }.map { it.type } + function.returnType
-        return IrFunctionReferenceImpl(function.startOffset, function.endOffset,
-            context.irBuiltIns.functionN(signature.size - 1).symbol.typeWith(signature), function.symbol, 0).apply {
-            dispatchReceiver = receiver
-        }
+    private fun boundReference(context: IrPluginContext, function: IrSimpleFunction, receiver: IrExpression) =
+        xamlFunctionReference(context, function, receiver)
+}
+
+@OptIn(UnsafeDuringIrConstructionAPI::class)
+internal fun xamlFunctionReference(context: IrPluginContext, function: IrSimpleFunction, receiver: IrExpression? = null): IrExpression {
+    val signature = (if (receiver == null) listOfNotNull(function.dispatchReceiverParameter?.type) else emptyList()) +
+        function.parameters.filter { it.kind == IrParameterKind.Regular }.map { it.type } + function.returnType
+    return IrFunctionReferenceImpl(function.startOffset, function.endOffset,
+        context.irBuiltIns.functionN(signature.size - 1).symbol.typeWith(signature), function.symbol, function.typeParameters.size).apply {
+        dispatchReceiver = receiver
     }
 }
