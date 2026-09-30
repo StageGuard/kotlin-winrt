@@ -43,6 +43,7 @@ internal object TypeProjection {
             } else {
                 intrinsic?.canonicalRuntimeName ?: TypeNameSupport.getNameForType(value)
             }
+        if (FeatureSwitches.traceCcw) println("winrt-typename: $value -> $typeName ($kind)")
         return TypeAbi(
             name = NativeStringMarshaller.fromManaged(typeName)?.handle ?: PlatformAbi.nullPointer,
             kind = kind.ordinal,

@@ -122,7 +122,9 @@ internal object WinUiAuthoredTypeMetadata {
                     output { PlatformAbi.writeInt8(it, 0) }, // No generated binding members
                     inherited(15, 1), // ItemType
                     inherited(16, 1), // KeyType
-                    inherited(17, 1), // BoxedType
+                    // CSharpTypeInfoPass2 XamlUserType owns its BoxedType. A
+                    // normal authored reference type is not a box of its SDK base.
+                    output { PlatformAbi.writePointer(it, PlatformAbi.nullPointer) }, // BoxedType
                     output { TypeProjection.copyTo(type.type, it) },
                     WinRTInspectableMethodDefinition(ComMethodSignatures.HResult_Ptr) { args ->
                         PlatformAbi.writePointer(args[0] as RawAddress, PlatformAbi.nullPointer)
@@ -180,7 +182,8 @@ internal object WinUiAuthoredTypeMetadata {
             if (!PlatformAbi.isNull(authored)) return authored
             val sdkType = resolveType(name)
             if (!PlatformAbi.isNull(sdkType)) return sdkType
-            return fallbackType?.let { createSystemType(name, it) } ?: PlatformAbi.nullPointer
+            return fallbackType?.let { createSystemType(name, it,
+                WinRTTypeClassifier.classify(it)?.xamlLiteralParser) } ?: PlatformAbi.nullPointer
         }
         val marshaler = MarshalInspectable.any()
         val host = WinRTInspectableComObject(

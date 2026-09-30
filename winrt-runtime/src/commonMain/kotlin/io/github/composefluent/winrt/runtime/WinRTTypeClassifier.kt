@@ -10,6 +10,7 @@ internal data class WinRTIntrinsicType(
     val signature: WinRTTypeSignature,
     val typeAliases: Set<KClass<*>>,
     val isTypeNamePrimitive: Boolean = true,
+    val xamlLiteralParser: ((String) -> Any)? = null,
     val runtimeNameAliases: Set<String> = setOf(canonicalRuntimeName),
     val primitiveArrayType: KClass<*>? = null,
     val boxPrimitiveArray: ((Any) -> Array<*>)? = null,
@@ -155,6 +156,7 @@ internal object WinRTTypeClassifier {
                 typeAliases = setOf(kotlin.time.Duration::class),
                 isTypeNamePrimitive = false,
                 runtimeNameAliases = setOf("TimeSpan", "Windows.Foundation.TimeSpan", "System.TimeSpan"),
+                xamlLiteralParser = TimeSpanProjection::parseXamlLiteral,
             ),
         )
 
