@@ -176,9 +176,9 @@ abstract class WindowsExtension @Inject constructor(
         val projectDirectory = project.layout.projectDirectory
         compilerDirectory.convention(project.providers.gradleProperty("kotlinWinRT.xaml.compilerDirectory").map { projectDirectory.dir(it) })
         genXbfDirectory.convention(project.providers.gradleProperty("kotlinWinRT.xaml.genXbfDirectory").map { projectDirectory.dir(it) })
-        compilerVersion.convention(project.providers.gradleProperty("kotlinWinRT.xaml.version").orElse("0.1.0-preview.2"))
+        compilerVersion.convention(project.providers.gradleProperty("kotlinWinRT.xaml.version").orElse("0.1.0-preview.3"))
         archiveSha256.convention(project.providers.gradleProperty("kotlinWinRT.xaml.sha256").orElse(
-            "5b91b944d30a844c2d03d1f7a58f51efbd4c5e5f9f2e52f84ef2c1cf294d1de3",
+            "a9b635f7539f85a3b3c5a9f538941779a098778da2ed8f8199f79f81a71daddd",
         ))
         archiveUrl.convention(compilerVersion.map { version ->
             "https://github.com/compose-fluent/microsoft-ui-xaml/releases/download/kotlin-xamlc-v$version/kotlin-xamlc-$version-win-x64.zip"
