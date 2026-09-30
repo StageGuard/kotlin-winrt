@@ -34,8 +34,9 @@ internal fun writeXamlBindingSupportSource(root: Path) {
                     DataTemplate.setExtensionInstance(root, this)
                 }
                 XamlBindingHelper.setDataTemplateComponent(root, this)
-                root.loading.add { _, _ -> scope.initialize(if (isControlTemplate) target else root.dataContext) }
-                root.unloaded.add { _, _ -> recycle() }
+                // CSharpPagePass2 subscribes Loading only for the file root.
+                // Template instances are initialized and recycled by the SDK.
+                scope.initialize(if (isControlTemplate) target else root.dataContext)
             }
 
             private fun dataContextChanged(sender: FrameworkElement, args: DataContextChangedEventArgs) {

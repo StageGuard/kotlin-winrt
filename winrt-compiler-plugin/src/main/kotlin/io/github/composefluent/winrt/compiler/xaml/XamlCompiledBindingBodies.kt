@@ -339,6 +339,15 @@ internal class XamlCompiledBindingBodies(
     fun lifecycleSubscription(builder: IrBuilderWithScope, klass: IrClass, page: WinRTXamlPageDeclaration,
         callback: IrSimpleFunction, receiver: IrExpression, loading: Boolean): IrExpression = with(builder) {
         val window = klass.defaultType.isSubtypeOfClass(projection("Microsoft.UI.Xaml.Window").symbol)
+        if (!window && !klass.defaultType.isSubtypeOfClass(projection("Microsoft.UI.Xaml.FrameworkElement").symbol)) {
+            // CSharpPagePass2 attaches Loading to binding file roots only.
+            // Dictionary templates use IDataTemplateComponent on their own
+            // realized FrameworkElement; the dictionary has no UI lifecycle.
+            require(page.connections.none { !it.isTemplateChild && it.bindings.isNotEmpty() }) {
+                "${page.resourcePath}: compiled bindings on a non-UI file root require an explicit lifecycle"
+            }
+            return@with irUnit()
+        }
         val owner = projection(if (window) "Microsoft.UI.Xaml.Window" else "Microsoft.UI.Xaml.FrameworkElement")
         val event = if (window) { if (loading) "Activated" else "Closed" } else { if (loading) "Loading" else "Unloaded" }
         val add = owner.functions.single { it.name.asString() == "add$event" }
