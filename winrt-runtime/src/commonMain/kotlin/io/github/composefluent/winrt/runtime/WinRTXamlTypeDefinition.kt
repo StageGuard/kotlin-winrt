@@ -11,6 +11,7 @@ class WinRTXamlTypeDefinition(
     val activate: (() -> Any)? = null,
     val contentProperty: String? = null,
     members: List<WinRTXamlMemberDefinition> = emptyList(),
+    val initializer: (() -> Unit)? = null,
 ) {
     val members: Map<String, WinRTXamlMemberDefinition> = members.associateBy { it.name }
 
@@ -48,4 +49,19 @@ class WinRTXamlCollectionDefinition(
 fun registerWinRTXamlTypeDefinition(definition: WinRTXamlTypeDefinition) {
     Projections.registerAuthoredRuntimeClassType(definition.type, definition.name, definition.baseName)
     WinUiAuthoredTypeMetadata.registerDefinition(definition)
+}
+
+/** Application enums use Kotlin declaration ordinals as their Int32 values.
+ * Mirrors XamlUserType's enum table; component ABI export is a separate contract. */
+fun <T : Enum<T>> registerWinRTXamlEnumType(type: KClass<T>, name: String, entries: Array<T>) {
+    Projections.registerEnumType(type, name, "enum($name;i4)", { it.ordinal }, entries)
+    val byName = entries.associateBy { it.name }
+    WinUiAuthoredTypeMetadata.registerEnum(type, name) { input ->
+        val value = input.split(',').fold(0) { result, part ->
+            val token = part.trim()
+            val entry = byName[token] ?: byName.entries.firstOrNull { it.key.equals(token, true) }?.value
+            result or (entry?.ordinal ?: token.toInt())
+        }
+        requireNotNull(entries.firstOrNull { it.ordinal == value }) { "Unknown $name value: $input" }
+    }
 }

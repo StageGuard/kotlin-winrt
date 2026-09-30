@@ -34,10 +34,10 @@ object WinRTPortableExecutableMetadataWriter {
         Files.createDirectories(outputFile.parent)
         writeIfChanged(outputFile, WinmdBuilder(assemblyName, runtimeClasses.map {
             WinmdClass(it.runtimeClassName, it.baseRuntimeClassName, it.interfaceNames,
-                isActivatable = it.isActivatable, isSealed = it.isSealed)
+                isActivatable = it.isActivatable, isSealed = it.isSealed, enumEntries = it.enumEntries)
         },
             externalTypeAssemblies = externalTypeAssemblies, applicationMembers = members,
-            valueTypeNames = valueTypeNames).build())
+            valueTypeNames = valueTypeNames + runtimeClasses.filter { it.enumEntries != null }.map { it.runtimeClassName }).build())
     }
 
     fun writeEmptyWinmd(
@@ -86,6 +86,7 @@ data class WinRTXamlApplicationTypeDescriptor(
     val interfaceNames: List<String> = emptyList(),
     val isActivatable: Boolean = true,
     val isSealed: Boolean = true,
+    val enumEntries: List<String>? = null,
 )
 
 private data class WinmdClass(
@@ -97,6 +98,7 @@ private data class WinmdClass(
     val isSealed: Boolean = true,
     val activatableFactoryInterfaceName: String? = null,
     val staticFactoryInterfaceNames: List<String> = emptyList(),
+    val enumEntries: List<String>? = null,
 ) {
     constructor(type: WinRTAuthoredRuntimeClassDescriptor) : this(type.runtimeClassName,
         type.baseRuntimeClassName, type.interfaceNames, type.overridableInterfaceNames,
@@ -111,6 +113,14 @@ private class WinmdBuilder(
     private val applicationMembers: Map<String, WinRTXamlApplicationTypeMembers> = emptyMap(),
     private val valueTypeNames: Set<String> = emptySet(),
 ) {
+    // WinRTTypeWriter.VisitEnumDeclaration owns value__, literal FieldDefs and constants.
+    private val fields = runtimeClasses.flatMap { type ->
+        type.enumEntries?.let { entries ->
+            listOf(Triple(type.runtimeClassName, "value__", null)) +
+                entries.mapIndexed { value, name -> Triple(type.runtimeClassName, name, value) }
+        }.orEmpty()
+    }
+    private val constants = fields.mapIndexedNotNull { index, field -> field.third?.let { index + 1 to it } }
     private val properties = runtimeClasses.flatMap { type ->
         applicationMembers[type.runtimeClassName]?.properties.orEmpty().sortedBy { it.name }
             .map { type.runtimeClassName to it }
@@ -265,9 +275,11 @@ private class WinmdBuilder(
         val validMask = (1L shl TABLE_MODULE) or
             (if (typeRefs.isEmpty()) 0L else 1L shl TABLE_TYPE_REF) or
             (1L shl TABLE_TYPE_DEF) or
+            (if (fields.isEmpty()) 0L else 1L shl TABLE_FIELD) or
             (if (methodCount == 0) 0L else 1L shl TABLE_METHOD_DEF) or
             (if (interfaceImplCount() > 0) 1L shl TABLE_INTERFACE_IMPL else 0L) or
             (if (attributeMemberRefs.isEmpty()) 0L else 1L shl TABLE_MEMBER_REF) or
+            (if (constants.isEmpty()) 0L else 1L shl TABLE_CONSTANT) or
             (if (customAttributes.isEmpty()) 0L else 1L shl TABLE_CUSTOM_ATTRIBUTE) or
             (if (events.isEmpty()) 0L else (1L shl TABLE_EVENT_MAP) or (1L shl TABLE_EVENT)) or
             (if (properties.isEmpty()) 0L else (1L shl TABLE_PROPERTY_MAP) or (1L shl TABLE_PROPERTY)) or
@@ -287,6 +299,7 @@ private class WinmdBuilder(
             writer.int32(typeRefs.size)
         }
         writer.int32(typeDefCount())
+        if (fields.isNotEmpty()) writer.int32(fields.size)
         if (methodCount > 0) writer.int32(methodCount)
         if (interfaceImplCount() > 0) {
             writer.int32(interfaceImplCount())
@@ -294,6 +307,7 @@ private class WinmdBuilder(
         if (attributeMemberRefs.isNotEmpty()) {
             writer.int32(attributeMemberRefs.size)
         }
+        if (constants.isNotEmpty()) writer.int32(constants.size)
         if (customAttributes.isNotEmpty()) {
             writer.int32(customAttributes.size)
         }
@@ -337,6 +351,7 @@ private class WinmdBuilder(
             writer.index(1)
         }
         var firstMethod = 1
+        var firstField = 1
         runtimeClasses.forEach { descriptor ->
             val namespace = descriptor.runtimeClassName.substringBeforeLast('.', missingDelimiterValue = "")
             val name = descriptor.runtimeClassName.substringAfterLast('.')
@@ -345,11 +360,18 @@ private class WinmdBuilder(
             writer.index(strings.index(name))
             writer.index(strings.index(namespace))
             writer.index(codedTypeDefOrRef(typeRefs, localTypeDefRowIds, baseTypeName))
-            writer.index(1)
+            writer.index(firstField)
             writer.index(firstMethod)
+            firstField += fields.count { it.first == descriptor.runtimeClassName }
             firstMethod += properties.filter { it.first == descriptor.runtimeClassName }.sumOf { if (it.second.isReadOnly) 1 else 2 } +
                 events.count { it.first == descriptor.runtimeClassName } * 2 + methods.count { it.first == descriptor.runtimeClassName } +
                 if (hasApplicationConstructor(descriptor)) 1 else 0
+        }
+        fields.forEach { (owner, name, value) ->
+            writer.int16(if (value == null) 0x0601 else 0x8056)
+            writer.index(strings.index(name))
+            val type = if (value == null) WinRTTypeRef.named("Int32") else WinRTTypeRef.named(owner)
+            writer.index(blobs.index(byteArrayOf(0x06) + signature(type, typeRefs, localTypeDefRowIds)))
         }
         // CsWinRT WinRTTypeWriter.AddPropertyDefinition: accessor MethodDefs plus MethodSemantics.
         fun method(name: String, flags: Int, signature: ByteArray) {
@@ -405,6 +427,11 @@ private class WinmdBuilder(
             writer.index((memberRef.typeRefRowId shl CODED_MEMBER_REF_PARENT_TAG_BITS) or CODED_MEMBER_REF_PARENT_TYPE_REF)
             writer.index(strings.index(".ctor"))
             writer.index(memberRef.signatureBlobIndex)
+        }
+        constants.forEach { (field, value) ->
+            writer.int8(0x08); writer.int8(0)
+            writer.index(field shl 2) // HasConstant: Field
+            writer.index(blobs.index(BinaryWriter().apply { int32(value) }.toByteArray()))
         }
         customAttributes.forEach { attribute ->
             writer.index(attribute.parentToken)
@@ -852,6 +879,8 @@ private class WinmdBuilder(
         const val TABLE_MODULE = 0
         const val TABLE_TYPE_REF = 1
         const val TABLE_TYPE_DEF = 2
+        const val TABLE_FIELD = 4
+        const val TABLE_CONSTANT = 11
         const val TABLE_METHOD_DEF = 6
         const val TABLE_PROPERTY_MAP = 21
         const val TABLE_EVENT_MAP = 18

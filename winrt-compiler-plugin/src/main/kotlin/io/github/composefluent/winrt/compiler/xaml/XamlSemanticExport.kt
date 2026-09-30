@@ -145,7 +145,9 @@ private class XamlSemanticExport(
                 }.first
                 authored += WinRTXamlApplicationTypeDescriptor(type.qualifiedName, type.baseTypeName,
                     type.implementedInterfaces.map { it.interfaceName }, type.activation.isActivatable,
-                    isSealed = klass.modality == org.jetbrains.kotlin.descriptors.Modality.FINAL)
+                    isSealed = klass.modality == org.jetbrains.kotlin.descriptors.Modality.FINAL,
+                    enumEntries = if (klass.kind == org.jetbrains.kotlin.descriptors.ClassKind.ENUM_CLASS)
+                        klass.declarations.filterIsInstance<IrEnumEntry>().map { it.name.asString() } else null)
                 applicationMembers[type.qualifiedName] = xamlApplicationProperties(klass, types, applicationTypes)
             }
         val symbols = buildJsonObject {

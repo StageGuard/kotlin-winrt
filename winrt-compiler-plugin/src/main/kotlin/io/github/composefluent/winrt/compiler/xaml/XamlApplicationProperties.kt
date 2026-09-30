@@ -20,6 +20,7 @@ internal fun xamlApplicationProperties(
     types: Map<String, IndexedWinRTType>,
     applicationTypes: Set<String>,
 ): WinRTXamlApplicationTypeMembers {
+    if (klass.kind == org.jetbrains.kotlin.descriptors.ClassKind.ENUM_CLASS) return WinRTXamlApplicationTypeMembers()
     fun visible(function: IrSimpleFunction?) = function != null &&
         function.visibility in setOf(DescriptorVisibilities.PUBLIC, DescriptorVisibilities.INTERNAL)
 
@@ -44,7 +45,8 @@ internal fun xamlApplicationProperties(
         }
         val result = WinRTTypeRef.named(metadataName, arguments)
         val isValueType = primitive?.isWinRTValueType == true ||
-            indexed?.kind in setOf(WinRTTypeKind.Enum.name, WinRTTypeKind.Struct.name)
+            indexed?.kind in setOf(WinRTTypeKind.Enum.name, WinRTTypeKind.Struct.name) ||
+            type.classOrNull?.owner?.kind == org.jetbrains.kotlin.descriptors.ClassKind.ENUM_CLASS
         return if (type.isNullable() && isValueType)
             WinRTTypeRef.named("Windows.Foundation.IReference`1", listOf(result)) else result
     }
@@ -82,7 +84,9 @@ internal fun xamlApplicationProperties(
                 visible(it) && it.name.asString() == "remove$name" &&
                     it.parameters.singleOrNull { p -> p.kind == IrParameterKind.Regular }?.type == parameter.type
             } ?: return@mapNotNull null
-            WinRTXamlApplicationEvent(name, resolve(parameter.type))
+            val handlerType = runCatching { resolve(parameter.type) }.getOrNull() ?: return@mapNotNull null
+            if (types[handlerType.qualifiedName?.substringBefore('`')]?.kind != WinRTTypeKind.Delegate.name) return@mapNotNull null
+            WinRTXamlApplicationEvent(name, handlerType)
         }
     val methods = (listOf(klass) + listOfNotNull(klass.companionObject())).flatMap { owner ->
         owner.declarations.filterIsInstance<IrSimpleFunction>()

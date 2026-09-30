@@ -40,6 +40,9 @@ class WinRTXamlBindingScope(owner: WinRTXamlBindingScopeOwner, val scopeId: Int)
 
     fun connect(connectionId: Int, target: Any?) {
         requireNotNull(target) { "XAML template connection $connectionId has a null target" }
+        if (FeatureSwitches.traceCcw) {
+            println("winrt-xaml-binding: owner=${owner.tryGetTarget()?.let { it::class }} scope=$scopeId connection=$connectionId target=${target::class}")
+        }
         targets[connectionId] = target
         owner.tryGetTarget()?._kotlinXamlConnectScope(this, connectionId, target)
         if (state.connected(connectionId)) state.update(::update)

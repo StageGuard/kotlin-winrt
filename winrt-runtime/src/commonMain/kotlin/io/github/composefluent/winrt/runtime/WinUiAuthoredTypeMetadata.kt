@@ -16,6 +16,12 @@ internal object WinUiAuthoredTypeMetadata {
     private val definitions = ConcurrentCacheMap<String, WinRTXamlTypeDefinition>()
     private val definitionsByType = ConcurrentCacheMap<KClass<*>, WinRTXamlTypeDefinition>()
     private val collectionDefinitions = ConcurrentCacheMap<String, WinRTXamlCollectionDefinition>()
+    private data class EnumType(val type: KClass<*>, val parse: (String) -> Any)
+    private val enumTypes = ConcurrentCacheMap<String, EnumType>()
+
+    fun registerEnum(type: KClass<*>, name: String, parse: (String) -> Any) {
+        enumTypes.putIfAbsent(name, EnumType(type, parse))
+    }
 
     fun registerDefinition(definition: WinRTXamlTypeDefinition) {
         definitions.putIfAbsent(definition.name, definition)
@@ -31,7 +37,7 @@ internal object WinUiAuthoredTypeMetadata {
     }
 
     fun clearForTests() {
-        types.clear(); definitions.clear(); definitionsByType.clear(); collectionDefinitions.clear()
+        types.clear(); definitions.clear(); definitionsByType.clear(); collectionDefinitions.clear(); enumTypes.clear()
     }
 
     /** Reuses generated accessors for CsWinRT's source-generated ICustomProperty path.
@@ -52,6 +58,7 @@ internal object WinUiAuthoredTypeMetadata {
 
     /** Returns an owned IXamlType pointer, or null when this is not an authored type. */
     fun tryCreate(name: String, resolveType: (String) -> RawAddress): RawAddress {
+        enumTypes[name]?.let { return createSystemType(name, it.type, it.parse) }
         // XBF refers to member types by name before asking IXamlMember.Type.
         // Generated XamlTypeInfo registers closed collection types in the same
         // lookup table as authored classes, preserving their typed Add helper.
@@ -153,7 +160,9 @@ internal object WinUiAuthoredTypeMetadata {
                     },
                     inherited(22, 2), // AddToVector
                     inherited(23, 3), // AddToMap
-                    inherited(24, 0), // RunInitializer
+                    definition?.initializer?.let { initializer -> WinRTInspectableMethodDefinition(ComMethodSignature.of()) {
+                        initializer(); KnownHResults.S_OK.value
+                    } } ?: inherited(24, 0), // RunInitializer
                 ),
             )),
             defaultInterfaceId = WinUiXamlInterfaceIds.IXamlType,
@@ -246,7 +255,7 @@ internal object WinUiAuthoredTypeMetadata {
     }
 
     /** XamlCompiler's XamlSystemBaseType for a projected type absent from SDK metadata providers. */
-    private fun createSystemType(name: String, type: KClass<*>): RawAddress {
+    private fun createSystemType(name: String, type: KClass<*>, parse: ((String) -> Any)? = null): RawAddress {
         fun pointer(value: () -> RawAddress) = WinRTInspectableMethodDefinition(ComMethodSignatures.HResult_Ptr) {
             PlatformAbi.writePointer(it[0] as RawAddress, value()); KnownHResults.S_OK.value
         }
@@ -276,7 +285,11 @@ internal object WinUiAuthoredTypeMetadata {
                         TypeProjection.copyTo(type, it[0] as RawAddress); KnownHResults.S_OK.value
                     }, // UnderlyingType
                     unavailable(ComMethodSignatures.HResult_Ptr), // ActivateInstance
-                    unavailable(ComMethodSignatures.HResult_Ptr_Ptr), // CreateFromString
+                    parse?.let { parser -> WinRTInspectableMethodDefinition(ComMethodSignatures.HResult_Ptr_Ptr) { args ->
+                        val input = HString.fromHandle(args[0] as RawAddress, owner = false).use { it.toKString() }
+                        PlatformAbi.writePointer(args[1] as RawAddress, WinRTObjectMarshaller.fromManaged(parser(input)))
+                        KnownHResults.S_OK.value
+                    } } ?: unavailable(ComMethodSignatures.HResult_Ptr_Ptr), // CreateFromString
                     unavailable(ComMethodSignatures.HResult_Ptr_Ptr), // GetMember
                     unavailable(ComMethodSignatures.HResult_Ptr_Ptr), // AddToVector
                     unavailable(ComMethodSignature.of(ComAbiValueKind.Pointer, ComAbiValueKind.Pointer, ComAbiValueKind.Pointer)), // AddToMap
