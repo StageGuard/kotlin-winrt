@@ -81,6 +81,10 @@ object ComWrappersSupport {
             cachedHosts.releaseCacheRoots()
         }
     private val rcwCache = RcwIdentityCache()
+    // Explicit registrations can associate a plain managed object with a COM
+    // identity. Match CsWinRT's reference-owning registration lifetime without
+    // putting implicitly unboxed (possibly interned) scalar values in this table.
+    private val registeredRcwReferences = WeakKeyStateMap<Any, ComObjectReference> { it.close() }
     private val closedInterfaceRcwCache = ClosedInterfaceRcwIdentityCache()
 
     init {
@@ -651,6 +655,20 @@ object ComWrappersSupport {
         staticallyDeterminedType: WinRTTypeHandle? = null,
     ): Any? = validateCachedRcw(pointerKey, rcwCache[pointerKey], staticallyDeterminedType)
 
+    // CsWinRT BoxedValueReferenceCache retains IInspectable while a boxed value
+    // is cached. Kotlin scalar boxes may be interned (Boolean/small integers),
+    // so they cannot own independent native identities. Decode these values on
+    // each call instead of caching a pointer after its reference was released.
+    internal fun canCacheRcwIdentity(value: Any): Boolean = value is IWinRTObject || value is ComObjectReference ||
+        registeredRcwReferences[value] != null
+
+    internal fun hasLiveRcwIdentity(value: Any): Boolean = when (value) {
+        is WinRTObjectBase<*> -> value.tryGetInitializedNativeObject()?.isDisposed == false
+        is IWinRTObject -> !value.nativeObject.isDisposed
+        is ComObjectReference -> !value.isDisposed
+        else -> registeredRcwReferences[value]?.isDisposed == false
+    }
+
     private inline fun validateCachedRcw(
         pointerKey: Long,
         cached: Any?,
@@ -680,6 +698,10 @@ object ComWrappersSupport {
         }
         val winRTObject = cached as? IWinRTObject
         if (winRTObject == null) {
+            if (!hasLiveRcwIdentity(cached)) {
+                rcwCache.remove(pointerKey)
+                return null
+            }
             return if (staticallyDeterminedType == null) cached else null
         }
         val winRTObjectBase = winRTObject as? WinRTObjectBase<*>
@@ -710,6 +732,11 @@ object ComWrappersSupport {
     ) {
         if (PlatformAbi.isNull(pointer)) {
             return
+        }
+        if (!canCacheRcwIdentity(value)) {
+            val reference = requireNotNull(wrapInspectable(pointer))
+            val retained = registeredRcwReferences.getOrPut(value) { reference }
+            if (retained !== reference) reference.close()
         }
         val directPointerKey = PlatformAbi.pointerKey(pointer)
         rcwCache[directPointerKey] = value
@@ -1290,6 +1317,7 @@ object ComWrappersSupport {
         ReferenceTrackerManager.clearForTests()
         ccwHostCache.clear()
         advanceCcwHostCacheGeneration()
+        registeredRcwReferences.clear()
         rcwCache.clear()
         closedInterfaceRcwCache.clear()
         RuntimeRegistryResetSupport.clearForTests()
@@ -1706,6 +1734,7 @@ private class RcwIdentityCache {
         pointerKey: Long,
         value: Any,
     ) {
+        if (!ComWrappersSupport.canCacheRcwIdentity(value)) return
         val reference = entries.put(pointerKey, value)
         hotEntry.store(RcwIdentityCacheEntry(pointerKey, reference, value))
     }

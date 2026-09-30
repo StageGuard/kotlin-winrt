@@ -25,12 +25,7 @@ object WinRTObjectMarshaller {
     @kotlin.concurrent.Volatile
     private var hotInboundRcw: HotInboundRcw? = null
 
-    private fun isLiveCachedValue(value: Any): Boolean =
-        when (value) {
-            is WinRTObjectBase<*> -> value.tryGetInitializedNativeObject()?.isDisposed == false
-            is IWinRTObject -> !value.nativeObject.isDisposed
-            else -> true
-        }
+    private fun isLiveCachedValue(value: Any): Boolean = ComWrappersSupport.hasLiveRcwIdentity(value)
 
     fun createMarshaler(
         value: Any?,
@@ -101,7 +96,8 @@ object WinRTObjectMarshaller {
         // Preserve the managed CCW identity probe before creating or reusing an RCW.
         WinRTInspectableComObject.findManagedValue(pointer)?.let { return it }
         return ComWrappersSupport.createRcwForComObject(pointer)?.also { rcw ->
-            hotInboundRcw = HotInboundRcw(pointerKey, PlatformManagedWeakReference(rcw))
+            if (ComWrappersSupport.canCacheRcwIdentity(rcw))
+                hotInboundRcw = HotInboundRcw(pointerKey, PlatformManagedWeakReference(rcw))
         }
     }
 
@@ -137,7 +133,8 @@ object WinRTObjectMarshaller {
             return managed
         }
         return ComWrappersSupport.createRcwForOwnedComObject(pointer)?.also { rcw ->
-            hotInboundRcw = HotInboundRcw(pointerKey, PlatformManagedWeakReference(rcw))
+            if (ComWrappersSupport.canCacheRcwIdentity(rcw))
+                hotInboundRcw = HotInboundRcw(pointerKey, PlatformManagedWeakReference(rcw))
         }
     }
 
