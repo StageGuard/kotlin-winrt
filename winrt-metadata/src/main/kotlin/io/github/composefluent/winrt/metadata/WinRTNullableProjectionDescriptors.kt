@@ -12,6 +12,14 @@ internal fun WinRTEventDefinition.withNullableEventContract(ownerTypeName: Strin
 }
 
 internal fun WinRTMethodDefinition.withNullableReturnContract(ownerTypeName: String): WinRTMethodDefinition {
+    // Virtualized ItemsControl containers do not exist until they are realized.
+    // CsWinRT MarshalInterface<T>.FromAbi preserves the SDK's null pointer, also
+    // used explicitly by WinUI Gallery's ItemsPageBase container lookup.
+    if (ownerTypeName.substringBeforeLast('.') in setOf("Microsoft.UI.Xaml.Controls", "Windows.UI.Xaml.Controls") &&
+        ownerTypeName.substringAfterLast('.') in setOf("ItemsControl", "IItemContainerMapping") &&
+        name in setOf("ContainerFromItem", "ContainerFromIndex")) {
+        return copy(returnTypeName = returnTypeName.removeSuffix("?") + "?")
+    }
     // Gallery's StringOrIntTemplateSelector returns null for unmatched items.
     // CsWinRT MarshalInterface<T>.FromAbi (WinRT.Runtime/Marshalers.cs) preserves
     // a zero ABI pointer. Normalize before planning so base calls and authored
