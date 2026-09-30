@@ -908,8 +908,11 @@ object KotlinWinRTAuthoringScannerCli {
             hasModifier(classNode, KtTokens.VALUE_KEYWORD, KtTokens.INLINE_KEYWORD)
 
         fun hasPublicDefaultActivationConstructor(classNode: LighterASTNode): Boolean {
-            val constructors = classNode.descendantsOfType(KtNodeTypes.PRIMARY_CONSTRUCTOR) +
-                classNode.descendantsOfType(KtNodeTypes.SECONDARY_CONSTRUCTOR)
+            // CsWinRT Authoring examines this type's InstanceConstructors.
+            // Nested classes' constructors do not affect the containing type.
+            val constructors = classNode.children().filter { it.tokenType == KtNodeTypes.PRIMARY_CONSTRUCTOR } +
+                classNode.children().firstOrNull { it.tokenType == KtNodeTypes.CLASS_BODY }?.children().orEmpty()
+                    .filter { it.tokenType == KtNodeTypes.SECONDARY_CONSTRUCTOR }
             if (constructors.isEmpty()) {
                 return true
             }
