@@ -3013,6 +3013,7 @@ class KotlinProjectionRenderer(
                 if (KotlinProjectionSpecializationKind.ApiContract in plan.specializationKinds) {
                     addKdoc("api contract WinRT declaration shell\n")
                 }
+                addFunction(renderEnumToString(plan, underlyingType, flags = false))
                 addType(
                     TypeSpec.companionObjectBuilder("Metadata")
                         .apply {
@@ -3075,6 +3076,7 @@ class KotlinProjectionRenderer(
             )
             .apply {
                 applyCommonTypeShape(this, plan)
+                addFunction(renderEnumToString(plan, WinRTIntegralType.UInt32, flags = true))
                 addFunction(
                     FunSpec.builder("contains")
                         .addModifiers(KModifier.OPERATOR)
@@ -3149,6 +3151,27 @@ class KotlinProjectionRenderer(
                 )
             }
             .build()
+
+    /** CsWinRT write_enum emits CLR enums, whose text is the declared name or numeric value. */
+    private fun renderEnumToString(plan: KotlinTypeProjectionPlan, underlying: WinRTIntegralType, flags: Boolean): FunSpec {
+        val members = plan.type.enumMembers.distinctBy { it.valueBits }
+        val body = CodeBlock.builder().beginControlFlow("when (abiValue)")
+        members.forEach { member -> body.addStatement("%L -> return %S", integralLiteral(member.valueBits, underlying), member.name) }
+        body.endControlFlow()
+        if (flags) {
+            body.addStatement("var remaining = abiValue")
+            body.addStatement("val names = mutableListOf<String>()")
+            members.filter { it.valueBits != 0UL }.sortedByDescending { it.valueBits }.forEach { member ->
+                val literal = integralLiteral(member.valueBits, underlying)
+                body.beginControlFlow("if ((remaining and %L) == %L)", literal, literal)
+                    .addStatement("names.add(%S)", member.name)
+                    .addStatement("remaining = remaining and %L.inv()", literal).endControlFlow()
+            }
+            body.addStatement("if (remaining == 0u && names.isNotEmpty()) return names.asReversed().joinToString(%S)", ", ")
+        }
+        body.addStatement("return abiValue.toString()")
+        return FunSpec.builder("toString").addModifiers(KModifier.OVERRIDE).returns(String::class).addCode(body.build()).build()
+    }
 
     private fun renderEnumRegistration(
         plan: KotlinTypeProjectionPlan,
