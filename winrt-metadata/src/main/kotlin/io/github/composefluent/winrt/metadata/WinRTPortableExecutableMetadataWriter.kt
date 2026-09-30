@@ -120,10 +120,15 @@ private class WinmdBuilder(
             .map { type.runtimeClassName to it }
     }
     private val eventTypeSpecs = events.map { it.second.handlerType }.filter { it.typeArguments.isNotEmpty() }.distinct()
+    private val methods = runtimeClasses.flatMap { type ->
+        applicationMembers[type.runtimeClassName]?.methods.orEmpty()
+            .sortedWith(compareBy({ it.name }, { it.parameterTypes.joinToString { parameter -> parameter.typeName } }))
+            .map { type.runtimeClassName to it }
+    }
     private fun hasApplicationConstructor(type: WinmdClass) =
         type.isActivatable && type.runtimeClassName in applicationMembers
     private val accessorCount = properties.sumOf { if (it.second.isReadOnly) 1 else 2 }
-    private val methodCount = accessorCount + events.size * 2 +
+    private val methodCount = accessorCount + events.size * 2 + methods.size +
         runtimeClasses.count(::hasApplicationConstructor)
     private val getterIds = buildMap<Pair<String, String>, Int> {
         var next = 1
@@ -134,6 +139,7 @@ private class WinmdBuilder(
                 next += if (property.isReadOnly) 1 else 2
             }
             next += events.count { it.first == type.runtimeClassName } * 2
+            next += methods.count { it.first == type.runtimeClassName }
         }
     }
     private val eventAdderIds = buildMap<Pair<String, String>, Int> {
@@ -145,6 +151,7 @@ private class WinmdBuilder(
                 put(owner to event.name, next)
                 next += 2
             }
+            next += methods.count { it.first == type.runtimeClassName }
         }
     }
     private val strings = IndexedStringHeap()
@@ -189,6 +196,7 @@ private class WinmdBuilder(
             } +
                 interfaces.flatMap { descriptor -> descriptor.implementedInterfaceNames.filterNot(localTypeNames::contains) } +
                 attributeTypeNames + (properties.flatMap { signatureReferences(it.second.type) } +
+                    methods.flatMap { (_, method) -> (method.parameterTypes + method.returnType).flatMap(::signatureReferences) } +
                     events.flatMap { signatureReferences(it.second.handlerType) } +
                     if (events.isEmpty()) emptyList() else listOf(EVENT_REGISTRATION_TOKEN)).filterNot(localTypeNames::contains)
             )
@@ -340,7 +348,8 @@ private class WinmdBuilder(
             writer.index(1)
             writer.index(firstMethod)
             firstMethod += properties.filter { it.first == descriptor.runtimeClassName }.sumOf { if (it.second.isReadOnly) 1 else 2 } +
-                events.count { it.first == descriptor.runtimeClassName } * 2 + if (hasApplicationConstructor(descriptor)) 1 else 0
+                events.count { it.first == descriptor.runtimeClassName } * 2 + methods.count { it.first == descriptor.runtimeClassName } +
+                if (hasApplicationConstructor(descriptor)) 1 else 0
         }
         // CsWinRT WinRTTypeWriter.AddPropertyDefinition: accessor MethodDefs plus MethodSemantics.
         fun method(name: String, flags: Int, signature: ByteArray) {
@@ -354,8 +363,10 @@ private class WinmdBuilder(
             if (hasApplicationConstructor(type)) method(".ctor", 0x1886, byteArrayOf(0x20, 0, 1))
             properties.filter { it.first == type.runtimeClassName }.forEach { (_, property) ->
                 val signature = signature(property.type, typeRefs, localTypeDefRowIds)
-                method("get_${property.name}", 0x0886, byteArrayOf(0x20, 0) + signature)
-                if (!property.isReadOnly) method("put_${property.name}", 0x0886, byteArrayOf(0x20, 1, 1) + signature)
+                val convention = if (property.isStatic) 0 else 0x20
+                val flags = if (property.isStatic) 0x0896 else 0x0886
+                method("get_${property.name}", flags, byteArrayOf(convention.toByte(), 0) + signature)
+                if (!property.isReadOnly) method("put_${property.name}", flags, byteArrayOf(convention.toByte(), 1, 1) + signature)
             }
             // WinRTTypeWriter.AddEventDeclaration owns EventMap/Event/MethodSemantics.
             // These application-only rows describe typed connector calls, not exported component ABI.
@@ -364,6 +375,16 @@ private class WinmdBuilder(
                 val token = signature(WinRTTypeRef.named(EVENT_REGISTRATION_TOKEN), typeRefs, localTypeDefRowIds)
                 method("add_${event.name}", 0x0886, byteArrayOf(0x20, 1) + token + handler)
                 method("remove_${event.name}", 0x0886, byteArrayOf(0x20, 1, 1) + token)
+            }
+            // CsWinRT WinRTTypeWriter.AddMethodDeclaration preserves staticness and typed signatures.
+            methods.filter { it.first == type.runtimeClassName }.forEach { (_, declaration) ->
+                method(declaration.name, if (declaration.isStatic) 0x0096 else 0x0086,
+                    BinaryWriter().apply {
+                        int8(if (declaration.isStatic) 0 else CALL_CONV_HASTHIS)
+                        compressedUInt(declaration.parameterTypes.size)
+                        bytes(signature(declaration.returnType, typeRefs, localTypeDefRowIds))
+                        declaration.parameterTypes.forEach { bytes(signature(it, typeRefs, localTypeDefRowIds)) }
+                    }.toByteArray())
             }
         }
         interfaces.forEach { descriptor ->
@@ -408,7 +429,7 @@ private class WinmdBuilder(
         }
         properties.forEach { (_, property) ->
             writer.int16(0); writer.index(strings.index(property.name))
-            writer.index(blobs.index(byteArrayOf(0x28, 0) + signature(property.type, typeRefs, localTypeDefRowIds)))
+            writer.index(blobs.index(byteArrayOf(if (property.isStatic) 0x08 else 0x28, 0) + signature(property.type, typeRefs, localTypeDefRowIds)))
         }
         data class Semantics(val flags: Int, val method: Int, val association: Int)
         val semantics = mutableListOf<Semantics>()
@@ -605,7 +626,7 @@ private class WinmdBuilder(
         WinRTTypeRefKind.Array -> signatureReferences(requireNotNull(type.elementType))
         WinRTTypeRefKind.Named -> {
             val name = requireNotNull(type.qualifiedName)
-            (if (winRTFundamentalTypeForName(name) != null || isWinRTObjectTypeName(name)) emptyList() else listOf(name)) +
+            (if (winRTFundamentalTypeForName(name) != null || isWinRTObjectTypeName(name) || isWinRTVoidTypeName(name)) emptyList() else listOf(name)) +
                 type.typeArguments.flatMap(::signatureReferences)
         }
         else -> error("XAML application property requires a closed type: ${type.typeName}")
@@ -623,6 +644,7 @@ private class WinmdBuilder(
             val name = requireNotNull(type.qualifiedName)
             val primitive = winRTFundamentalTypeForName(name)
             when {
+                isWinRTVoidTypeName(name) -> int8(ELEMENT_TYPE_VOID)
                 primitive != null -> int8(primitive.cliElementType)
                 isWinRTObjectTypeName(name) -> int8(0x1c)
                 else -> {

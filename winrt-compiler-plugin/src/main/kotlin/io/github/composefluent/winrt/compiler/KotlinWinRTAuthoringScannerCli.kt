@@ -20,6 +20,8 @@ import io.github.composefluent.winrt.metadata.WinRTTypeKind
 import io.github.composefluent.winrt.metadata.WinRTTypeRef
 import io.github.composefluent.winrt.metadata.WinRTXamlApplicationProperty
 import io.github.composefluent.winrt.metadata.WinRTXamlApplicationEvent
+import io.github.composefluent.winrt.metadata.WinRTXamlApplicationMethod
+import io.github.composefluent.winrt.metadata.isWinRTVoidTypeName
 import io.github.composefluent.winrt.metadata.WinRTXamlApplicationTypeMembers
 import io.github.composefluent.winrt.metadata.WinRTXamlApplicationTypeDescriptor
 import io.github.composefluent.winrt.metadata.WinRTCollectionInterfaceKind
@@ -146,8 +148,12 @@ object KotlinWinRTAuthoringScannerCli {
                 classes.getValue(name).schemaBaseName?.takeIf(classes::containsKey)?.let(selected::add)
                 val raw = sourceSchema(name).getOrThrow()
                 val properties = raw.properties.filter { it.metadata.isPublic || representable(it.metadata.type) }
-                val schema = raw.copy(properties = properties,
-                    metadata = raw.metadata.copy(properties = properties.map(XamlSourceProperty::metadata)))
+                val methods = raw.methods.filter { method ->
+                    (method.metadata.parameterTypes + method.metadata.returnType).all { representable(it) }
+                }
+                val schema = raw.copy(properties = properties, methods = methods,
+                    metadata = raw.metadata.copy(properties = properties.map(XamlSourceProperty::metadata),
+                        methods = methods.map(XamlSourceMethod::metadata)))
                 schemas[name] = schema
                 fun include(ref: WinRTTypeRef) {
                     ref.qualifiedName?.takeIf(classes::containsKey)?.let(selected::add)
@@ -155,6 +161,7 @@ object KotlinWinRTAuthoringScannerCli {
                 }
                 schema.properties.forEach { include(it.metadata.type) }
                 schema.metadata.events.forEach { include(it.handlerType) }
+                schema.metadata.methods.forEach { method -> (method.parameterTypes + method.returnType).forEach(::include) }
             }
         }
         val applicationClasses = selected.sorted().map(classes::getValue)
@@ -213,6 +220,7 @@ object KotlinWinRTAuthoringScannerCli {
                         }
                     }
                     for (i in 0 until xml.attributeCount) {
+                        include(xml.getAttributeNamespace(i), xml.getAttributeLocalName(i))
                         Regex("""\b([\w]+):([\w]+)""").findAll(xml.getAttributeValue(i)).forEach { match ->
                             include(xml.getNamespaceURI(match.groupValues[1]), match.groupValues[2])
                         }
@@ -223,9 +231,12 @@ object KotlinWinRTAuthoringScannerCli {
     }
 
     private data class XamlSourceProperty(val metadata: WinRTXamlApplicationProperty, val kotlinType: String)
+    private data class XamlSourceMethod(val metadata: WinRTXamlApplicationMethod,
+        val kotlinReturnType: String, val kotlinParameterTypes: List<String>)
     private data class XamlSourceMembers(
         val metadata: WinRTXamlApplicationTypeMembers,
         val properties: List<XamlSourceProperty>,
+        val methods: List<XamlSourceMethod> = emptyList(),
     )
 
     private fun String.kotlinLiteral(): String = buildString {
@@ -269,11 +280,12 @@ object KotlinWinRTAuthoringScannerCli {
                 if (!source.isObjectDeclaration(klass) && !source.isAbstractClass(klass) && source.hasPublicDefaultActivationConstructor(klass)) appendLine("      activate = { ${candidate.className}() },")
                 schema.metadata.contentProperty?.let { appendLine("      contentProperty = ${it.kotlinLiteral()},") }
                 appendLine("      members = listOf(")
-                schema.properties.filter { it.metadata.isPublic }.forEach { property ->
+                schema.properties.filter { it.metadata.isPublic && !it.metadata.isStatic }.forEach { property ->
                     appendLine("        io.github.composefluent.winrt.runtime.WinRTXamlMemberDefinition(")
                     appendLine("          name = ${property.metadata.name.kotlinLiteral()},")
                     appendLine("          typeName = ${property.metadata.type.typeName.kotlinLiteral()},")
                     appendLine("          type = ${property.kotlinType.removeSuffix("?").substringBefore('<')}::class,")
+                    appendLine("          isDependencyProperty = ${property.metadata.isDependencyProperty},")
                     appendLine("          get = { (it as ${candidate.className}).${property.metadata.name} },")
                     if (winRTCollectionKindForAbiName(property.metadata.type.qualifiedName.orEmpty()) == WinRTCollectionInterfaceKind.Vector) {
                         val item = property.metadata.type.typeArguments.single()
@@ -287,6 +299,22 @@ object KotlinWinRTAuthoringScannerCli {
                         appendLine("          set = { instance, value -> (instance as ${candidate.className}).${property.metadata.name} = value as ${property.kotlinType} },")
                     }
                     appendLine("        ),")
+                }
+                // CSharpTypeInfoPass2 invokes static Get/Set attached accessors on the owner.
+                schema.methods.filter { it.metadata.isStatic && it.metadata.isPublic &&
+                    it.metadata.name.startsWith("Get") && it.metadata.parameterTypes.size == 1 }.forEach { getter ->
+                    val name = getter.metadata.name.removePrefix("Get")
+                    val setter = schema.methods.singleOrNull { it.metadata.isStatic && it.metadata.isPublic &&
+                        it.metadata.name == "Set$name" && it.metadata.parameterTypes ==
+                            getter.metadata.parameterTypes + getter.metadata.returnType && isWinRTVoidTypeName(it.metadata.returnType.typeName) }
+                    if (setter != null) {
+                        appendLine("        io.github.composefluent.winrt.runtime.WinRTXamlMemberDefinition(")
+                        appendLine("          name = ${name.kotlinLiteral()}, typeName = ${getter.metadata.returnType.typeName.kotlinLiteral()},")
+                        appendLine("          type = ${getter.kotlinReturnType.removeSuffix("?").substringBefore('<')}::class, isAttachable = true, isDependencyProperty = true,")
+                        appendLine("          get = { ${candidate.className}.${getter.metadata.name}(it as ${getter.kotlinParameterTypes.single()}) },")
+                        appendLine("          set = { instance, value -> ${candidate.className}.${setter.metadata.name}(instance as ${setter.kotlinParameterTypes[0]}, value as ${setter.kotlinParameterTypes[1]}) },")
+                        appendLine("        ),")
+                    }
                 }
                 appendLine("      ),")
                 appendLine("    ),")
@@ -524,7 +552,10 @@ object KotlinWinRTAuthoringScannerCli {
 
     private fun parseSource(source: Path): KotlinLightSource {
         ensureKotlinApplicationEnvironment()
-        val text = source.readText()
+        // KotlinLightParser receives the LF-normalized text used by Kotlin's
+        // source loader. Raw CRLF otherwise splits multiline property accessors
+        // into error nodes, losing setter visibility and other member syntax.
+        val text = source.readText().replace("\r\n", "\n").replace('\r', '\n')
         val tree = KotlinLightParser.buildLightTree(
             text,
             InMemoryKtSourceFile(source.name, source.toAbsolutePath().toString(), text),
@@ -689,6 +720,7 @@ object KotlinWinRTAuthoringScannerCli {
                 val parsed = WinRTTypeRef.fromDisplayName(raw.trim().removeSuffix("?"))
                 val arguments = parsed.typeArguments.map { resolve(it.typeName) }
                 val name = parsed.qualifiedName ?: parsed.typeName
+                if (isWinRTVoidTypeName(name.removePrefix("kotlin."))) return WinRTTypeRef.named("System.Void")
                 if (name == "Array" || name == "kotlin.Array") {
                     require(arguments.size == 1) { "XAML property Array requires one element type: $raw" }
                     return WinRTTypeRef.array(arguments.single())
@@ -718,15 +750,28 @@ object KotlinWinRTAuthoringScannerCli {
                     WinRTTypeRef.named("Windows.Foundation.IReference`1", listOf(result)) else result
             }
             val body = classNode.children().firstOrNull { it.tokenType == KtNodeTypes.CLASS_BODY }
+            val companions = body?.children().orEmpty().filter { it.tokenType == KtNodeTypes.OBJECT_DECLARATION &&
+                hasModifier(it, KtTokens.COMPANION_KEYWORD) }
+            val staticProperties = companions.flatMap { companion ->
+                companion.children().firstOrNull { it.tokenType == KtNodeTypes.CLASS_BODY }?.children().orEmpty()
+                    .filter { it.tokenType == KtNodeTypes.PROPERTY }
+            }
+            val dependencyPropertyNames = (staticProperties + if (isObjectDeclaration(classNode))
+                body?.children().orEmpty().filter { it.tokenType == KtNodeTypes.PROPERTY } else emptyList()).mapNotNull { property ->
+                if (property.children().firstOrNull { it.tokenType == KtNodeTypes.TYPE_REFERENCE }?.let(::nodeText)?.substringAfterLast('.') != "DependencyProperty") null
+                else property.descendants().dropWhile { it.tokenType != KtTokens.VAL_KEYWORD && it.tokenType != KtTokens.VAR_KEYWORD }
+                    .drop(1).firstOrNull { it.tokenType == KtTokens.IDENTIFIER }?.let(::nodeText)
+            }.toSet()
             val constructorProperties = classNode.children().filter { it.tokenType == KtNodeTypes.PRIMARY_CONSTRUCTOR }
                 .flatMap { it.descendantsOfType(KtNodeTypes.VALUE_PARAMETER) }
                 .filter { it.children().any { child -> child.tokenType == KtTokens.VAL_KEYWORD || child.tokenType == KtTokens.VAR_KEYWORD } }
-            val properties = (body?.children().orEmpty().filter { it.tokenType == KtNodeTypes.PROPERTY } + constructorProperties)
-                .mapNotNull { property ->
+            val properties = (body?.children().orEmpty().filter { it.tokenType == KtNodeTypes.PROPERTY }
+                .map { it to isObjectDeclaration(classNode) } + constructorProperties.map { it to false } + staticProperties.map { it to true })
+                .mapNotNull { (property, isStatic) ->
                     val private = hasModifier(property, KtTokens.PRIVATE_KEYWORD, KtTokens.PROTECTED_KEYWORD)
                     val typeNode = property.children().firstOrNull {
                         it.tokenType == KtNodeTypes.TYPE_REFERENCE
-                    } ?: if (private) return@mapNotNull null else error(
+                    } ?: if (private || isStatic) return@mapNotNull null else error(
                         "Public Kotlin XAML property in ${className(classNode)} requires an explicit type " +
                             "so XamlCompiler pass 1 can resolve it before Kotlin semantic compilation")
                     val name = property.descendants().dropWhile {
@@ -735,7 +780,7 @@ object KotlinWinRTAuthoringScannerCli {
                         ?: error("XAML property declaration is missing a name")
                     val setter = property.children().firstOrNull { accessor ->
                         accessor.tokenType == KtNodeTypes.PROPERTY_ACCESSOR &&
-                            accessor.descendants().any { it.tokenType == KtTokens.SET_KEYWORD }
+                            accessor.children().any { it.tokenType == KtTokens.SET_KEYWORD }
                     }
                     val mutable = property.descendants().any { it.tokenType == KtTokens.VAR_KEYWORD }
                     val rawType = nodeText(typeNode).trim()
@@ -743,7 +788,8 @@ object KotlinWinRTAuthoringScannerCli {
                     XamlSourceProperty(WinRTXamlApplicationProperty(name, resolved,
                         isReadOnly = !mutable || setter?.let {
                             hasModifier(it, KtTokens.PRIVATE_KEYWORD, KtTokens.PROTECTED_KEYWORD)
-                        } == true, isPublic = !private), rawType)
+                        } == true, isPublic = !private, isStatic = isStatic,
+                        isDependencyProperty = !isStatic && "${name}Property" in dependencyPropertyNames), rawType)
                 }
             val modifier = classNode.children().firstOrNull { it.tokenType == KtNodeTypes.MODIFIER_LIST }
                 ?.let(::nodeText).orEmpty()
@@ -771,8 +817,33 @@ object KotlinWinRTAuthoringScannerCli {
                     }
                     WinRTXamlApplicationEvent(name.removePrefix("add"), type)
                 }
+            val methods = (listOf(classNode) + companions).flatMap { owner ->
+                owner.children().firstOrNull { it.tokenType == KtNodeTypes.CLASS_BODY }?.children().orEmpty()
+                    .filter { it.tokenType == KtNodeTypes.FUN &&
+                        !hasModifier(it, KtTokens.OVERRIDE_KEYWORD, KtTokens.SUSPEND_KEYWORD) &&
+                        it.children().none { child -> child.tokenType == KtNodeTypes.TYPE_PARAMETER_LIST || child.tokenType == KtTokens.DOT } }
+                    .mapNotNull { function ->
+                        val name = function.children().firstOrNull { it.tokenType == KtTokens.IDENTIFIER }?.let(::nodeText)
+                            ?: return@mapNotNull null
+                        if (events.any { name == "add${it.name}" || name == "remove${it.name}" }) return@mapNotNull null
+                        val parameters = function.children().firstOrNull { it.tokenType == KtNodeTypes.VALUE_PARAMETER_LIST }
+                            ?.children().orEmpty().filter { it.tokenType == KtNodeTypes.VALUE_PARAMETER }
+                        if (parameters.any { hasModifier(it, KtTokens.VARARG_KEYWORD) }) return@mapNotNull null
+                        val rawParameters = parameters.map { parameter ->
+                            parameter.children().firstOrNull { it.tokenType == KtNodeTypes.TYPE_REFERENCE }?.let(::nodeText)
+                                ?: return@mapNotNull null
+                        }
+                        val rawReturn = function.children().firstOrNull { it.tokenType == KtNodeTypes.TYPE_REFERENCE }?.let(::nodeText)
+                            ?: if (function.children().any { it.tokenType == KtNodeTypes.BLOCK }) "Unit" else return@mapNotNull null
+                        runCatching {
+                            XamlSourceMethod(WinRTXamlApplicationMethod(name, resolve(rawReturn), rawParameters.map(::resolve),
+                                isStatic = isObjectDeclaration(owner),
+                                isPublic = !hasModifier(function, KtTokens.PRIVATE_KEYWORD, KtTokens.PROTECTED_KEYWORD)), rawReturn, rawParameters)
+                        }.getOrNull()
+                    }
+            }
             return XamlSourceMembers(WinRTXamlApplicationTypeMembers(
-                properties.map(XamlSourceProperty::metadata), contentProperty, events), properties)
+                properties.map(XamlSourceProperty::metadata), contentProperty, events, methods.map(XamlSourceMethod::metadata)), properties, methods)
         }
 
         fun isEffectivelyAuthorableClass(classNode: LighterASTNode): Boolean =

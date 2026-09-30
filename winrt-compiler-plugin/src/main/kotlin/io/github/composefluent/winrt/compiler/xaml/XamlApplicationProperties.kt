@@ -8,6 +8,7 @@ import org.jetbrains.kotlin.ir.declarations.*
 import org.jetbrains.kotlin.ir.symbols.UnsafeDuringIrConstructionAPI
 import org.jetbrains.kotlin.ir.types.*
 import org.jetbrains.kotlin.ir.util.isNullable
+import org.jetbrains.kotlin.ir.util.companionObject
 
 /** Public property visibility follows CsWinRT WinRTTypeWriter.AddPropertyDeclaration.
  * The temporary schema also describes representable private x:Bind inputs; generated
@@ -24,6 +25,7 @@ internal fun xamlApplicationProperties(
 
     fun resolve(type: IrType): WinRTTypeRef {
         val name = requireNotNull(type.classFqName?.asString()) { "XAML property requires a concrete type: $type" }
+        if (isWinRTVoidTypeName(name.removePrefix("kotlin."))) return WinRTTypeRef.named("System.Void")
         val arguments = (type as? IrSimpleType)?.arguments.orEmpty().map {
             resolve(requireNotNull(it.typeOrNull) { "XAML property cannot use a star-projected type: $type" })
         }
@@ -47,19 +49,28 @@ internal fun xamlApplicationProperties(
             WinRTTypeRef.named("Windows.Foundation.IReference`1", listOf(result)) else result
     }
 
-    val properties = klass.declarations.filterIsInstance<IrProperty>()
-        .filter { it.origin == IrDeclarationOrigin.DEFINED && it.getter != null &&
-            it.getter?.dispatchReceiverParameter != null &&
-            it.getter!!.parameters.none { parameter ->
+    val owners = listOf(klass) + listOfNotNull(klass.companionObject())
+    val dependencyPropertyNames = owners.filter { it.kind == org.jetbrains.kotlin.descriptors.ClassKind.OBJECT }
+        .flatMap { it.declarations.filterIsInstance<IrProperty>() }
+        .filter { it.getter?.returnType?.classFqName?.asString() == "microsoft.ui.xaml.DependencyProperty" }
+        .mapTo(mutableSetOf()) { it.name.asString() }
+    val properties = owners.flatMap { owner -> owner.declarations.filterIsInstance<IrProperty>().map { owner to it } }
+        .filter { (_, property) -> property.origin == IrDeclarationOrigin.DEFINED && property.getter != null &&
+            property.getter?.dispatchReceiverParameter != null &&
+            property.getter!!.parameters.none { parameter ->
                 parameter.kind == IrParameterKind.ExtensionReceiver || parameter.kind == IrParameterKind.Context
             } }
-        .sortedBy { it.name.asString() }
-        .mapNotNull { property ->
+        .sortedBy { it.second.name.asString() }
+        .mapNotNull { (owner, property) ->
             val public = visible(property.getter)
-            val type = if (public) resolve(property.getter!!.returnType) else
+            val static = owner.kind == org.jetbrains.kotlin.descriptors.ClassKind.OBJECT
+            val type = if (public && !static) resolve(property.getter!!.returnType) else
                 runCatching { resolve(property.getter!!.returnType) }.getOrNull() ?: return@mapNotNull null
+            if (isWinRTVoidTypeName(type.typeName)) return@mapNotNull null
             WinRTXamlApplicationProperty(property.name.asString(), type,
-                isReadOnly = property.setter == null || (public && !visible(property.setter)), isPublic = public)
+                isReadOnly = property.setter == null || (public && !visible(property.setter)), isPublic = public,
+                isStatic = static,
+                isDependencyProperty = owner === klass && "${property.name.asString()}Property" in dependencyPropertyNames)
         }
     val events = klass.declarations.filterIsInstance<IrSimpleFunction>()
         .filter { visible(it) && it.overriddenSymbols.isEmpty() && it.name.asString().startsWith("add") &&
@@ -73,5 +84,19 @@ internal fun xamlApplicationProperties(
             } ?: return@mapNotNull null
             WinRTXamlApplicationEvent(name, resolve(parameter.type))
         }
-    return WinRTXamlApplicationTypeMembers(properties = properties, events = events)
+    val methods = (listOf(klass) + listOfNotNull(klass.companionObject())).flatMap { owner ->
+        owner.declarations.filterIsInstance<IrSimpleFunction>()
+            .filter { it.origin == IrDeclarationOrigin.DEFINED && it.overriddenSymbols.isEmpty() &&
+                !it.isSuspend && it.typeParameters.isEmpty() &&
+                it.parameters.none { parameter -> parameter.kind == IrParameterKind.ExtensionReceiver ||
+                    parameter.kind == IrParameterKind.Context || parameter.varargElementType != null } &&
+                events.none { event -> it.name.asString() in listOf("add${event.name}", "remove${event.name}") } }
+            .mapNotNull { function -> runCatching {
+                WinRTXamlApplicationMethod(function.name.asString(), resolve(function.returnType),
+                    function.parameters.filter { it.kind == IrParameterKind.Regular }.map { resolve(it.type) },
+                    isStatic = owner.kind == org.jetbrains.kotlin.descriptors.ClassKind.OBJECT,
+                    isPublic = visible(function))
+            }.getOrNull() }
+    }
+    return WinRTXamlApplicationTypeMembers(properties = properties, events = events, methods = methods)
 }

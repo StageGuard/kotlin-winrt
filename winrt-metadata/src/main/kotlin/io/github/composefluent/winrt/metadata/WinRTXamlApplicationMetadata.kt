@@ -6,6 +6,8 @@ data class WinRTXamlApplicationProperty(
     val type: WinRTTypeRef,
     val isReadOnly: Boolean = false,
     val isPublic: Boolean = true,
+    val isStatic: Boolean = false,
+    val isDependencyProperty: Boolean = false,
 ) {
     init { require(name.isNotBlank()) }
 }
@@ -15,10 +17,21 @@ data class WinRTXamlApplicationEvent(val name: String, val handlerType: WinRTTyp
     init { require(name.isNotBlank()) }
 }
 
+/** Temporary CLR method signatures for x:Bind and static attached accessors.
+ * Calls remain typed Kotlin IR; this does not publish component ABI methods. */
+data class WinRTXamlApplicationMethod(
+    val name: String,
+    val returnType: WinRTTypeRef,
+    val parameterTypes: List<WinRTTypeRef> = emptyList(),
+    val isStatic: Boolean = false,
+    val isPublic: Boolean = true,
+)
+
 data class WinRTXamlApplicationTypeMembers(
     val properties: List<WinRTXamlApplicationProperty> = emptyList(),
     val contentProperty: String? = null,
     val events: List<WinRTXamlApplicationEvent> = emptyList(),
+    val methods: List<WinRTXamlApplicationMethod> = emptyList(),
 ) {
     init {
         require(properties.map { it.name }.distinct().size == properties.size)

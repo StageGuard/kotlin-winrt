@@ -32,6 +32,7 @@ class WinRTXamlMemberDefinition(
     val set: ((Any, Any?) -> Unit)? = null,
     val isDependencyProperty: Boolean = false,
     val collection: WinRTXamlCollectionDefinition? = null,
+    val isAttachable: Boolean = false,
 ) {
     init { require(name.isNotBlank() && typeName.isNotBlank()) }
 }

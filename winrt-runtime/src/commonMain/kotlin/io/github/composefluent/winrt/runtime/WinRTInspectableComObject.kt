@@ -609,6 +609,7 @@ internal class WinRTInspectableComObject(
         method.hostHandler?.invoke(this, managedValue, rawArguments)
             ?: method.handler(managedValue, rawArguments)
     }.getOrElse { error ->
+        trace { "Invoke failed interface=$interfaceId methodIndex=$methodIndex runtimeClassName=$runtimeClassName\n${error.stackTraceToString()}" }
         platformSetErrorInfo(error)
         platformHResultFromThrowable(error).value
     }

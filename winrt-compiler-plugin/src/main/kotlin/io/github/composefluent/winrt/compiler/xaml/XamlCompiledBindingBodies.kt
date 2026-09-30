@@ -49,9 +49,10 @@ internal class XamlCompiledBindingBodies(
     ) = with(builder) {
         val location = "${page.resourcePath}:${binding.location.line}:${binding.location.column}"
         val owner = projection(binding.declaringTypeName)
-        val setter = if (binding.isLoad) null else if (binding.isAttachable) requireNotNull(owner.companionObject()).functions.single {
-            it.name.asString() == "set${binding.name}"
-        } else requireNotNull(property(owner, binding.name)?.setter) {
+        val staticOwner = if (owner.kind == ClassKind.OBJECT) owner else owner.companionObject()
+        val setter = if (binding.isLoad) null else if (binding.isAttachable)
+            functions(requireNotNull(staticOwner), "Set${binding.name}").single()
+        else requireNotNull(property(owner, binding.name)?.setter) {
             "$location: no setter for ${binding.declaringTypeName}.${binding.name}"
         }
         val targetType = if (binding.isLoad) pluginContext.irBuiltIns.booleanType else requireNotNull(setter).parameters.last { it.kind == IrParameterKind.Regular }.type
@@ -73,7 +74,7 @@ internal class XamlCompiledBindingBodies(
             fun IrBuilderWithScope.assignment(): IrExpression = if (binding.isLoad)
                 requireNotNull(loadAssignment)(this, irGet(assignedValue)) else irCall(requireNotNull(setter).symbol).apply {
                     if (binding.isAttachable) {
-                        dispatchReceiver = irGetObject(requireNotNull(owner.companionObject()).symbol)
+                        dispatchReceiver = irGetObject(requireNotNull(staticOwner).symbol)
                         arguments[1] = target(); arguments[2] = convert(irGet(assignedValue), targetType, this@assignment, location)
                     } else { dispatchReceiver = target(); arguments[1] = convert(irGet(assignedValue), targetType, this@assignment, location) }
             }
@@ -361,7 +362,9 @@ internal class XamlCompiledBindingBodies(
 
     private fun dependencyProperty(klass: IrClass, name: String, visited: MutableSet<IrClass> = mutableSetOf()): IrSimpleFunction? {
         if (!visited.add(klass)) return null
-        klass.companionObject()?.let { companion -> property(companion, "${name.replaceFirstChar(Char::lowercase)}Property")?.getter?.let { return it } }
+        (if (klass.kind == ClassKind.OBJECT) klass else klass.companionObject())?.let { companion ->
+            (property(companion, "${name}Property") ?: property(companion, "${name.replaceFirstChar(Char::lowercase)}Property"))?.getter?.let { return it }
+        }
         return klass.superTypes.mapNotNull { it.classOrNull?.owner }.firstNotNullOfOrNull { dependencyProperty(it, name, visited) }
     }
 

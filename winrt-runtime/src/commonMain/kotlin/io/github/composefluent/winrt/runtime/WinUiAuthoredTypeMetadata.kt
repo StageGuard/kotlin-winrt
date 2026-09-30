@@ -178,7 +178,7 @@ internal object WinUiAuthoredTypeMetadata {
             interfaceDefinitions = listOf(WinRTInspectableInterfaceDefinition(
                 interfaceId = WinUiXamlInterfaceIds.IXamlMember,
                 methods = listOf(
-                    output { PlatformAbi.writeInt8(it, 0) }, // IsAttachable
+                    output { PlatformAbi.writeInt8(it, if (member.isAttachable) 1 else 0) }, // IsAttachable
                     output { PlatformAbi.writeInt8(it, if (member.isDependencyProperty) 1 else 0) },
                     output { PlatformAbi.writeInt8(it, if (member.set == null) 1 else 0) },
                     output { PlatformAbi.writePointer(it, HString.create(member.name).handle) },
