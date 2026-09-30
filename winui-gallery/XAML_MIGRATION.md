@@ -118,7 +118,7 @@ examples and activates the window; interaction and Native checks remain.
 | Slider | BasicInput | [SliderPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/basicinput/SliderPage.kt) | 4 | Pending |
 | SplitButton | BasicInput | [SplitButtonPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/basicinput/SplitButtonPage.kt) | 2 | Pending |
 | ToggleButton | BasicInput | [ToggleButtonPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/basicinput/ToggleButtonPage.kt) | 1 | Shared XAML example with separate source file; JVM native state/event/disable checks passed; visual and Native checks pending |
-| ToggleSplitButton | BasicInput | [ToggleSplitButtonPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/basicinput/ToggleSplitButtonPage.kt) | 1 | Pending |
+| ToggleSplitButton | BasicInput | [ToggleSplitButtonPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/basicinput/ToggleSplitButtonPage.kt) | 1 | Original XAML retained apart from namespace mapping and unused WebViewHeight attribute; separate sample and Kotlin list-formatting handlers; JVM native page load passed; editing interaction and Native checks pending |
 | ToggleSwitch | BasicInput | [ToggleSwitchPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/basicinput/ToggleSwitchPage.kt) | 2 | Two shared XAML examples with separate source files; JVM native state/event/source checks passed; visual and Native checks pending |
 | FlipView | Collections | [FlipViewPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/collections/FlipViewPage.kt) | 3 | Pending |
 | GridView | Collections | [GridViewPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/collections/GridViewPage.kt) | 3 | Pending |
@@ -137,7 +137,7 @@ examples and activates the window; interaction and Native checks remain.
 | Iconography | DesignItem | [IconographyPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/design/IconographyPage.kt) | 0 | Pending |
 | Spacing | DesignItem | [SpacingPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/design/SpacingPage.kt) | 0 | Pending |
 | Typography | DesignItem | [TypographyPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/design/TypographyPage.kt) | 1 | Pending |
-| ContentDialog | DialogsAndFlyouts | [ContentDialogPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/dialogsandflyouts/ContentDialogPage.kt) | 2 | Pending |
+| ContentDialog | DialogsAndFlyouts | [ContentDialogPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/dialogsandflyouts/ContentDialogPage.kt) | 2 | Original page and two independent dialog/content XAML classes preserved apart from namespace mapping; two separate samples; JVM native page load passed; dialog activation and Native checks pending |
 | Flyout | DialogsAndFlyouts | [FlyoutPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/dialogsandflyouts/FlyoutPage.kt) | 1 | Original XAML and sample text preserved apart from namespace mapping; JVM native page load passed; interaction, visual and Native checks pending |
 | Popup | DialogsAndFlyouts | [PopupPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/dialogsandflyouts/PopupPage.kt) | 1 | Pending |
 | TeachingTip | DialogsAndFlyouts | [TeachingTipPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/dialogsandflyouts/TeachingTipPage.kt) | 3 | Pending |
@@ -146,7 +146,7 @@ examples and activates the window; interaction and Native checks remain.
 | CustomXamlConditionals | FundamentalsItem | [CustomXamlConditionalsPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/fundamentals/CustomXamlConditionalsPage.kt) | 3 | Pending |
 | ScratchPad | FundamentalsItem | [ScratchPadPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/fundamentals/ScratchPadPage.kt) | 0 | Pending |
 | Templates | FundamentalsItem | [TemplatesPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/fundamentals/TemplatesPage.kt) | 3 | Pending |
-| XamlResources | FundamentalsItem | [XamlResourcesPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/fundamentals/XamlResourcesPage.kt) | 3 | Pending |
+| XamlResources | FundamentalsItem | [XamlResourcesPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/fundamentals/XamlResourcesPage.kt) | 3 | Original resource dictionaries and three-example XAML retained apart from namespace mapping and C# explanatory text translated to Kotlin; three separate samples; JVM native page load and resource rendering passed; theme interaction and Native checks pending |
 | XamlStyles | FundamentalsItem | [XamlStylesPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/fundamentals/XamlStylesPage.kt) | 2 | Original XAML and two sample texts preserved apart from namespace mapping; JVM native page load passed; visual and Native checks pending |
 | Border | Layout | [BorderPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/layout/BorderPage.kt) | 1 | Pending |
 | Canvas | Layout | [CanvasPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/layout/CanvasPage.kt) | 1 | Pending |
@@ -161,16 +161,16 @@ examples and activates the window; interaction and Native checks remain.
 | CaptureElementPreview | Media | [CaptureElementPreviewPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/media/CaptureElementPreviewPage.kt) | 1 | Pending |
 | Image | Media | [ImagePage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/media/ImagePage.kt) | 6 | Pending |
 | MapControl | Media | [MapControlPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/media/MapControlPage.kt) | 1 | Pending |
-| MediaPlayerElement | Media | [MediaPlayerElementPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/media/MediaPlayerElementPage.kt) | 2 | Pending |
+| MediaPlayerElement | Media | [MediaPlayerElementPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/media/MediaPlayerElementPage.kt) | 2 | Original two-example XAML preserved apart from namespace mapping; separate samples and Kotlin picker/player lifecycle; JVM native page load passed; playback/picker interaction and Native checks pending |
 | PersonPicture | Media | [PersonPicturePage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/media/PersonPicturePage.kt) | 1 | Pending |
-| Sound | Media | [SoundPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/media/SoundPage.kt) | 3 | Pending |
+| Sound | Media | [SoundPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/media/SoundPage.kt) | 3 | Original three-example XAML preserved apart from namespace mapping; separate samples and Kotlin sound handlers; JVM native page load passed; audio interaction and Native checks pending |
 | WebView2 | Media | [WebView2Page.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/media/WebView2Page.kt) | 1 | Original XAML and sample text preserved apart from namespace mapping and one trailing space; JVM native page load passed; remote content and Native checks pending |
 | AppBarButton | MenusAndToolbars | [AppBarButtonPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/menusandtoolbars/AppBarButtonPage.kt) | 6 | Original XAML and six sample texts preserved apart from namespace mapping; JVM native page load passed; interaction and Native checks pending |
 | AppBarSeparator | MenusAndToolbars | [AppBarSeparatorPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/menusandtoolbars/AppBarSeparatorPage.kt) | 1 | Original XAML and sample text preserved apart from namespace mapping; JVM native page load passed; visual and Native checks pending |
 | AppBarToggleButton | MenusAndToolbars | [AppBarToggleButtonPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/menusandtoolbars/AppBarToggleButtonPage.kt) | 4 | Original XAML and four sample texts preserved apart from namespace mapping; JVM native page load passed; interaction and Native checks pending |
 | CommandBar | MenusAndToolbars | [CommandBarPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/menusandtoolbars/CommandBarPage.kt) | 1 | Pending |
-| CommandBarFlyout | MenusAndToolbars | [CommandBarFlyoutPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/menusandtoolbars/CommandBarFlyoutPage.kt) | 1 | Pending |
-| MenuBar | MenusAndToolbars | [MenuBarPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/menusandtoolbars/MenuBarPage.kt) | 3 | Pending |
+| CommandBarFlyout | MenusAndToolbars | [CommandBarFlyoutPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/menusandtoolbars/CommandBarFlyoutPage.kt) | 1 | Original XAML preserved apart from namespace mapping; independent sample and Kotlin handlers; JVM native page load passed; menu interaction and Native checks pending |
+| MenuBar | MenusAndToolbars | [MenuBarPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/menusandtoolbars/MenuBarPage.kt) | 3 | Original three-example XAML and separate sample texts preserved apart from namespace mapping; JVM native page load passed; keyboard/menu interaction and Native checks pending |
 | MenuFlyout | MenusAndToolbars | [MenuFlyoutPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/menusandtoolbars/MenuFlyoutPage.kt) | 7 | Pending |
 | StandardUICommand | MenusAndToolbars | [StandardUICommandPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/menusandtoolbars/StandardUICommandPage.kt) | 1 | Pending |
 | SwipeControl | MenusAndToolbars | [SwipeControlPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/menusandtoolbars/SwipeControlPage.kt) | 5 | Pending |
@@ -198,7 +198,7 @@ examples and activates the window; interaction and Native checks remain.
 | SemanticZoom | Scrolling | [SemanticZoomPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/scrolling/SemanticZoomPage.kt) | 1 | Pending |
 | AppNotification | Shell | [AppNotificationPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/shell/AppNotificationPage.kt) | 5 | Pending |
 | BadgeNotificationManager | Shell | [BadgeNotificationManagerPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/shell/BadgeNotificationManagerPage.kt) | 2 | Pending |
-| JumpList | Shell | [JumpListPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/shell/JumpListPage.kt) | 2 | Pending |
+| JumpList | Shell | [JumpListPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/shell/JumpListPage.kt) | 2 | Original two-example XAML retained with named support-gating controls; sample logos use existing package assets; JVM native page load passed; shell interaction and Native checks pending |
 | InfoBadge | StatusAndInfo | [InfoBadgePage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/statusandinfo/InfoBadgePage.kt) | 4 | Pending |
 | InfoBar | StatusAndInfo | [InfoBarPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/statusandinfo/InfoBarPage.kt) | 3 | Pending |
 | ProgressBar | StatusAndInfo | [ProgressBarPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/statusandinfo/ProgressBarPage.kt) | 2 | Pending |
@@ -216,7 +216,7 @@ examples and activates the window; interaction and Native checks remain.
 | Clipboard | System | [ClipboardPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/system/ClipboardPage.kt) | 10 | Pending |
 | ContentIsland | System | [ContentIslandPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/system/ContentIslandPage.kt) | 1 | Pending |
 | StoragePickers | System | [StoragePickersPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/system/StoragePickersPage.kt) | 5 | Pending |
-| AutoSuggestBox | Text | [AutoSuggestBoxPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/text/AutoSuggestBoxPage.kt) | 2 | Pending |
+| AutoSuggestBox | Text | [AutoSuggestBoxPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/text/AutoSuggestBoxPage.kt) | 2 | Original two-example XAML preserved apart from namespace mapping; separate Kotlin/XAML sample texts; Kotlin search uses GalleryCatalog; JVM native page load passed; query interaction, visual and Native checks pending |
 | NumberBox | Text | [NumberBoxPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/text/NumberBoxPage.kt) | 3 | Pending |
 | PasswordBox | Text | [PasswordBoxPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/text/PasswordBoxPage.kt) | 3 | Original XAML preserved apart from namespace mapping; three separate samples and Kotlin handlers; JVM native page load passed; interaction, visual and Native checks pending |
 | RichEditBox | Text | [RichEditBoxPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/text/RichEditBoxPage.kt) | 5 | Pending |
@@ -230,9 +230,9 @@ examples and activates the window; interaction and Native checks remain.
 | --- | --- | --- |
 | Application resources and startup | Main.kt / GalleryApplication | Pending |
 | Main window and navigation | MainWindow.kt / GalleryNavigationHost.kt | Pending |
-| Page headers and sample frames | ControlExample.xaml / ControlExample.kt / GalleryTheme.kt | Eight BasicInput routes plus AppBarButton, AppBarSeparator, AppBarToggleButton, Pivot, CalendarDatePicker, DatePicker, TimePicker, ToolTip, Flyout, TextBox, PasswordBox, WebView2, XamlStyles, RelativePanel and XamlUICommand use shared XAML control; original private components and other routes pending |
+| Page headers and sample frames | ControlExample.xaml / ControlExample.kt / GalleryTheme.kt | Eight BasicInput routes plus AppBarButton, AppBarSeparator, AppBarToggleButton, Pivot, CalendarDatePicker, DatePicker, TimePicker, ToolTip, Flyout, TextBox, PasswordBox, WebView2, XamlStyles, RelativePanel, XamlUICommand, AutoSuggestBox, CommandBarFlyout, MenuBar, ContentDialog, MediaPlayerElement, Sound, JumpList, ToggleSplitButton and XamlResources use shared XAML control; original private components and other routes pending |
 | Settings and All routes | GallerySettingsPage.kt / navigation host | Pending |
-| Example source display and copy | processor / code-document / code UI | SampleDefinition selects separate XAML/Kotlin files on twenty-three routes; remaining routes pending |
+| Example source display and copy | processor / code-document / code UI | SampleDefinition selects separate XAML/Kotlin files on thirty-two routes; remaining routes pending |
 | Styles, dictionaries and templates | shared UI and relevant individual pages | Pending |
 
 This is the source inventory (122 existing annotated routes including Home). Visual baselines, feature prerequisites, and interaction acceptance remain to be captured before marking any route complete.
