@@ -32,6 +32,19 @@ internal class XamlPageBodies(private val index: WinRTXamlDeclarationIndex, priv
             // loading itself occurs only at the completed construction call boundary.
             klass.declarations.removeAll(properties.values.toSet())
             klass.declarations.addAll(0, properties.values)
+            // C#/C++ generate fields for x:Name. Kotlin exposes typed properties,
+            // whose default JVM getters would collide for firstName/FirstName or
+            // with inherited SDK getters. Keep their source names and give only
+            // these compiler-owned accessors a distinct platform method name.
+            pluginContext.referenceClass(ClassId.topLevel(FqName("kotlin.jvm.JvmName")))?.owner?.let { annotation ->
+                val constructor = annotation.constructors.single().symbol
+                properties.values.mapNotNull { it.getter }.forEach { getter ->
+                    val builder = DeclarationIrBuilder(pluginContext, getter.symbol)
+                    getter.annotations += builder.irAnnotation(constructor, emptyList()).apply {
+                        arguments[0] = builder.irString("getKotlinWinRTXaml_" + getter.correspondingPropertySymbol!!.owner.name.asString())
+                    }
+                }
+            }
             val functions = (listOf(xamlInitializeName, xamlConstructionName, xamlLoadName, xamlConnectName, xamlBindingName) +
                 if (page.hasCompiledBindings()) listOf(xamlUpdateBindingsName, xamlBindingsChangedName, xamlBindingsLoadingName,
                     xamlBindingsUnloadedName, xamlRefreshBindingsName) + page.bindBackNames() +
@@ -189,8 +202,8 @@ internal class XamlPageBodies(private val index: WinRTXamlDeclarationIndex, priv
                                     requireNotNull(properties.getValue(fieldName).backingField), irGet(target))
                             }
                             for (event in connection.events) {
-                                val handler = klass.functions.single { it.name.asString() == event.handlerName }
-                                val add = projection(event.declaringTypeName).functions.single {
+                                val handler = xamlIrFunctions(klass, event.handlerName).single()
+                                val add = (classes[event.declaringTypeName] ?: projection(event.declaringTypeName)).functions.single {
                                     it.name.asString() == "add${event.name}" && it.parameters.count { p -> p.kind == IrParameterKind.Regular } == 1
                                 }
                                 val delegateType = add.parameters.single { it.kind == IrParameterKind.Regular }.type
@@ -223,6 +236,18 @@ internal class XamlPageBodies(private val index: WinRTXamlDeclarationIndex, priv
                             for (event in connection.bindings.filter { it.isEvent && !connection.isTemplateChild }) {
                                 +XamlCompiledBindingBodies(pluginContext, classes).eventSubscription(this, klass, event,
                                     irGet(requireNotNull(connect.dispatchReceiverParameter)), irGet(target))
+                            }
+                            if (connection.canBeInstantiatedLater && !connection.isTemplateChild && page.hasCompiledBindings()) {
+                                val receiver = requireNotNull(connect.dispatchReceiverParameter)
+                                val bindingState = requireNotNull(properties.getValue(xamlBindingStateName.asString()).backingField)
+                                val stateType = requireNotNull(pluginContext.referenceClass(xamlBindingStateId)).owner
+                                +irIfThen(pluginContext.irBuiltIns.unitType,
+                                    irCall(stateType.functions.single { it.name.asString() == "connected" }).apply {
+                                        dispatchReceiver = irGetField(irGet(receiver), bindingState)
+                                        arguments[1] = irInt(connection.id)
+                                    }, irCall(function(xamlBindingsChangedName).symbol).apply {
+                                        dispatchReceiver = irGet(receiver); arguments[1] = irNull(); arguments[2] = irNull()
+                                    })
                             }
                             +irUnit()
                         })

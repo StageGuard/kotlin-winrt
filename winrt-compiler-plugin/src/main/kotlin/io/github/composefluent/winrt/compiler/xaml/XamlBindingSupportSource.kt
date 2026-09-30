@@ -28,32 +28,35 @@ internal fun writeXamlBindingSupportSource(root: Path) {
             private var dataContextHandlerRemoved = false
 
             init {
-                scope.connect(scopeId, target)
+                connect(scopeId, target)
                 if (!controlTemplate) {
                     root.dataContextChanged.add(::dataContextChanged)
                     DataTemplate.setExtensionInstance(root, this)
                 }
                 XamlBindingHelper.setDataTemplateComponent(root, this)
                 root.loading.add { _, _ -> scope.initialize(if (isControlTemplate) target else root.dataContext) }
-                root.unloaded.add { _, _ -> scope.recycle() }
+                root.unloaded.add { _, _ -> recycle() }
             }
 
             private fun dataContextChanged(sender: FrameworkElement, args: DataContextChangedEventArgs) {
                 scope.initialize(args.newValue)
             }
 
-            override fun connect(connectionId: Int, target: Any?) = scope.connect(connectionId, target)
+            override fun connect(connectionId: Int, target: Any?) {
+                scope.connect(connectionId, target)
+                if (scope.phaseOf(connectionId) != 0) XamlBindingHelper.suspendRendering(requireNotNull(target).asWinRT<UIElement>())
+            }
             override fun getBindingConnector(connectionId: Int, target: Any?): IComponentConnector? =
                 if (connectionId == scope.scopeId) this else
                     scope.createConnector(connectionId, target)?.asWinRT<IComponentConnector>()
 
             override fun processBindings(item: Any?, itemIndex: Int, phase: Int, nextPhase: WinRTOut<Int>) {
-                nextPhase.value = -1
-                if (!dataContextHandlerRemoved && !isControlTemplate) {
+                if (phase == 0 && !dataContextHandlerRemoved && !isControlTemplate) {
                     root.dataContextChanged.remove(::dataContextChanged)
                     dataContextHandlerRemoved = true
                 }
-                scope.initialize(item)
+                if (phase != 0) scope.phaseTargets(phase).forEach { XamlBindingHelper.resumeRendering(it.asWinRT<UIElement>()) }
+                nextPhase.value = scope.processBindings(item, phase)
             }
 
             override fun processBindings(arg: ContainerContentChangingEventArgs): Int {
@@ -65,7 +68,10 @@ internal fun writeXamlBindingSupportSource(root: Path) {
             override fun processBinding(phase: UInt): Boolean =
                 throw UnsupportedOperationException("Use IDataTemplateComponent.ProcessBindings")
             override fun resetTemplate() = recycle()
-            override fun recycle() = scope.recycle()
+            override fun recycle() {
+                scope.recycle()
+                scope.phasedTargets().forEach { XamlBindingHelper.suspendRendering(it.asWinRT<UIElement>()) }
+            }
         }
     """.trimIndent() + "\n")
 }

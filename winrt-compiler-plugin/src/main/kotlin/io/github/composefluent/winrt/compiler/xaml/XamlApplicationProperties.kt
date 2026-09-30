@@ -9,8 +9,9 @@ import org.jetbrains.kotlin.ir.symbols.UnsafeDuringIrConstructionAPI
 import org.jetbrains.kotlin.ir.types.*
 import org.jetbrains.kotlin.ir.util.isNullable
 
-/** Application schema follows CsWinRT WinRTTypeWriter.AddPropertyDeclaration's accessor visibility.
- * It is deliberately separate from component ABI export and generated x:Name fields.
+/** Public property visibility follows CsWinRT WinRTTypeWriter.AddPropertyDeclaration.
+ * The temporary schema also describes representable private x:Bind inputs; generated
+ * runtime registration filters them out. Component ABI export remains separate.
  */
 @OptIn(UnsafeDuringIrConstructionAPI::class)
 internal fun xamlApplicationProperties(
@@ -46,15 +47,31 @@ internal fun xamlApplicationProperties(
             WinRTTypeRef.named("Windows.Foundation.IReference`1", listOf(result)) else result
     }
 
-    return WinRTXamlApplicationTypeMembers(properties = klass.declarations.filterIsInstance<IrProperty>()
-        .filter { it.origin == IrDeclarationOrigin.DEFINED && visible(it.getter) &&
+    val properties = klass.declarations.filterIsInstance<IrProperty>()
+        .filter { it.origin == IrDeclarationOrigin.DEFINED && it.getter != null &&
             it.getter?.dispatchReceiverParameter != null &&
             it.getter!!.parameters.none { parameter ->
                 parameter.kind == IrParameterKind.ExtensionReceiver || parameter.kind == IrParameterKind.Context
             } }
         .sortedBy { it.name.asString() }
-        .map { property ->
-            WinRTXamlApplicationProperty(property.name.asString(), resolve(property.getter!!.returnType),
-                isReadOnly = !visible(property.setter))
-        })
+        .mapNotNull { property ->
+            val public = visible(property.getter)
+            val type = if (public) resolve(property.getter!!.returnType) else
+                runCatching { resolve(property.getter!!.returnType) }.getOrNull() ?: return@mapNotNull null
+            WinRTXamlApplicationProperty(property.name.asString(), type,
+                isReadOnly = property.setter == null || (public && !visible(property.setter)), isPublic = public)
+        }
+    val events = klass.declarations.filterIsInstance<IrSimpleFunction>()
+        .filter { visible(it) && it.overriddenSymbols.isEmpty() && it.name.asString().startsWith("add") &&
+            it.name.asString().length > 3 && it.name.asString()[3].isUpperCase() }
+        .mapNotNull { add ->
+            val name = add.name.asString().removePrefix("add")
+            val parameter = add.parameters.singleOrNull { it.kind == IrParameterKind.Regular } ?: return@mapNotNull null
+            val remove = klass.declarations.filterIsInstance<IrSimpleFunction>().singleOrNull {
+                visible(it) && it.name.asString() == "remove$name" &&
+                    it.parameters.singleOrNull { p -> p.kind == IrParameterKind.Regular }?.type == parameter.type
+            } ?: return@mapNotNull null
+            WinRTXamlApplicationEvent(name, resolve(parameter.type))
+        }
+    return WinRTXamlApplicationTypeMembers(properties = properties, events = events)
 }

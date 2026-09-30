@@ -99,7 +99,7 @@ private class XamlSemanticExport(
                 "XAML ${page.className}: requires same-directory, same-basename .kt and .xaml files"
             }
             require(klass.superTypes.any { type -> type.classFqName?.asString()?.let {
-                resolveIndexedWinRTTypeByProjectedName(it, types)?.qualifiedName
+                if (it in applicationTypes) it else resolveIndexedWinRTTypeByProjectedName(it, types)?.qualifiedName
             } == page.baseTypeName }) { "XAML ${page.className}: expected direct base ${page.baseTypeName}" }
             require(klass.declarations.filterIsInstance<IrConstructor>().any { constructor ->
                 constructor.visibility == org.jetbrains.kotlin.descriptors.DescriptorVisibilities.PUBLIC &&
@@ -114,7 +114,7 @@ private class XamlSemanticExport(
             applicationMembers[page.className] = xamlApplicationProperties(klass, types, applicationTypes)
                 .copy(contentProperty = contentProperty)
             val handlers = page.connections.flatMap { it.events }.map { it.handlerName }.distinct().sorted().map { name ->
-                val handler = requireNotNull(klass.declarations.filterIsInstance<IrSimpleFunction>().singleOrNull { it.name.asString() == name }) {
+                val handler = requireNotNull(xamlIrFunctions(klass, name).singleOrNull()) {
                     "XAML ${page.className}: missing or overloaded handler $name"
                 }
                 require(!handler.isSuspend && handler.typeParameters.isEmpty() &&
@@ -144,7 +144,8 @@ private class XamlSemanticExport(
                     "XAML application type ${type.qualifiedName} is missing from Kotlin semantic compilation"
                 }.first
                 authored += WinRTXamlApplicationTypeDescriptor(type.qualifiedName, type.baseTypeName,
-                    type.implementedInterfaces.map { it.interfaceName }, type.activation.isActivatable)
+                    type.implementedInterfaces.map { it.interfaceName }, type.activation.isActivatable,
+                    isSealed = klass.modality == org.jetbrains.kotlin.descriptors.Modality.FINAL)
                 applicationMembers[type.qualifiedName] = xamlApplicationProperties(klass, types, applicationTypes)
             }
         val symbols = buildJsonObject {

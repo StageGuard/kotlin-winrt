@@ -34,9 +34,8 @@ internal class XamlCompiledBindingBodies(
     private fun runtime(name: String) = pluginContext.referenceFunctions(
         CallableId(FqName("io.github.composefluent.winrt.runtime"), Name.identifier(name))).single()
     private fun method(klass: IrClass, name: Name) = klass.functions.single { it.name == name }
-    private fun property(klass: IrClass, name: String): IrProperty? =
-        klass.properties.firstOrNull { it.name.asString() == name } ?:
-        klass.properties.firstOrNull { it.name.asString() == name.replaceFirstChar(Char::lowercase) }
+    private fun property(klass: IrClass, name: String): IrProperty? = xamlIrProperty(klass, name)
+    private fun functions(klass: IrClass, name: String): List<IrSimpleFunction> = xamlIrFunctions(klass, name)
 
     private fun emitBinding(builder: IrStatementsBuilder<*>, klass: IrClass, page: WinRTXamlPageDeclaration,
         connection: WinRTXamlConnectionDeclaration, binding: WinRTXamlBindingDeclaration,
@@ -45,16 +44,22 @@ internal class XamlCompiledBindingBodies(
         changed: IrSimpleFunction, initial: IrExpression, back: IrSimpleFunction? = null,
         namedTargets: ((String, IrBuilderWithScope) -> IrExpression?)? = null,
         backDelegate: ((IrBuilderWithScope, IrType) -> IrExpression)? = null,
+        targetPresent: ((IrBuilderWithScope) -> IrExpression)? = null,
+        loadAssignment: ((IrBuilderWithScope, IrExpression) -> IrExpression)? = null,
     ) = with(builder) {
         val location = "${page.resourcePath}:${binding.location.line}:${binding.location.column}"
         val owner = projection(binding.declaringTypeName)
-        val setter = if (binding.isAttachable) requireNotNull(owner.companionObject()).functions.single {
+        val setter = if (binding.isLoad) null else if (binding.isAttachable) requireNotNull(owner.companionObject()).functions.single {
             it.name.asString() == "set${binding.name}"
         } else requireNotNull(property(owner, binding.name)?.setter) {
             "$location: no setter for ${binding.declaringTypeName}.${binding.name}"
         }
-        val targetType = setter.parameters.last { it.kind == IrParameterKind.Regular }.type
+        val targetType = if (binding.isLoad) pluginContext.irBuiltIns.booleanType else requireNotNull(setter).parameters.last { it.kind == IrParameterKind.Regular }.type
         val body = irBlock {
+            val stateClass = requireNotNull(pluginContext.referenceClass(xamlBindingStateId)).owner
+            +irCall(stateClass.functions.single { it.name.asString() == "trackPhase" }).apply {
+                dispatchReceiver = state(); arguments[1] = irInt(binding.phase)
+            }
             val source = irTemporary(evaluate(binding.expression, this, klass, root, targetType, namedTargets))
             val alternate = binding.targetNullValue ?: binding.fallbackValue
             val converted = if (binding.converter == null) irGet(source) else
@@ -63,13 +68,22 @@ internal class XamlCompiledBindingBodies(
                 irEquals(irGet(source), irNull(source.type)),
                 convert(evaluate(alternate, this, klass, root, targetType, namedTargets), targetType, this, location),
                 convert(converted, targetType, this, location)) else convert(converted, targetType, this, location)
-            val assignment = irCall(setter.symbol).apply {
-                if (binding.isAttachable) {
-                    dispatchReceiver = irGetObject(requireNotNull(owner.companionObject()).symbol)
-                    arguments[1] = target(); arguments[2] = value
-                } else { dispatchReceiver = target(); arguments[1] = value }
+            val skipNull = source.type.isNullable() && !targetType.isNullable() && alternate == null && binding.converter == null
+            val assignedValue = irTemporary(if (skipNull) irGet(source) else value)
+            fun IrBuilderWithScope.assignment(): IrExpression = if (binding.isLoad)
+                requireNotNull(loadAssignment)(this, irGet(assignedValue)) else irCall(requireNotNull(setter).symbol).apply {
+                    if (binding.isAttachable) {
+                        dispatchReceiver = irGetObject(requireNotNull(owner.companionObject()).symbol)
+                        arguments[1] = target(); arguments[2] = convert(irGet(assignedValue), targetType, this@assignment, location)
+                    } else { dispatchReceiver = target(); arguments[1] = convert(irGet(assignedValue), targetType, this@assignment, location) }
             }
-            if (source.type.isNullable() && !targetType.isNullable() && alternate == null && binding.converter == null)
+            val assignment = if (targetPresent == null || binding.isLoad) assignment() else irIfThenElse(
+                pluginContext.irBuiltIns.unitType, targetPresent(this), assignment(),
+                irCall(stateClass.functions.single { it.name.asString() == "defer" }).apply {
+                    dispatchReceiver = state(); arguments[1] = irInt(connection.id); arguments[2] = irString(binding.name)
+                    arguments[3] = lambda(this@irBlock, emptyList()) { nested, _ -> nested.assignment() }
+                })
+            if (skipNull)
                 +irIfThen(pluginContext.irBuiltIns.unitType, irNotEquals(irGet(source), irNull(source.type)), assignment)
             else +assignment
             if (binding.mode != "OneTime") {
@@ -87,7 +101,7 @@ internal class XamlCompiledBindingBodies(
                         irNotEquals(irGet(sourceObject), irNull(sourceObject.type)), subscribe)
                     else +subscribe
                 }
-                if (binding.mode == "TwoWay") {
+                if (binding.mode == "TwoWay") +irBlock {
                     val targetObject = irTemporary(target())
                     val dp = dependencyProperty(owner, binding.name)
                     if (binding.updateSourceTrigger == "LostFocus") +subscribeEvent(this, observerClass, observer(),
@@ -96,7 +110,8 @@ internal class XamlCompiledBindingBodies(
                         requireNotNull(dp) { "$location: TwoWay target ${binding.name} requires a dependency property or LostFocus trigger" }
                         +subscribeProperty(this, observerClass, observer(), state(), irGet(targetObject), dp, back ?: changed, backDelegate)
                     }
-                }
+                }.let { subscriptions -> if (targetPresent == null) subscriptions else
+                    irIfThen(pluginContext.irBuiltIns.unitType, targetPresent(this), subscriptions) }
             }
             +irUnit()
         }
@@ -110,6 +125,9 @@ internal class XamlCompiledBindingBodies(
         val bindingState = requireNotNull(property(scopeClass, "state")?.getter)
         val changed = scopeClass.functions.single { it.name.asString() == "changed" }
         val getTarget = scopeClass.functions.single { it.name.asString() == "target" }
+        val getOptionalTarget = scopeClass.functions.single { it.name.asString() == "targetOrNull" }
+        val isPhaseActive = scopeClass.functions.single { it.name.asString() == "isPhaseActive" }
+        val registerPhase = scopeClass.functions.single { it.name.asString() == "registerPhase" }
         val groups = page.connections.filter { it.isTemplateChild }.groupBy { it.scopeId }
             .filterValues { it.any { connection -> connection.isScopeRoot } }
         val writeBackIds = groups.values.flatten().flatMap { connection ->
@@ -138,8 +156,10 @@ internal class XamlCompiledBindingBodies(
                     val named: (String, IrBuilderWithScope) -> IrExpression? = { name, builder ->
                         connections.firstOrNull { it.elementName == name || it.fieldName == name }?.let { builder.target(scope, it) }
                     }
-                    for (connection in connections) for (binding in connection.bindings.filterNot { it.isEvent }) {
-                        emitBinding(this, klass, page, connection, binding,
+                    for (connection in connections) for (binding in connection.bindings.filterNot { it.isEvent }.sortedByDescending { it.isLoad }) {
+                        +irIfThen(pluginContext.irBuiltIns.unitType, irCall(isPhaseActive.symbol).apply {
+                            dispatchReceiver = irGet(scope); arguments[1] = irInt(binding.phase)
+                        }, irBlock { emitBinding(this, klass, page, connection, binding,
                             { source(scope, connections) }, { irGet(requireNotNull(update.dispatchReceiverParameter)) },
                             { target(scope, connection) },
                             { irCall(bindingState.symbol).apply { dispatchReceiver = irGet(scope) } },
@@ -149,7 +169,21 @@ internal class XamlCompiledBindingBodies(
                                     arguments[0] = irGet(scope)
                                     arguments[1] = irInt(writeBackIds.getValue(connection.id to binding.name))
                                 }, delegateType)
+                            } },
+                            targetPresent = if (!connection.canBeInstantiatedLater) null else { nested -> with(nested) {
+                                irNotEquals(irCall(getOptionalTarget.symbol).apply { dispatchReceiver = irGet(scope); arguments[1] = irInt(connection.id) }, irNull())
+                            } },
+                            loadAssignment = { nested, value -> loadElement(nested, connection, value,
+                                { nested.target(scope, connections.first { it.isScopeRoot }) },
+                                { nested.irCall(getOptionalTarget.symbol).apply { dispatchReceiver = nested.irGet(scope); arguments[1] = nested.irInt(connection.id) } }) { cleanup ->
+                                for (id in connection.children + connection.id) with(cleanup) {
+                                    +irCall(scopeClass.functions.single { it.name.asString() == "disconnect" }).apply {
+                                        dispatchReceiver = irGet(scope); arguments[1] = irInt(id)
+                                    }
+                                }
                             } })
+                            +irUnit()
+                        })
                     }
                     +irUnit()
                 })
@@ -180,6 +214,13 @@ internal class XamlCompiledBindingBodies(
                 dispatchReceiver = irGet(requireNotNull(connect.dispatchReceiverParameter))
                 arguments[1] = irGet(parameters[1]); arguments[2] = irGet(parameters[2])
             }
+            for ((id, connections) in groups) +irIfThen(pluginContext.irBuiltIns.unitType,
+                irEquals(irGet(parameters[1]), irInt(id)), irBlock {
+                    for (connection in connections.filter { it.phase != 0 }) +irCall(registerPhase.symbol).apply {
+                        dispatchReceiver = irGet(parameters[0]); arguments[1] = irInt(connection.id); arguments[2] = irInt(connection.phase)
+                    }
+                    +irUnit()
+                })
             +irWhen(pluginContext.irBuiltIns.unitType, mutableListOf()).apply {
                 for (connections in groups.values) for (connection in connections.filter { it.bindings.any { it.isEvent } }) {
                     branches += irBranch(irEquals(irGet(parameters[1]), irInt(connection.id)), irBlock {
@@ -211,13 +252,27 @@ internal class XamlCompiledBindingBodies(
         update.body = DeclarationIrBuilder(pluginContext, update.symbol).irBlockBody {
             val receiver = requireNotNull(update.dispatchReceiverParameter)
             val initial = update.parameters.single { it.kind == IrParameterKind.Regular }
-            for (connection in bindings) for (binding in connection.bindings.filterNot { it.isEvent }) {
+            for (connection in bindings) for (binding in connection.bindings.filterNot { it.isEvent }.sortedByDescending { it.isLoad }) {
                 emitBinding(this, klass, page, connection, binding,
                     { irGet(receiver) }, { irGet(receiver) },
                     { irCall(requireNotNull(properties.getValue(requireNotNull(connection.storageName())).getter).symbol).apply { dispatchReceiver = irGet(receiver) } },
                     { irGetField(irGet(receiver), state) }, klass, { irGet(receiver) }, method(klass, xamlBindingsChangedName),
                     irGet(initial),
-                    if (binding.mode == "TwoWay") method(klass, binding.bindBackName(connection)) else null)
+                    if (binding.mode == "TwoWay") method(klass, binding.bindBackName(connection)) else null,
+                    targetPresent = if (!connection.canBeInstantiatedLater) null else { nested -> with(nested) {
+                        val field = requireNotNull(properties.getValue(requireNotNull(connection.storageName())).backingField)
+                        irNotEquals(irGetField(irGet(receiver), field), irNull(field.type))
+                    } },
+                    loadAssignment = { nested, value -> loadElement(nested, connection, value,
+                        { nested.irGet(receiver) },
+                        { nested.irGetField(nested.irGet(receiver), requireNotNull(properties.getValue(requireNotNull(connection.storageName())).backingField)) }) { cleanup ->
+                        for (element in page.connections.filter { it.id == connection.id || it.id in connection.children }) {
+                            element.storageName()?.let { name -> with(cleanup) {
+                                val field = requireNotNull(properties.getValue(name).backingField)
+                                +irSetField(irGet(receiver), field, irNull(field.type))
+                            } }
+                        }
+                    } })
             }
         }
 
@@ -256,9 +311,33 @@ internal class XamlCompiledBindingBodies(
         if (page.hasTemplateScopes()) generateTemplateScopes(klass, page)
     }
 
+    private fun loadElement(builder: IrBuilderWithScope, connection: WinRTXamlConnectionDeclaration,
+        value: IrExpression, root: () -> IrExpression, current: () -> IrExpression,
+        disconnect: (IrStatementsBuilder<*>) -> Unit): IrExpression = with(builder) {
+        val framework = projection("Microsoft.UI.Xaml.FrameworkElement")
+        val helper = requireNotNull(projection("Microsoft.UI.Xaml.Markup.XamlMarkupHelper").companionObject())
+        val dependencyObject = projection("Microsoft.UI.Xaml.DependencyObject")
+        irIfThenElse(pluginContext.irBuiltIns.unitType, value,
+            irBlock {
+                +irCall(framework.functions.single { it.name.asString() == "findName" }).apply {
+                    dispatchReceiver = root(); arguments[1] = irString(requireNotNull(connection.elementName))
+                }
+                +irUnit()
+            }, irBlock {
+                val element = irTemporary(current())
+                disconnect(this)
+                +irIfThen(pluginContext.irBuiltIns.unitType, irNotEquals(irGet(element), irNull(element.type)),
+                    irCall(helper.functions.single { it.name.asString() == "unloadObject" }).apply {
+                        dispatchReceiver = irGetObject(helper.symbol)
+                        arguments[1] = convert(irGet(element), dependencyObject.defaultType, this@irBlock, "x:Load")
+                    })
+                +irUnit()
+            })
+    }
+
     fun lifecycleSubscription(builder: IrBuilderWithScope, klass: IrClass, page: WinRTXamlPageDeclaration,
         callback: IrSimpleFunction, receiver: IrExpression, loading: Boolean): IrExpression = with(builder) {
-        val window = page.baseTypeName == "Microsoft.UI.Xaml.Window"
+        val window = klass.defaultType.isSubtypeOfClass(projection("Microsoft.UI.Xaml.Window").symbol)
         val owner = projection(if (window) "Microsoft.UI.Xaml.Window" else "Microsoft.UI.Xaml.FrameworkElement")
         val event = if (window) { if (loading) "Activated" else "Closed" } else { if (loading) "Loading" else "Unloaded" }
         val add = owner.functions.single { it.name.asString() == "add$event" }
@@ -370,7 +449,7 @@ internal class XamlCompiledBindingBodies(
                     dispatchReceiver = body.irGet(parameters[0])
                 }, requireNotNull(dataType), body, binding.name)
             })
-            val functions = requireNotNull(source.type.classOrNull).owner.functions.filter { it.name.asString() == path.name }
+            val functions = functions(requireNotNull(source.type.classOrNull).owner, requireNotNull(path.name))
             val handler = functions.singleOrNull { it.parameters.count { p -> p.kind == IrParameterKind.Regular } == types.size }
                 ?: functions.singleOrNull { it.parameters.none { p -> p.kind == IrParameterKind.Regular } }
                 ?: error("Compiled event ${binding.name}: missing or ambiguous method ${path.name}")

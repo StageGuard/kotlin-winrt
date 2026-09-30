@@ -17,7 +17,7 @@ object WinRTPortableExecutableMetadataWriter {
     ) {
         writeXamlSchemaWinmd(assemblyName, runtimeClasses.map {
             WinRTXamlApplicationTypeDescriptor(it.runtimeClassName, it.baseRuntimeClassName,
-                it.interfaceNames, it.isActivatable)
+                it.interfaceNames, it.isActivatable, it.isSealed)
         }, members, outputFile, externalTypeAssemblies, valueTypeNames)
     }
 
@@ -34,7 +34,7 @@ object WinRTPortableExecutableMetadataWriter {
         Files.createDirectories(outputFile.parent)
         writeIfChanged(outputFile, WinmdBuilder(assemblyName, runtimeClasses.map {
             WinmdClass(it.runtimeClassName, it.baseRuntimeClassName, it.interfaceNames,
-                isActivatable = it.isActivatable)
+                isActivatable = it.isActivatable, isSealed = it.isSealed)
         },
             externalTypeAssemblies = externalTypeAssemblies, applicationMembers = members,
             valueTypeNames = valueTypeNames).build())
@@ -85,6 +85,7 @@ data class WinRTXamlApplicationTypeDescriptor(
     val baseRuntimeClassName: String? = null,
     val interfaceNames: List<String> = emptyList(),
     val isActivatable: Boolean = true,
+    val isSealed: Boolean = true,
 )
 
 private data class WinmdClass(
@@ -114,10 +115,15 @@ private class WinmdBuilder(
         applicationMembers[type.runtimeClassName]?.properties.orEmpty().sortedBy { it.name }
             .map { type.runtimeClassName to it }
     }
+    private val events = runtimeClasses.flatMap { type ->
+        applicationMembers[type.runtimeClassName]?.events.orEmpty().sortedBy { it.name }
+            .map { type.runtimeClassName to it }
+    }
+    private val eventTypeSpecs = events.map { it.second.handlerType }.filter { it.typeArguments.isNotEmpty() }.distinct()
     private fun hasApplicationConstructor(type: WinmdClass) =
         type.isActivatable && type.runtimeClassName in applicationMembers
     private val accessorCount = properties.sumOf { if (it.second.isReadOnly) 1 else 2 }
-    private val methodCount = accessorCount +
+    private val methodCount = accessorCount + events.size * 2 +
         runtimeClasses.count(::hasApplicationConstructor)
     private val getterIds = buildMap<Pair<String, String>, Int> {
         var next = 1
@@ -126,6 +132,18 @@ private class WinmdBuilder(
             properties.filter { it.first == type.runtimeClassName }.forEach { (owner, property) ->
                 put(owner to property.name, next)
                 next += if (property.isReadOnly) 1 else 2
+            }
+            next += events.count { it.first == type.runtimeClassName } * 2
+        }
+    }
+    private val eventAdderIds = buildMap<Pair<String, String>, Int> {
+        var next = 1
+        runtimeClasses.forEach { type ->
+            if (hasApplicationConstructor(type)) next++
+            next += properties.filter { it.first == type.runtimeClassName }.sumOf { if (it.second.isReadOnly) 1 else 2 }
+            events.filter { it.first == type.runtimeClassName }.forEach { (owner, event) ->
+                put(owner to event.name, next)
+                next += 2
             }
         }
     }
@@ -170,7 +188,9 @@ private class WinmdBuilder(
                 (listOf(descriptor.baseRuntimeClassName ?: "System.Object") + descriptor.interfaceNames).filterNot(localTypeNames::contains)
             } +
                 interfaces.flatMap { descriptor -> descriptor.implementedInterfaceNames.filterNot(localTypeNames::contains) } +
-                attributeTypeNames + properties.flatMap { signatureReferences(it.second.type) }.filterNot(localTypeNames::contains)
+                attributeTypeNames + (properties.flatMap { signatureReferences(it.second.type) } +
+                    events.flatMap { signatureReferences(it.second.handlerType) } +
+                    if (events.isEmpty()) emptyList() else listOf(EVENT_REGISTRATION_TOKEN)).filterNot(localTypeNames::contains)
             )
             .distinct()
             .map { qualifiedName -> TypeRefRow(qualifiedName) }
@@ -241,7 +261,10 @@ private class WinmdBuilder(
             (if (interfaceImplCount() > 0) 1L shl TABLE_INTERFACE_IMPL else 0L) or
             (if (attributeMemberRefs.isEmpty()) 0L else 1L shl TABLE_MEMBER_REF) or
             (if (customAttributes.isEmpty()) 0L else 1L shl TABLE_CUSTOM_ATTRIBUTE) or
-            (if (properties.isEmpty()) 0L else (1L shl TABLE_PROPERTY_MAP) or (1L shl TABLE_PROPERTY) or (1L shl TABLE_METHOD_SEMANTICS)) or
+            (if (events.isEmpty()) 0L else (1L shl TABLE_EVENT_MAP) or (1L shl TABLE_EVENT)) or
+            (if (properties.isEmpty()) 0L else (1L shl TABLE_PROPERTY_MAP) or (1L shl TABLE_PROPERTY)) or
+            (if (properties.isEmpty() && events.isEmpty()) 0L else 1L shl TABLE_METHOD_SEMANTICS) or
+            (if (eventTypeSpecs.isEmpty()) 0L else 1L shl TABLE_TYPE_SPEC) or
             (1L shl TABLE_ASSEMBLY) or
             (if (assemblyRefs.isEmpty()) 0L else 1L shl TABLE_ASSEMBLY_REF)
         writer.int32(0)
@@ -266,11 +289,16 @@ private class WinmdBuilder(
         if (customAttributes.isNotEmpty()) {
             writer.int32(customAttributes.size)
         }
+        if (events.isNotEmpty()) {
+            writer.int32(events.map { it.first }.distinct().size)
+            writer.int32(events.size)
+        }
         if (properties.isNotEmpty()) {
             writer.int32(properties.map { it.first }.distinct().size)
             writer.int32(properties.size)
-            writer.int32(accessorCount)
         }
+        if (properties.isNotEmpty() || events.isNotEmpty()) writer.int32(accessorCount + events.size * 2)
+        if (eventTypeSpecs.isNotEmpty()) writer.int32(eventTypeSpecs.size)
         writer.int32(1)
         if (assemblyRefs.isNotEmpty()) writer.int32(assemblyRefs.size)
         writer.int16(0)
@@ -312,7 +340,7 @@ private class WinmdBuilder(
             writer.index(1)
             writer.index(firstMethod)
             firstMethod += properties.filter { it.first == descriptor.runtimeClassName }.sumOf { if (it.second.isReadOnly) 1 else 2 } +
-                if (hasApplicationConstructor(descriptor)) 1 else 0
+                events.count { it.first == descriptor.runtimeClassName } * 2 + if (hasApplicationConstructor(descriptor)) 1 else 0
         }
         // CsWinRT WinRTTypeWriter.AddPropertyDefinition: accessor MethodDefs plus MethodSemantics.
         fun method(name: String, flags: Int, signature: ByteArray) {
@@ -328,6 +356,14 @@ private class WinmdBuilder(
                 val signature = signature(property.type, typeRefs, localTypeDefRowIds)
                 method("get_${property.name}", 0x0886, byteArrayOf(0x20, 0) + signature)
                 if (!property.isReadOnly) method("put_${property.name}", 0x0886, byteArrayOf(0x20, 1, 1) + signature)
+            }
+            // WinRTTypeWriter.AddEventDeclaration owns EventMap/Event/MethodSemantics.
+            // These application-only rows describe typed connector calls, not exported component ABI.
+            events.filter { it.first == type.runtimeClassName }.forEach { (_, event) ->
+                val handler = signature(event.handlerType, typeRefs, localTypeDefRowIds)
+                val token = signature(WinRTTypeRef.named(EVENT_REGISTRATION_TOKEN), typeRefs, localTypeDefRowIds)
+                method("add_${event.name}", 0x0886, byteArrayOf(0x20, 1) + token + handler)
+                method("remove_${event.name}", 0x0886, byteArrayOf(0x20, 1, 1) + token)
             }
         }
         interfaces.forEach { descriptor ->
@@ -354,6 +390,17 @@ private class WinmdBuilder(
             writer.index((attribute.memberRefRowId shl CODED_CUSTOM_ATTRIBUTE_TYPE_TAG_BITS) or CODED_CUSTOM_ATTRIBUTE_TYPE_MEMBER_REF)
             writer.index(attribute.valueBlobIndex)
         }
+        events.forEachIndexed { index, (owner, _) ->
+            if (index == 0 || events[index - 1].first != owner) {
+                writer.index(localTypeDefRowIds.getValue(owner)); writer.index(index + 1)
+            }
+        }
+        events.forEach { (_, event) ->
+            writer.int16(0); writer.index(strings.index(event.name))
+            val specIndex = eventTypeSpecs.indexOf(event.handlerType)
+            writer.index(if (specIndex >= 0) ((specIndex + 1) shl 2) or 2 else
+                codedTypeDefOrRef(typeRefs, localTypeDefRowIds, requireNotNull(event.handlerType.qualifiedName)))
+        }
         properties.forEachIndexed { index, (owner, _) ->
             if (index == 0 || properties[index - 1].first != owner) {
                 writer.index(localTypeDefRowIds.getValue(owner)); writer.index(index + 1)
@@ -363,13 +410,24 @@ private class WinmdBuilder(
             writer.int16(0); writer.index(strings.index(property.name))
             writer.index(blobs.index(byteArrayOf(0x28, 0) + signature(property.type, typeRefs, localTypeDefRowIds)))
         }
+        data class Semantics(val flags: Int, val method: Int, val association: Int)
+        val semantics = mutableListOf<Semantics>()
         properties.forEachIndexed { index, (owner, property) ->
             val accessorId = getterIds.getValue(owner to property.name)
-            writer.int16(2); writer.index(accessorId); writer.index(((index + 1) shl 1) or 1)
+            semantics += Semantics(2, accessorId, ((index + 1) shl 1) or 1)
             if (!property.isReadOnly) {
-                writer.int16(1); writer.index(accessorId + 1); writer.index(((index + 1) shl 1) or 1)
+                semantics += Semantics(1, accessorId + 1, ((index + 1) shl 1) or 1)
             }
         }
+        events.forEachIndexed { index, (owner, event) ->
+            val adderId = eventAdderIds.getValue(owner to event.name)
+            semantics += Semantics(8, adderId, (index + 1) shl 1)
+            semantics += Semantics(16, adderId + 1, (index + 1) shl 1)
+        }
+        semantics.sortedBy { it.association }.forEach { row ->
+            writer.int16(row.flags); writer.index(row.method); writer.index(row.association)
+        }
+        eventTypeSpecs.forEach { type -> writer.index(blobs.index(signature(type, typeRefs, localTypeDefRowIds))) }
         writer.int32(0x00008004)
         writer.int16(1)
         writer.int16(0)
@@ -774,6 +832,10 @@ private class WinmdBuilder(
         const val TABLE_TYPE_DEF = 2
         const val TABLE_METHOD_DEF = 6
         const val TABLE_PROPERTY_MAP = 21
+        const val TABLE_EVENT_MAP = 18
+        const val TABLE_EVENT = 20
+        const val TABLE_TYPE_SPEC = 27
+        const val EVENT_REGISTRATION_TOKEN = "Windows.Foundation.EventRegistrationToken"
         const val TABLE_PROPERTY = 23
         const val TABLE_METHOD_SEMANTICS = 24
         const val XAML_CONTENT_PROPERTY = "Microsoft.UI.Xaml.Markup.ContentPropertyAttribute"

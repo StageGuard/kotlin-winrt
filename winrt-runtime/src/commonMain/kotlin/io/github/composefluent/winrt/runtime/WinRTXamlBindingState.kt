@@ -9,7 +9,10 @@ package io.github.composefluent.winrt.runtime
 class WinRTXamlBindingState {
     private var active = false
     private var updating = false
-    private val subscriptions = mutableListOf<() -> Unit>()
+    private data class Subscription(val phase: Int, val remove: () -> Unit)
+    private val subscriptions = mutableListOf<Subscription>()
+    private var trackingPhase = 0
+    private val deferredAssignments = mutableMapOf<Pair<Int, String>, () -> Unit>()
 
     fun initialize(update: (Boolean) -> Unit) {
         if (active) return
@@ -27,6 +30,26 @@ class WinRTXamlBindingState {
         refresh(true, update)
     }
 
+    /** A later template phase keeps listeners installed by earlier phases. */
+    fun updatePhase(phase: Int, update: (Boolean) -> Unit) {
+        active = true
+        refresh(true, update, phase)
+    }
+
+    fun trackPhase(phase: Int) { trackingPhase = phase }
+
+    /** XamlCompiler stores typed values until a deferred element is connected. */
+    fun defer(connectionId: Int, member: String, assignment: () -> Unit) {
+        if (active) deferredAssignments[connectionId to member] = assignment
+    }
+
+    fun connected(connectionId: Int): Boolean {
+        val pending = deferredAssignments.filterKeys { it.first == connectionId }
+        pending.keys.forEach(deferredAssignments::remove)
+        pending.values.forEach { it() }
+        return pending.isNotEmpty()
+    }
+
     /** Target changes must not write back values while a source update is running. */
     fun changeTarget(change: () -> Unit, update: (Boolean) -> Unit) {
         if (!active || updating) return
@@ -35,11 +58,11 @@ class WinRTXamlBindingState {
         refresh(false, update)
     }
 
-    private fun refresh(initial: Boolean, update: (Boolean) -> Unit) {
+    private fun refresh(initial: Boolean, update: (Boolean) -> Unit, phase: Int? = null) {
         if (updating) return
         updating = true
         try {
-            disconnect()
+            disconnect(phase)
             update(initial)
         } catch (error: Throwable) {
             active = false
@@ -52,15 +75,16 @@ class WinRTXamlBindingState {
 
     fun stopTracking() {
         active = false
+        deferredAssignments.clear()
         disconnect()
     }
 
-    private fun disconnect() {
-        val pending = subscriptions.toList()
-        subscriptions.clear()
+    private fun disconnect(phase: Int? = null) {
+        val pending = subscriptions.filter { phase == null || it.phase == phase }
+        subscriptions.removeAll(pending.toSet())
         var failure: Throwable? = null
-        pending.asReversed().forEach { remove ->
-            try { remove() } catch (error: Throwable) {
+        pending.asReversed().forEach { subscription ->
+            try { subscription.remove() } catch (error: Throwable) {
                 if (failure == null) failure = error else failure!!.addSuppressed(error)
             }
         }
@@ -68,7 +92,7 @@ class WinRTXamlBindingState {
     }
 
     private fun track(remove: () -> Unit) {
-        if (active) subscriptions += remove else remove()
+        if (active) subscriptions += Subscription(trackingPhase, remove) else remove()
     }
 
     fun <Source : Any, Property : Any> trackProperty(

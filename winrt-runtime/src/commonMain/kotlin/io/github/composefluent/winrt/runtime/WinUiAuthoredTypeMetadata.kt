@@ -58,15 +58,16 @@ internal object WinUiAuthoredTypeMetadata {
         collectionDefinitions[name]?.let { return createCollectionType(name, it, resolveType) }
         val type = types[name] ?: return PlatformAbi.nullPointer
         val definition = definitions[name]
+        val baseName = definition?.baseName ?: type.baseName
         if (FeatureSwitches.traceCcw) {
             println("winrt-xaml-metadata: authored type=$name definition=${definition != null}")
         }
         fun resolveBase(): RawAddress {
-            val authored = tryCreate(type.baseName, resolveType)
+            val authored = tryCreate(baseName, resolveType)
             if (!PlatformAbi.isNull(authored)) return authored
-            val sdkType = resolveType(type.baseName)
+            val sdkType = resolveType(baseName)
             if (!PlatformAbi.isNull(sdkType)) return sdkType
-            return definition?.baseType?.let { createSystemType(type.baseName, it) } ?: PlatformAbi.nullPointer
+            return definition?.baseType?.let { createSystemType(baseName, it) } ?: PlatformAbi.nullPointer
         }
         // Generated XamlTypeInfo includes system-type entries when the SDK provider omits them.
         val base = resolveBase()

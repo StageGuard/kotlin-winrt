@@ -38,6 +38,10 @@ data class WinRTXamlConnectionDeclaration(
     @SerialName("IsScopeRoot") val isScopeRoot: Boolean = false,
     @SerialName("IsTemplateChild") val isTemplateChild: Boolean = false,
     @SerialName("DataTypeName") val dataTypeName: String? = null,
+    @SerialName("Phase") val phase: Int = 0,
+    @SerialName("CanBeInstantiatedLater") val canBeInstantiatedLater: Boolean = false,
+    @SerialName("IsUnloadableRoot") val isUnloadableRoot: Boolean = false,
+    @SerialName("Children") val children: List<Int> = emptyList(),
     @SerialName("Bindings") val bindings: List<WinRTXamlBindingDeclaration> = emptyList(),
 )
 
@@ -51,6 +55,8 @@ data class WinRTXamlBindingDeclaration(
     @SerialName("Location") val location: WinRTXamlSourceLocation,
     @SerialName("IsAttachable") val isAttachable: Boolean = false,
     @SerialName("IsEvent") val isEvent: Boolean = false,
+    @SerialName("IsLoad") val isLoad: Boolean = false,
+    @SerialName("Phase") val phase: Int = 0,
     @SerialName("BindBack") val bindBack: WinRTXamlBindingExpression? = null,
     @SerialName("Converter") val converter: String? = null,
     @SerialName("ConverterParameter") val converterParameter: String? = null,
@@ -89,7 +95,7 @@ data class WinRTXamlSourceLocation(
 object WinRTXamlDeclarations {
     const val SCHEMA_VERSION = 2
     private val json = Json { encodeDefaults = true }
-    private val supportedFeatures = setOf("named-elements", "events", "compiled-bindings", "templates")
+    private val supportedFeatures = setOf("named-elements", "events", "compiled-bindings", "templates", "phased-bindings", "deferred-elements")
 
     /** Never accept a partial/stale index from a compiler invocation that reported an error. */
     fun readCompilerOutput(path: Path): WinRTXamlDeclarationIndex {
@@ -122,6 +128,7 @@ object WinRTXamlDeclarations {
                 connections = page.connections.sortedBy { it.id }.map { connection -> connection.copy(
                     events = connection.events.sortedBy { it.name },
                     bindings = connection.bindings.sortedBy { it.name },
+                    children = connection.children.sorted(),
                 ) },
             ) },
         ))
@@ -150,6 +157,11 @@ object WinRTXamlDeclarations {
             for (connection in page.connections) {
                 require(connection.id > 0 && connection.typeName.isNotBlank()) { "Invalid XAML connection in ${page.resourcePath}." }
                 require(connection.fieldName == null || connection.fieldName.isNotBlank()) { "Empty x:Name." }
+                require(connection.phase in 0..31) { "Invalid XAML phase." }
+                require(connection.phase == 0 || "phased-bindings" in page.features) { "Missing phased-bindings feature." }
+                require(!connection.canBeInstantiatedLater || "deferred-elements" in page.features) { "Missing deferred-elements feature." }
+                require(connection.children.distinct().size == connection.children.size &&
+                    connection.children.all { child -> child != connection.id && page.connections.any { it.id == child } }) { "Invalid deferred child connection." }
                 validateLocation(connection.location)
                 require(connection.events.map { it.name }.distinct().size == connection.events.size) { "Duplicate XAML event." }
                 for (event in connection.events) {
@@ -161,6 +173,8 @@ object WinRTXamlDeclarations {
                     require(listOf(binding.name, binding.declaringTypeName, binding.typeName).all(String::isNotBlank) &&
                         binding.mode in setOf("OneTime", "OneWay", "TwoWay")) { "Incomplete compiled binding in ${page.resourcePath}." }
                     require(connection.scopeId > 0) { "Compiled binding has no scope in ${page.resourcePath}." }
+                    require(binding.phase in 0..31) { "Invalid compiled binding phase." }
+                    require(!binding.isLoad || connection.isUnloadableRoot) { "x:Load binding has no unloadable element." }
                     validateExpression(binding.expression)
                     listOfNotNull(binding.bindBack, binding.fallbackValue, binding.targetNullValue).forEach(::validateExpression)
                     validateLocation(binding.location)
