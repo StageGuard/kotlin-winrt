@@ -310,7 +310,7 @@ object KotlinWinRTAuthoringScannerCli {
                         appendLine("          ),")
                     }
                     if (!property.metadata.isReadOnly) {
-                        appendLine("          set = { instance, value -> (instance as ${candidate.className}).${property.metadata.name} = value as ${property.kotlinType} },")
+                        appendLine("          set = { instance, value -> (instance as ${candidate.className}).${property.metadata.name} = io.github.composefluent.winrt.generated.xaml.kotlinWinRTXamlMemberValue<${property.kotlinType}>(value) },")
                     }
                     appendLine("        ),")
                 }
@@ -326,7 +326,7 @@ object KotlinWinRTAuthoringScannerCli {
                         appendLine("          name = ${name.kotlinLiteral()}, typeName = ${getter.metadata.returnType.typeName.kotlinLiteral()},")
                         appendLine("          type = ${getter.kotlinReturnType.removeSuffix("?").substringBefore('<')}::class, isAttachable = true, isDependencyProperty = true,")
                         appendLine("          get = { ${candidate.className}.${getter.metadata.name}(it as ${getter.kotlinParameterTypes.single()}) },")
-                        appendLine("          set = { instance, value -> ${candidate.className}.${setter.metadata.name}(instance as ${setter.kotlinParameterTypes[0]}, value as ${setter.kotlinParameterTypes[1]}) },")
+                        appendLine("          set = { instance, value -> ${candidate.className}.${setter.metadata.name}(instance as ${setter.kotlinParameterTypes[0]}, io.github.composefluent.winrt.generated.xaml.kotlinWinRTXamlMemberValue<${setter.kotlinParameterTypes[1]}>(value)) },")
                         appendLine("        ),")
                     }
                 }
@@ -342,6 +342,15 @@ object KotlinWinRTAuthoringScannerCli {
         Files.createDirectories(registry.parent)
         registry.writeText(buildString {
             appendLine("package io.github.composefluent.winrt.generated.xaml")
+            // XamlTypeExtensions.GetStringToTypeConversion uses the same SDK
+            // converter when a XAML literal has not already been boxed as its
+            // target type. Keep parsing out of application code and runtime ABI.
+            appendLine("internal inline fun <reified T> kotlinWinRTXamlMemberValue(value: Any?): T {")
+            appendLine("  if (value is T || value !is String) return value as T")
+            appendLine("  return io.github.composefluent.winrt.runtime.convertWinRTXamlLiteral(T::class, value) { type, text ->")
+            appendLine("    microsoft.ui.xaml.markup.XamlBindingHelper.convertValue(type, text)")
+            appendLine("  } as T")
+            appendLine("}")
             appendLine("object KotlinXamlApplicationDefinitions {")
             appendLine("  private val registration: Unit = run {")
             registrations.forEach { appendLine("    $it()") }
