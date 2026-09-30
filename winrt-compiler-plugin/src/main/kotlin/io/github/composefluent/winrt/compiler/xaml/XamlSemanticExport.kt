@@ -101,18 +101,15 @@ private class XamlSemanticExport(
             require(klass.superTypes.any { type -> type.classFqName?.asString()?.let {
                 if (it in applicationTypes) it else resolveIndexedWinRTTypeByProjectedName(it, types)?.qualifiedName
             } == page.baseTypeName }) { "XAML ${page.className}: expected direct base ${page.baseTypeName}" }
-            require(klass.declarations.filterIsInstance<IrConstructor>().any { constructor ->
+            val isActivatable = klass.declarations.filterIsInstance<IrConstructor>().any { constructor ->
                 constructor.visibility == org.jetbrains.kotlin.descriptors.DescriptorVisibilities.PUBLIC &&
                     constructor.parameters.none { it.kind == IrParameterKind.Regular }
-            }) { "XAML ${page.className} requires a public zero-argument constructor" }
+            }
+            // LoadComponent fills this already constructed root. A no-argument
+            // constructor is needed only if IXamlType activates it from markup.
             authored += WinRTXamlApplicationTypeDescriptor(page.className, page.baseTypeName,
-                listOf("Microsoft.UI.Xaml.Markup.IComponentConnector"), isActivatable = true)
-            val contentProperty = klass.annotations.firstOrNull { call ->
-                call.symbol.owner.parentClassOrNull?.fqNameWhenAvailable?.asString() ==
-                    "io.github.composefluent.winrt.runtime.WinRTXamlContentProperty"
-            }?.arguments?.firstOrNull()?.let { (it as? IrConst)?.value as? String }
+                listOf("Microsoft.UI.Xaml.Markup.IComponentConnector"), isActivatable = isActivatable)
             applicationMembers[page.className] = xamlApplicationProperties(klass, types, applicationTypes)
-                .copy(contentProperty = contentProperty)
             val handlers = page.connections.flatMap { it.events }.map { it.handlerName }.distinct().sorted().map { name ->
                 val handler = requireNotNull(xamlIrFunctions(klass, name).singleOrNull()) {
                     "XAML ${page.className}: missing or overloaded handler $name"

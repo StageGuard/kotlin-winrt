@@ -9,6 +9,9 @@ import org.jetbrains.kotlin.ir.symbols.UnsafeDuringIrConstructionAPI
 import org.jetbrains.kotlin.ir.types.*
 import org.jetbrains.kotlin.ir.util.isNullable
 import org.jetbrains.kotlin.ir.util.companionObject
+import org.jetbrains.kotlin.ir.util.parentClassOrNull
+import org.jetbrains.kotlin.ir.util.fqNameWhenAvailable
+import org.jetbrains.kotlin.ir.expressions.IrConst
 
 /** Public property visibility follows CsWinRT WinRTTypeWriter.AddPropertyDeclaration.
  * The temporary schema also describes representable private x:Bind inputs; generated
@@ -102,5 +105,10 @@ internal fun xamlApplicationProperties(
                     isPublic = visible(function))
             }.getOrNull() }
     }
-    return WinRTXamlApplicationTypeMembers(properties = properties, events = events, methods = methods)
+    val contentProperty = klass.annotations.firstOrNull { call ->
+        call.symbol.owner.parentClassOrNull?.fqNameWhenAvailable?.asString() ==
+            "io.github.composefluent.winrt.runtime.WinRTXamlContentProperty"
+    }?.arguments?.firstOrNull()?.let { (it as? IrConst)?.value as? String }
+    return WinRTXamlApplicationTypeMembers(properties = properties, events = events, methods = methods,
+        contentProperty = contentProperty)
 }
