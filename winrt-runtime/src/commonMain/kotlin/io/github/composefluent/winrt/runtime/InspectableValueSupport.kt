@@ -59,6 +59,13 @@ internal fun createSyntheticInspectableCcwDefinition(
     declaredReferenceArrayElementType: KClass<*>? = null,
 ): WinRTCcwDefinition? {
     createSyntheticValueCcwDefinition(value, declaredReferenceArrayElementType)?.let { return it }
+    return createSyntheticInterfaceCcwDefinition(value)
+}
+
+/** CsWinRT GetInterfaceTableEntries includes projected interfaces alongside authored ones.
+ * Keep interface adaptation separate from value boxing so notification registrations
+ * cannot suppress IEnumerable/IBindableIterable on the same managed object. */
+internal fun createSyntheticInterfaceCcwDefinition(value: Any): WinRTCcwDefinition? {
     val interfaces = buildList {
         // CsWinRT Projections/Bindable.net5.cs exposes IEnumerable as IBindableIterable
         // even when the caller's declared ABI type is only IInspectable (ItemsSource).

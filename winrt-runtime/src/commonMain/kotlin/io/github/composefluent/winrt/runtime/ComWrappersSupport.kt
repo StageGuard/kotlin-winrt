@@ -1462,10 +1462,14 @@ object ComWrappersSupport {
         value: Any,
         declaredReferenceArrayElementType: KClass<*>? = null,
     ): WinRTCcwDefinition {
+        fun withSyntheticInterfaces(definition: WinRTCcwDefinition): WinRTCcwDefinition =
+            createSyntheticInterfaceCcwDefinition(value)?.let { synthetic ->
+                augmentCcwDefinition(mergeCcwDefinitions(listOf(definition, synthetic)))
+            } ?: definition
         val registration = CcwFactoryRegistry.findRegistration(value)
         registration.augmentedStaticDefinition?.let { definition ->
             traceCcw { "create CCW definition value=${value::class.qualifiedName} source=static-definition" }
-            return definition
+            return withSyntheticInterfaces(definition)
         }
         registration.sources.takeIf(List<*>::isNotEmpty)?.let { sources ->
             val sourceName = if (registration.staticDefinitions.isNotEmpty()) {
@@ -1484,7 +1488,7 @@ object ComWrappersSupport {
                     },
                 )
             }
-            return augmentCcwDefinition(definition)
+            return withSyntheticInterfaces(augmentCcwDefinition(definition))
         }
         val syntheticDefinition = if (declaredReferenceArrayElementType == null) {
             platformCreateSyntheticCcwDefinition(value)
