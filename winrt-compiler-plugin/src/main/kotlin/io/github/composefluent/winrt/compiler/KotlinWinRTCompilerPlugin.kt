@@ -908,6 +908,9 @@ class KotlinWinRTIrGenerationExtension(
         val publicFunctions = klass.declarations.filterIsInstance<IrSimpleFunction>()
             .filter { function ->
                 function.visibility == DescriptorVisibilities.PUBLIC &&
+                    // Internal application objects expose their implemented WinRT
+                    // interfaces, not an ABI for every ordinary Kotlin helper.
+                    (authoredType.isPublic || implementsProjectedInterface(function)) &&
                     function.origin != IrDeclarationOrigin.FAKE_OVERRIDE &&
                     function.name.asString() !in authoredMemberValidationSyntheticFunctionNames
             }

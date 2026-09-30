@@ -119,8 +119,8 @@ object KotlinWinRTAuthoringScannerCli {
                 val source = parseSource(path)
                 val name = listOf(source.packageName(), simpleName).filter(String::isNotBlank).joinToString(".")
                 val type = requireNotNull(classes[name]) { "XAML $path requires one top-level Kotlin class $name" }
-                require(type.candidate?.winRTBaseClassName != null && source.hasPublicDefaultActivationConstructor(type.klass)) {
-                    "XAML $name requires a WinRT base and an accessible zero-argument constructor"
+                require(type.candidate?.winRTBaseClassName != null) {
+                    "XAML $name requires a WinRT base"
                 }
                 name
             }
@@ -626,12 +626,15 @@ object KotlinWinRTAuthoringScannerCli {
         val explicit = linkedMapOf<String, String>()
         val wildcards = mutableListOf<String>()
         file.imports().forEach { imported ->
-            val path = imported.substringBefore(" as ").trim()
+            // Backticks escape Kotlin tokens; they are not part of metadata identity.
+            val path = imported.substringBefore(" as ").trim().split('.')
+                .joinToString(".") { it.removeSurrounding("`") }
             if (path.endsWith(".*")) {
                 wildcards += path.removeSuffix(".*")
             } else if (path.isNotBlank()) {
                 val alias = imported.substringAfter(" as ", missingDelimiterValue = "")
                     .trim()
+                    .removeSurrounding("`")
                     .takeIf(String::isNotBlank)
                 explicit[alias ?: path.substringAfterLast('.')] = path
             }
