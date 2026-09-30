@@ -19,8 +19,7 @@ internal data class GallerySampleDefinition(val header: String, val xaml: String
             }
             fun section(name: String) = sections[name]?.joinToString("\n")?.trim('\n').orEmpty()
             val result = GallerySampleDefinition(section("header"), section("xaml"), section("kotlin"))
-            require(result.header.isNotBlank()) { "Sample definition requires Header" }
-            require(result.xaml.isNotBlank() || result.kotlin.isNotBlank()) { "Sample definition requires code" }
+            // The original Gallery keeps HeaderText from XAML when this section is absent.
             return result
         }
     }

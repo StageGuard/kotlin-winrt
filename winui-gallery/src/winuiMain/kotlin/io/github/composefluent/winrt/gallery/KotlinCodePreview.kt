@@ -13,7 +13,7 @@ import windows.ui.viewmanagement.AccessibilitySettings
 /** Rendering consumes build-time spans; displaying XAML never executes the markup. */
 internal fun kotlinCodePreview(document: KotlinCodeDocument, xamlDocument: KotlinCodeDocument? = null): UIElement = Grid().apply {
     val documents = listOfNotNull(xamlDocument, document).filter { it.source.isNotBlank() }
-    var currentDocument = documents.first()
+    var currentDocument = documents.firstOrNull() ?: return@apply
     fun language(value: KotlinCodeDocument) = if (value.fileName.endsWith(".xaml", true)) "XAML" else "Kotlin"
     rowSpacing = 16.0
     rowDefinitions.add(autoRow())

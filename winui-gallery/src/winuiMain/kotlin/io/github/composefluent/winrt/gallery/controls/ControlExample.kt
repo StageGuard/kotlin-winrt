@@ -22,6 +22,8 @@ internal class ControlExample : UserControl() {
     private var refreshSource: (() -> Unit)? = null
     var Xaml: String = ""
         set(value) { field = value; refreshSource?.invoke() }
+    var XamlSource: String = ""
+        set(value) { field = value; refreshSource?.invoke() }
     val Substitutions: MutableList<ControlExampleSubstitution> = mutableListOf()
     var ExampleHeight: GridLength = GridLength(1.0, GridUnitType.Star)
     var WebViewHeight: Int = 400
@@ -40,7 +42,7 @@ internal class ControlExample : UserControl() {
         set(value) {
             field = value
             sourceSample = GalleryCodeCatalog.sampleDefinition(value)
-            sourceSample?.let { HeaderText = it.header }
+            sourceSample?.header?.takeIf(String::isNotBlank)?.let { HeaderText = it }
         }
 
     var Example: UIElement? = null
@@ -90,7 +92,7 @@ internal class ControlExample : UserControl() {
             val kotlin = sourceSample?.kotlin ?: route?.let { GalleryCodeCatalog.document(it, HeaderText, index) }
             val xaml = if (Xaml.isNotEmpty()) KotlinCodeDocument("sample.xaml", Xaml,
                 listOf(KotlinCodeSpan(Xaml.length, KotlinCodeKind.Plain))) else
-                sourceSample?.xaml ?: route?.let { GalleryCodeCatalog.xamlDocument(it, HeaderText, index) }
+                GalleryCodeCatalog.sourceDocument(XamlSource) ?: sourceSample?.xaml ?: route?.let { GalleryCodeCatalog.xamlDocument(it, HeaderText, index) }
             if (kotlin != null) sourcePresenter.content = kotlinCodePreview(substitute(kotlin), xaml?.let(::substitute))
         }
         refreshSource = { if (sourceReady) updateSource() }
