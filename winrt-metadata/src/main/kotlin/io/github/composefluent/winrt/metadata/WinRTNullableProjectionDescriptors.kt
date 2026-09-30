@@ -12,6 +12,14 @@ internal fun WinRTEventDefinition.withNullableEventContract(ownerTypeName: Strin
 }
 
 internal fun WinRTMethodDefinition.withNullableReturnContract(ownerTypeName: String): WinRTMethodDefinition {
+    // WinUI ConnectedAnimationService_Partial.cpp returns S_OK with a null
+    // animation when the requested key is absent. Preserve it like CsWinRT's
+    // MarshalInterface<T>.FromAbi rather than constructing a zero-pointer RCW.
+    if (ownerTypeName.substringBeforeLast('.') in setOf("Microsoft.UI.Xaml.Media.Animation", "Windows.UI.Xaml.Media.Animation") &&
+        ownerTypeName.substringAfterLast('.') in setOf("ConnectedAnimationService", "IConnectedAnimationService") &&
+        name == "GetAnimation") {
+        return copy(returnTypeName = returnTypeName.removeSuffix("?") + "?")
+    }
     // Virtualized ItemsControl containers do not exist until they are realized.
     // CsWinRT MarshalInterface<T>.FromAbi preserves the SDK's null pointer, also
     // used explicitly by WinUI Gallery's ItemsPageBase container lookup.
