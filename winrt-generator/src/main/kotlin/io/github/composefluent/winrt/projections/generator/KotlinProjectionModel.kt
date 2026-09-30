@@ -36,6 +36,7 @@ import io.github.composefluent.winrt.metadata.WinRTMetadataValidationOptions
 import io.github.composefluent.winrt.metadata.WinRTMetadataSemanticHelpers
 import io.github.composefluent.winrt.metadata.requireValidForProjection
 import io.github.composefluent.winrt.metadata.semanticHelpers
+import io.github.composefluent.winrt.metadata.winRTMappedTypeForAbiName
 import io.github.composefluent.winrt.metadata.isWinRTObjectTypeName
 import io.github.composefluent.winrt.runtime.ActivationFactory
 import io.github.composefluent.winrt.runtime.ActivationFactoryReference
@@ -348,8 +349,10 @@ internal val ABSTRACT_MAP_CLASS_NAME = AbstractMap::class.asClassName()
 internal val ABSTRACT_MUTABLE_LIST_CLASS_NAME = ClassName("kotlin.collections", "AbstractMutableList")
 internal val ABSTRACT_MUTABLE_MAP_CLASS_NAME = ClassName("kotlin.collections", "AbstractMutableMap")
 internal val ABSTRACT_MUTABLE_SET_CLASS_NAME = ClassName("kotlin.collections", "AbstractMutableSet")
-internal val KOTLIN_INSTANT_CLASS_NAME = ClassName("kotlin.time", "Instant")
-internal val KOTLIN_DURATION_CLASS_NAME = ClassName("kotlin.time", "Duration")
+internal val KOTLIN_INSTANT_CLASS_NAME = ClassName.bestGuess(
+    requireNotNull(winRTMappedTypeForAbiName("Windows.Foundation.DateTime")?.kotlinQualifiedName))
+internal val KOTLIN_DURATION_CLASS_NAME = ClassName.bestGuess(
+    requireNotNull(winRTMappedTypeForAbiName("Windows.Foundation.TimeSpan")?.kotlinQualifiedName))
 internal val KOTLIN_DURATION_ALIAS_CLASS_NAME = ClassName("", "TimeDuration")
 internal val KCLASS_STAR_TYPE_NAME = KClass::class.asClassName().parameterizedBy(STAR)
 internal val AUTO_CLOSEABLE_CLASS_NAME = ClassName("kotlin", "AutoCloseable")

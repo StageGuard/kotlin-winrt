@@ -3,6 +3,7 @@ package io.github.composefluent.winrt.compiler.authoring
 import io.github.composefluent.winrt.metadata.WinRTMetadataModel
 import io.github.composefluent.winrt.metadata.WinRTTypeKind
 import io.github.composefluent.winrt.metadata.isWinRTObjectTypeName
+import io.github.composefluent.winrt.metadata.winRTMappedTypeForKotlinName
 import io.github.composefluent.winrt.runtime.Guid
 import java.nio.file.Files
 import java.nio.file.Path
@@ -295,7 +296,8 @@ fun resolveIndexedWinRTTypeByProjectedName(
     typeName: String,
     winRTTypes: Map<String, IndexedWinRTType>,
 ): IndexedWinRTType? {
-    val projectedName = projectionPackageToMetadataName(typeName)
+    val projectedName = winRTMappedTypeForKotlinName(typeName)?.abiQualifiedName
+        ?: projectionPackageToMetadataName(typeName)
     return winRTTypes[typeName]
         ?: winRTTypes[projectedName]
         ?: winRTTypes.values.firstOrNull { type ->
