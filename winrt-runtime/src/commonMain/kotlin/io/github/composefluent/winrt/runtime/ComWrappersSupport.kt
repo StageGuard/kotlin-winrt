@@ -851,6 +851,12 @@ object ComWrappersSupport {
         (value as? WinRTComposableObject)
             ?.winRTComposableObjectReference
             ?.let { composable ->
+                // CsWinRT MarshalInspectable.CreateMarshaler2 must expose the
+                // managed controlling identity for a derived class. NativeObject
+                // is its nondelegating inner, reserved for inherited ABI calls.
+                if (interfaceId == IID.IInspectable || interfaceId == IID.IUnknown) {
+                    return WinRTProjectionMarshaler.owned(composable.outer.queryInterface(interfaceId).getOrThrow())
+                }
                 // Public inherited interfaces are implemented by the composed
                 // native identity.  Keep the managed outer lease as a fallback
                 // for authored override interfaces only.
@@ -1082,10 +1088,11 @@ object ComWrappersSupport {
         return if (interfaceId == null || interfaceId == outerReference.interfaceId) {
             traceCcw { "create composable CCW using outer" }
             cloneComReference(outerReference)
+        } else if (interfaceId == IID.IInspectable || interfaceId == IID.IUnknown) {
+            outerReference.queryInterface(interfaceId).getOrThrow()
         } else {
             // A derived WinRT class is aggregated over the native composed
-            // identity.  Public base interfaces (including IUnknown and
-            // IInspectable) must therefore be queried from that identity;
+            // identity. Public SDK base interfaces must be queried from that identity;
             // the managed outer host only carries authored override interfaces.
             composableReference.tryCreateNativeCallReference(interfaceId)
                 ?: throw WinRTUnsupportedOperationException(

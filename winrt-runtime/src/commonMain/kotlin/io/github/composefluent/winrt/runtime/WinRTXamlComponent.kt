@@ -14,6 +14,8 @@ interface WinRTXamlComponent {
 
 /** Called by constructor-call lowering after the complete Kotlin constructor returns. */
 fun <T : WinRTXamlComponent> initializeWinRTXamlComponent(instance: T): T {
+    if (FeatureSwitches.traceCcw) println("winrt-xaml: initialize ${instance::class.qualifiedName}")
     instance._kotlinXamlCompleteConstruction()
+    if (FeatureSwitches.traceCcw) println("winrt-xaml: initialized ${instance::class.qualifiedName}")
     return instance
 }

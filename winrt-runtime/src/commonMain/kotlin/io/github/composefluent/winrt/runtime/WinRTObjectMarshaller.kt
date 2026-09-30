@@ -67,7 +67,6 @@ object WinRTObjectMarshaller {
             is RawAddress -> WinRTObjectMarshaler(value)
             is RawComPtr -> WinRTObjectMarshaler(value.asRawAddress())
             is ComObjectReference -> createInspectableMarshaler(value)
-            is IWinRTObject -> createInspectableMarshaler(value.nativeObject)
             else -> ComWrappersSupport.createCCWForObjectForMarshaling(
                 value = value,
                 interfaceId = IID.IInspectable,
@@ -170,7 +169,6 @@ object WinRTObjectMarshaller {
             is RawAddress -> value
             is RawComPtr -> value.asRawAddress()
             is ComObjectReference -> value.asInspectable().useAndGetRef()
-            is IWinRTObject -> value.nativeObject.asInspectable().useAndGetRef()
             else -> ComWrappersSupport.createCCWForObject(value, IID.IInspectable, declaredReferenceArrayElementType).useAndGetRef()
         }
 

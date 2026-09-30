@@ -6,6 +6,7 @@ Ownership follows `.cswinrt/src/WinRT.Runtime/ComWrappersSupport.cs` (`GetInterf
 - `Connect` receives a borrowed inspectable. Use existing `WinRTObjectMarshaller.fromAbi` and the normal typed projection conversion; do not attach ownership to the incoming pointer or release it. Store the resolved control in a generated instance field.
 - `GetBindingConnector` returns a caller-owned interface pointer when a binding scope exists. Without such a scope, initialize the out pointer to null and return success. Reuse normal interface marshaling for non-null scopes.
 - The actual native Page aggregation and `Application.LoadComponent` call must be verified in Gallery. An ABI-shaped synthetic host only proves outer interface identity and callback mechanics.
+- As in CsWinRT `MarshalInspectable<T>.CreateMarshaler2`, a derived page crosses `Object`/`IInspectable` boundaries as its controlling managed outer. The nondelegating native inner implements inherited SDK ABI calls and must not replace that object identity in activation results or component loading.
 - Generated event code uses projected event add/remove APIs, `EventSource` and existing delegate/reference tracking. It must not maintain an independent global callback registry. Any generated unsubscribe hook must retain the same handler instance used for subscription.
 - Named controls and initialization state are fields on each page. Kotlin constructor calls are lowered to `initializeWinRTXamlComponent(constructorCall)` after the complete constructor returns, including secondary constructor bodies. Delegating base-constructor calls are not wrapped. Kotlin 2.4 rich constructor references contain invocation bodies and follow the same lowering. The managed `WinRTXamlComponent` interface carries the contract across compilation boundaries; it has no IID or CCW entry.
 - User code overrides `initializeComponent()`, calls `super.initializeComponent()` to execute the generated guarded load, and then accesses named controls. There is no separate initialized callback. Repeated base calls preserve the loaded tree and subscriptions; arbitrary user override statements are ordinary Kotlin code and are not automatically idempotent. Constructor exceptions skip initialization; initialization exceptions propagate before the call returns an instance.
@@ -45,10 +46,11 @@ getter/setter calls. The page's generated load method registers all application
 types before invoking `Application.LoadComponent`. Kotlin semantic compilation
 then emits the authoritative application WinMD for pass 2.
 
-Gallery `ControlExample` migration, compiled bindings, and end-to-end Native
-support remain incomplete. Existing six Gallery XAML pages now pass the
-pre-analysis WinMD, semantic compilation, final XAML compilation, and main
-Kotlin compilation stages.
+Gallery pages and shared controls use the pre-analysis WinMD, isolated semantic
+compilation, final XAML compilation, and main Kotlin compilation stages.
+Compiled bindings use generated calls with template scopes, phase tracking,
+deferred elements, converters and binding updates. JVM and Native execution
+remain separate integration checks, recorded in the Gallery migration inventory.
 
 The semantic compilation now exports declared public/internal instance
 properties into the application-only `KotlinXaml.winmd`. It uses Kotlin IR
