@@ -615,6 +615,9 @@ class KotlinProjectionRenderer(
             genericTypeArguments = genericTypeArguments,
         ).forEach { proxyBinding ->
             val interfaceType = proxyBinding.interfaceType
+            val invokeTarget = interfaceNativeProjectionObjectReference(
+                plan, interfaceType, genericArguments, proxyBinding.interfaceInstanceName,
+            ).toString()
             interfaceType.methods.filter(WinRTMethodDefinition::isOrdinaryProjectedMethod).forEach { method ->
                 val renderedMethod = if (method.genericParameterCount > 0) {
                     val instantiatedMethod = proxyBinding.instantiatedType.methods.firstOrNull { candidate ->
@@ -627,6 +630,7 @@ class KotlinProjectionRenderer(
                         method = method,
                         typesByQualifiedName = plan.typesByQualifiedName,
                         genericTypeArguments = proxyBinding.genericTypeArguments,
+                        invokeTargetExpression = invokeTarget,
                     )
                 }
                 builder.addFunction(renderedMethod)
@@ -638,6 +642,7 @@ class KotlinProjectionRenderer(
                         property = property,
                         typesByQualifiedName = plan.typesByQualifiedName,
                         genericTypeArguments = proxyBinding.genericTypeArguments,
+                        invokeTargetExpression = invokeTarget,
                     ),
                 )
             }
@@ -652,7 +657,7 @@ class KotlinProjectionRenderer(
                         override = true,
                         eventSourceOwnerTypeName = eventSourceBinding.ownerTypeName,
                         eventSourceEventTypeName = instantiatedEvent.delegateTypeName,
-                        eventSourceObjectReference = interfaceNativeProjectionEventSourceObjectReference(
+                        eventSourceObjectReference = interfaceNativeProjectionObjectReference(
                             plan = plan,
                             interfaceType = interfaceType,
                             genericArguments = genericArguments,
@@ -702,7 +707,9 @@ class KotlinProjectionRenderer(
             .filter { binding -> binding.requiresInterfaceNativeProjectionCache(plan) }
             .distinctBy { binding -> binding.ownerCachePropertyName }
 
-    internal fun interfaceNativeProjectionEventSourceObjectReference(
+    // CsWinRT write_required_interface_members_for_abi_type selects the declaring interface.
+    // Required WinRT interfaces have separate IInspectable vtables, not appended base slots.
+    internal fun interfaceNativeProjectionObjectReference(
         plan: KotlinTypeProjectionPlan,
         interfaceType: WinRTTypeDefinition,
         genericArguments: List<WinRTTypeRef> = emptyList(),
@@ -716,7 +723,7 @@ class KotlinProjectionRenderer(
             ?.let { binding -> CodeBlock.of("%L", binding.ownerCachePropertyName) }
             ?: CodeBlock.of("nativeObject")
 
-    private fun addInterfaceNativeProjectionMemberCaches(
+    internal fun addInterfaceNativeProjectionMemberCaches(
         builder: TypeSpec.Builder,
         plan: KotlinTypeProjectionPlan,
         genericArguments: List<WinRTTypeRef>,
@@ -969,6 +976,7 @@ class KotlinProjectionRenderer(
         method: WinRTMethodDefinition,
         typesByQualifiedName: Map<String, WinRTTypeDefinition>,
         genericTypeArguments: List<KotlinProjectionAbiTypeBinding> = emptyList(),
+        invokeTargetExpression: String = "nativeObject",
     ): FunSpec {
         val returnBinding = renderAbiTypeBinding(
             method.returnTypeName,
@@ -994,7 +1002,7 @@ class KotlinProjectionRenderer(
         )
         val slotExpression = metadataSlotExpression(slotInterfaceType, method.abiSlotConstantName(slotInterfaceType.methods))
         val invocation = renderInlineAbiInvocation(
-            invokeTargetExpression = "nativeObject",
+            invokeTargetExpression = invokeTargetExpression,
             slotExpression = slotExpression,
             callPlan = callPlan,
         ) ?: error("Generator interface proxy parity failed to emit ${method.name}")
@@ -1025,6 +1033,7 @@ class KotlinProjectionRenderer(
         property: WinRTPropertyDefinition,
         typesByQualifiedName: Map<String, WinRTTypeDefinition>,
         genericTypeArguments: List<KotlinProjectionAbiTypeBinding> = emptyList(),
+        invokeTargetExpression: String = "nativeObject",
     ): PropertySpec {
         val propertyTypeName = property
             .projectedPropertyTypeName(slotInterfaceType.qualifiedName, typesByQualifiedName)
@@ -1053,7 +1062,7 @@ class KotlinProjectionRenderer(
                     .addCode(
                         "%L\n",
                         renderInlineAbiInvocation(
-                            invokeTargetExpression = "nativeObject",
+                            invokeTargetExpression = invokeTargetExpression,
                             slotExpression = getterSlotExpression,
                             callPlan = getterCallPlan,
                         ) ?: error("Generator interface proxy parity failed to emit getter ${property.name}"),
@@ -1098,7 +1107,7 @@ class KotlinProjectionRenderer(
                     .addCode(
                         "%L\n",
                         renderInlineAbiInvocation(
-                            invokeTargetExpression = "nativeObject",
+                            invokeTargetExpression = invokeTargetExpression,
                             slotExpression = setterSlotExpression,
                             callPlan = setterCallPlan,
                         ) ?: error("Generator interface proxy parity failed to emit setter ${property.name}"),
