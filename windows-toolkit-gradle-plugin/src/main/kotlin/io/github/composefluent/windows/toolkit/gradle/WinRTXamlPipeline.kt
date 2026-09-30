@@ -46,16 +46,7 @@ internal fun configureWinRTXamlPipeline(
         // DirectoryProperty.orElse can lose producer inference through an absent override.
         // The resolver skips itself for local overrides, but must precede input validation.
         task.dependsOn(resolveCompiler)
-        task.genXbfDirectory.set(extension.xaml.genXbfDirectory.orElse(project.layout.dir(metadataManifest.map { manifest ->
-            val winui = readPreparedMetadataCache(manifest.asFile.toPath()).files
-                .singleOrNull { it.fileName.toString().equals("Microsoft.UI.Xaml.winmd", true) }
-                ?: error("Kotlin XAML requires one resolved Microsoft.UI.Xaml.winmd reference.")
-            winui.parent.parent.resolve("tools").toFile().also { tools ->
-                require(File(tools, "x64/GenXbf.dll").isFile) {
-                    "The selected WinUI package has no x64 GenXbf.dll at $tools; configure windows.xaml.genXbfDirectory."
-                }
-            }
-        })))
+        task.genXbfDirectory.set(extension.xaml.genXbfDirectory)
         task.minimumWindowsVersion.set(extension.xaml.minimumWindowsVersion)
         task.projectName.set(project.name)
         task.onlyIf { hasXaml.get() }
@@ -141,7 +132,7 @@ internal fun configureWinRTXamlPipeline(
                 task.destinationDirectory.set(semanticRoot.map { it.dir("classes") })
                 (task as org.jetbrains.kotlin.gradle.tasks.KotlinCompile).incremental = false
                 task.inputs.file(declarations.flatMap { it.declarationsFile })
-                task.inputs.files(declarations.map { it.referenceFiles })
+                task.inputs.file(metadataManifest)
                 task.outputs.file(symbols)
                 task.outputs.file(semanticRoot.map { it.file("KotlinXaml.winmd") })
                 task.dependsOn(declarations)

@@ -6,6 +6,7 @@ import org.gradle.api.file.DirectoryProperty
 import org.gradle.api.file.FileSystemOperations
 import org.gradle.api.file.RegularFileProperty
 import org.gradle.api.provider.ListProperty
+import org.gradle.api.model.ObjectFactory
 import org.gradle.api.tasks.*
 import org.gradle.process.ExecOperations
 import java.nio.file.Files
@@ -16,6 +17,7 @@ import javax.inject.Inject
 abstract class GenerateWinRTXamlApplicationHeaderTask @Inject constructor(
     private val exec: ExecOperations,
     private val fileSystem: FileSystemOperations,
+    private val objects: ObjectFactory,
 ) : DefaultTask() {
     @get:InputFiles @get:PathSensitive(PathSensitivity.RELATIVE)
     abstract val sourceRoots: ConfigurableFileCollection
@@ -26,8 +28,11 @@ abstract class GenerateWinRTXamlApplicationHeaderTask @Inject constructor(
     @get:InputFile @get:PathSensitive(PathSensitivity.NONE)
     abstract val preparedMetadataManifest: RegularFileProperty
 
-    @get:InputFiles @get:PathSensitive(PathSensitivity.NONE)
+    @get:Internal
     abstract val referenceFiles: ConfigurableFileCollection
+    @get:InputFiles @get:PathSensitive(PathSensitivity.NONE)
+    val inputReferenceFiles get() = objects.fileCollection().from(
+        preparedMetadataManifest.map { readPreparedMetadataCache(it.asFile.toPath()).files }, referenceFiles)
 
     @get:Classpath abstract val scannerClasspath: ConfigurableFileCollection
     @get:Input abstract val scannerJvmArgs: ListProperty<String>
@@ -36,7 +41,6 @@ abstract class GenerateWinRTXamlApplicationHeaderTask @Inject constructor(
 
     init {
         scannerJvmArgs.convention(emptyList())
-        referenceFiles.from(preparedMetadataManifest.map { readPreparedMetadataCache(it.asFile.toPath()).files })
     }
 
     @TaskAction fun generate() {
@@ -61,7 +65,7 @@ abstract class GenerateWinRTXamlApplicationHeaderTask @Inject constructor(
                     .sortedBy { it.absolutePath }.forEach {
                     add("--source-root"); add(it.absolutePath)
                 }
-                referenceFiles.files.sortedBy { it.absolutePath }.forEach {
+                inputReferenceFiles.files.sortedBy { it.absolutePath }.forEach {
                     add("--reference"); add(it.absolutePath)
                 }
             })

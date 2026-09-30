@@ -7,6 +7,7 @@ import org.gradle.api.file.ConfigurableFileCollection
 import org.gradle.api.file.DirectoryProperty
 import org.gradle.api.file.FileSystemOperations
 import org.gradle.api.file.RegularFileProperty
+import org.gradle.api.model.ObjectFactory
 import org.gradle.api.provider.Property
 import org.gradle.api.tasks.*
 import org.gradle.process.ExecOperations
@@ -19,19 +20,39 @@ import javax.inject.Inject
 abstract class CompileWinRTXamlTask @Inject constructor(
     private val exec: ExecOperations,
     private val fileSystem: FileSystemOperations,
+    private val objects: ObjectFactory,
 ) : DefaultTask() {
     @get:InputFiles @get:PathSensitive(PathSensitivity.RELATIVE)
     abstract val sourceRoots: ConfigurableFileCollection
     @get:InputFile @get:PathSensitive(PathSensitivity.NONE)
     abstract val preparedMetadataManifest: RegularFileProperty
-    @get:InputFiles @get:PathSensitive(PathSensitivity.NONE)
+    @get:Internal
     abstract val referenceFiles: ConfigurableFileCollection
-    @get:InputFiles @get:PathSensitive(PathSensitivity.NONE)
+    @get:Internal
     abstract val windowsSdkFacadeFiles: ConfigurableFileCollection
     @get:InputDirectory @get:PathSensitive(PathSensitivity.RELATIVE)
     abstract val compilerDirectory: DirectoryProperty
-    @get:InputDirectory @get:PathSensitive(PathSensitivity.RELATIVE)
+    @get:Internal
     abstract val genXbfDirectory: DirectoryProperty
+    // Do not store a mapped file collection in task state. Configuration-cache
+    // serialization can realize it before the metadata producer updates its manifest.
+    @get:InputFiles @get:PathSensitive(PathSensitivity.NONE)
+    val inputReferenceFiles get() = objects.fileCollection().from(
+        preparedMetadataManifest.map { readPreparedMetadataCache(it.asFile.toPath()).files }, referenceFiles)
+    @get:InputFiles @get:PathSensitive(PathSensitivity.NONE)
+    val inputWindowsSdkFacadeFiles get() = objects.fileCollection().from(
+        inputReferenceFiles.elements.map { windowsSdkUnionMetadataFiles(it.map { reference -> reference.asFile }) }, windowsSdkFacadeFiles)
+    @get:InputDirectory @get:PathSensitive(PathSensitivity.RELATIVE)
+    val inputGenXbfDirectory get() = genXbfDirectory.map { it.asFile }.orElse(preparedMetadataManifest.map { manifest ->
+        val references = readPreparedMetadataCache(manifest.asFile.toPath()).files.map { it.toFile() } + referenceFiles.files
+        val winui = references.distinct().singleOrNull { it.name.equals("Microsoft.UI.Xaml.winmd", true) }
+            ?: error("Kotlin XAML requires one resolved Microsoft.UI.Xaml.winmd reference.")
+        winui.parentFile.parentFile.resolve("tools").also { tools ->
+            require(File(tools, "x64/GenXbf.dll").isFile) {
+                "The selected WinUI package has no x64 GenXbf.dll at $tools; configure windows.xaml.genXbfDirectory."
+            }
+        }
+    })
     @get:Input abstract val projectName: Property<String>
     @get:Input abstract val minimumWindowsVersion: Property<String>
     @get:InputFile @get:Optional @get:PathSensitive(PathSensitivity.NONE)
@@ -47,10 +68,6 @@ abstract class CompileWinRTXamlTask @Inject constructor(
 
     init {
         minimumWindowsVersion.convention("10.0.19041.0")
-        referenceFiles.from(preparedMetadataManifest.map { readPreparedMetadataCache(it.asFile.toPath()).files })
-        windowsSdkFacadeFiles.from(referenceFiles.elements.map { references ->
-            windowsSdkUnionMetadataFiles(references.map { it.asFile })
-        })
     }
 
     @TaskAction fun compile() {
@@ -69,7 +86,7 @@ abstract class CompileWinRTXamlTask @Inject constructor(
             require(existing == null || sources[existing] == file) { "Duplicate XAML resource path: $relative" }
             sources[relative] = file
         } }
-        val refs = referenceFiles.files.sortedBy { it.absolutePath }
+        val refs = inputReferenceFiles.files.sortedBy { it.absolutePath }
         GradleFileOperations.writeStringIfChanged(File(output, "references.txt").toPath(),
             refs.map { it.absolutePath }.sorted().joinToString("\n"))
         fun item(file: File, link: String? = null) = buildJsonObject {
@@ -91,10 +108,10 @@ abstract class CompileWinRTXamlTask @Inject constructor(
             put("Language", "Kotlin"); put("LanguageSourceExtension", ".kt"); put("OutputType", "WinExe")
             put("IsPass1", !finalPass); put("OutputPath", File(output, "compiled").absolutePath)
             put("TargetPlatformMinVersion", minimumWindowsVersion.get())
-            put("GenXbfPath", genXbfDirectory.get().asFile.absolutePath)
+            put("GenXbfPath", inputGenXbfDirectory.get().absolutePath)
             put("SavedStateFile", File(output, "state.xml").absolutePath)
             put("ReferenceAssemblies", JsonArray(refs.map { item(it) }))
-            put("ReferenceAssemblyPaths", JsonArray((refs.map { it.parentFile } + windowsSdkFacadeFiles.files.map { it.parentFile } +
+            put("ReferenceAssemblyPaths", JsonArray((refs.map { it.parentFile } + inputWindowsSdkFacadeFiles.files.map { it.parentFile } +
                 File(System.getenv("WINDIR"), "Microsoft.NET/Framework64/v4.0.30319")).distinct().map { item(it) }))
             put("XamlPages", JsonArray(sources.toSortedMap().map { (path, file) -> item(file, path) }))
             if (finalPass) {
