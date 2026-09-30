@@ -53,6 +53,28 @@ internal fun WinRTMethodDefinition.withNullableReturnContract(ownerTypeName: Str
     return copy(returnTypeName = returnTypeName.removeSuffix("?") + "?")
 }
 
+internal fun WinRTMethodDefinition.withNullableParameterContract(ownerTypeName: String): WinRTMethodDefinition {
+    // CsWinRT MarshalInterface<T>.FromManaged (Marshalers.cs) sends null as a
+    // zero pointer. These documented XAML operations use it for the tree root,
+    // removing a composition child, and the default navigation transition.
+    // Normalize once so calls and authored overrides share this contract.
+    val ownerNamespace = ownerTypeName.substringBeforeLast('.')
+    val owner = ownerTypeName.substringAfterLast('.')
+    val nullableType = when {
+        ownerNamespace in setOf("Microsoft.UI.Xaml", "Windows.UI.Xaml") &&
+            owner in setOf("UIElement", "IUIElement") && name == "TransformToVisual" -> "$ownerNamespace.UIElement"
+        ownerNamespace in setOf("Microsoft.UI.Xaml.Hosting", "Windows.UI.Xaml.Hosting") &&
+            owner in setOf("ElementCompositionPreview", "IElementCompositionPreviewStatics") &&
+            name == "SetElementChildVisual" -> if (ownerNamespace.startsWith("Microsoft")) "Microsoft.UI.Composition.Visual" else "Windows.UI.Composition.Visual"
+        ownerNamespace in setOf("Microsoft.UI.Xaml.Controls", "Windows.UI.Xaml.Controls") &&
+            owner in setOf("Frame", "IFrame", "IFrame2") && name == "Navigate" -> ownerNamespace.removeSuffix(".Controls") + ".Media.Animation.NavigationTransitionInfo"
+        else -> return this
+    }
+    return copy(parameters = parameters.map { parameter ->
+        if (parameter.typeName.removeSuffix("?") == nullableType) parameter.copy(typeName = "$nullableType?") else parameter
+    })
+}
+
 fun WinRTPropertyDefinition.projectedPropertyTypeName(
     ownerTypeName: String,
     typesByQualifiedName: Map<String, WinRTTypeDefinition> = emptyMap(),
