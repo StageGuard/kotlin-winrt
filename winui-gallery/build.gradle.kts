@@ -68,6 +68,7 @@ kotlin {
         getByName("winuiMain").dependencies {
             implementation(project(":winui-gallery:code-document"))
             implementation(project(":winui-gallery:models"))
+            implementation(project(":winui-gallery:resources"))
         }
         commonTest.dependencies { implementation(kotlin("test")) }
     }

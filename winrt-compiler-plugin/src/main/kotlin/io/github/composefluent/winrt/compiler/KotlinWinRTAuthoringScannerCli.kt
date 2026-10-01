@@ -355,7 +355,9 @@ object KotlinWinRTAuthoringScannerCli {
             file.writeText(code)
             candidate.sourceSetName to "${candidate.packageName}.$registerName".removePrefix(".")
         }
-        val supportRoot = if (pages.any { it.sourceSetName != null }) root.resolve("shared") else root
+        // Resource-only KMP libraries still need a semantic compilation. Their
+        // shared source root is attached even when there are no adjacent page classes.
+        val supportRoot = root.resolve("shared")
         val converter = supportRoot.resolve("io/github/composefluent/winrt/generated/xaml/KotlinXamlMemberValue.kt")
         Files.createDirectories(converter.parent)
         converter.writeText(buildString {
@@ -389,7 +391,9 @@ object KotlinWinRTAuthoringScannerCli {
                 "io.github.composefluent.winrt.generated.xaml.$registryName"
             }
         root.resolve("registrars.tsv").writeText((listOf("className") + registrarNames).joinToString("\n", postfix = "\n"))
-        writeXamlBindingSupportSource(supportRoot, assemblyName)
+        // A dictionary without x:Class has no owning connector or compiled
+        // bindings. Do not require template projections for resource-only libraries.
+        if (pages.isNotEmpty()) writeXamlBindingSupportSource(supportRoot, assemblyName)
     }
 
     private fun scan(
