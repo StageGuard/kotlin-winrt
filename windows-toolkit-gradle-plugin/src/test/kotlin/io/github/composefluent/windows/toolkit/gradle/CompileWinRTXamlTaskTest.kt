@@ -1,6 +1,9 @@
 package io.github.composefluent.windows.toolkit.gradle
 
 import io.github.composefluent.winrt.metadata.WinRTXamlDeclarations
+import io.github.composefluent.winrt.metadata.WinRTMetadataLoader
+import io.github.composefluent.winrt.metadata.WinRTPortableExecutableMetadataWriter
+import io.github.composefluent.winrt.metadata.WinRTXamlApplicationTypeDescriptor
 import org.gradle.testfixtures.ProjectBuilder
 import org.junit.Assert.*
 import org.junit.Assume.assumeTrue
@@ -64,11 +67,35 @@ class CompileWinRTXamlTaskTest {
         task.genXbfDirectory.set(File(genXbf!!))
         task.projectName.set("fixture")
         task.outputDirectory.set(File(root, "output"))
+        val referenceFiles = refs!!.split(File.pathSeparator).flatMap {
+            File(it).listFiles()!!.filter { file -> file.extension == "winmd" }
+        }
+        val header = File(root, "Header.winmd")
+        WinRTPortableExecutableMetadataWriter.writeXamlSchemaWinmd(
+            "Header", listOf(WinRTXamlApplicationTypeDescriptor(
+                "sample.MainPage", "Microsoft.UI.Xaml.Controls.Page")), emptyMap(), header.toPath(),
+            WinRTMetadataLoader.loadTypeAssemblyNames(referenceFiles.map { it.toPath() }))
+        task.applicationHeaderWinmd.set(header)
         task.compile()
         val index = WinRTXamlDeclarations.parse(task.declarationsFile.get().asFile.readText())
         assertEquals("pages/MainPage.xaml", index.pages.single().resourcePath)
-        val stale = File(root, "output/compiled/pages/obsolete.xbf").apply { parentFile.mkdirs(); writeText("stale") }
+        val originalMarkup = page.readText()
+        page.writeText(originalMarkup.replace("x:Name=\"checked\"", "x:Name=\"renamedControl\""))
+        task.compile()
+        val modified = WinRTXamlDeclarations.parse(task.declarationsFile.get().asFile.readText())
+        assertTrue(modified.pages.single().connections.any { it.fieldName == "renamedControl" })
+        assertTrue(modified.pages.single().connections.none { it.fieldName == "checked" })
+        val renamed = File(page.parentFile, "RenamedPage.xaml")
+        page.copyTo(renamed)
         page.delete()
+        File(page.parentFile, "MainPage.kt").renameTo(File(page.parentFile, "RenamedPage.kt"))
+        task.compile()
+        assertEquals("pages/RenamedPage.xaml",
+            WinRTXamlDeclarations.parse(task.declarationsFile.get().asFile.readText()).pages.single().resourcePath)
+        assertFalse(File(root, "output/compiled/pages/MainPage.xaml").exists())
+        assertFalse(File(root, "output/compiled/pages/MainPage.xbf").exists())
+        val stale = File(root, "output/compiled/pages/obsolete.xbf").apply { parentFile.mkdirs(); writeText("stale") }
+        renamed.delete()
         task.compile()
         assertTrue(WinRTXamlDeclarations.parse(task.declarationsFile.get().asFile.readText()).pages.isEmpty())
         assertFalse(stale.exists())
