@@ -40,6 +40,12 @@ compiled bindings, template scopes, collection notifications, converters,
 phased bindings, deferred elements, application resources and custom Kotlin
 XAML types. Unsupported forms produce build errors.
 
+The `models` library supplies the plain Kotlin Recipe model and its inferred XAML
+schema. The `resources` library supplies the shared grid and text dictionaries
+as XBF through AppX resource variants. Neither library generates SDK projections
+or requires its model classes to be Windows Runtime components. Existing
+dictionary `ms-appx:///` paths remain unchanged.
+
 ## Initialization and navigation
 
 The plugin calls `initializeComponent()` after complete construction. A page can

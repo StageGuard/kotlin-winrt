@@ -120,6 +120,13 @@ generating SDK bindings in the model library. Ordinary classes implementing
 runtime-mapped interfaces such as `INotifyPropertyChanged` use the existing CCW
 adapters; only explicit authoring or an unmapped ABI shape requires a component.
 
+Resource-only XAML libraries use the same resource variants without exporting
+authored types or SDK projections. An empty semantic schema records their
+identity; no binding converter or template connector is emitted. Consumer PRI
+staging merges the XBF files at their original package-relative dictionary paths.
+The Gallery's `resources` module owns its shared grid and text styles, while its
+`models` module owns the plain Kotlin Recipe model used by ItemsRepeater.
+
 When an `x:Name` conflicts with an inherited Kotlin property, FIR reports an error
 including the XAML path, line, column, and conflicting property. Rename the element
 explicitly in XAML and Kotlin. Generated accessors retain the literal XAML name;
