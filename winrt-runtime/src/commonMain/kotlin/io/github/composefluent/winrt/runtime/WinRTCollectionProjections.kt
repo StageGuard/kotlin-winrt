@@ -655,6 +655,10 @@ object WinRTReadOnlyListProjection {
 
         override fun get(index: Int): T = adapter[index]
 
+        override fun indexOf(element: T): Int = adapter.indexOf(element)
+
+        override fun contains(element: T): Boolean = adapter.contains(element)
+
         override fun close() {
             vectorView.close()
         }
@@ -822,6 +826,12 @@ object WinRTListProjection {
             get() = adapter.size
 
         override fun get(index: Int): T = adapter[index]
+
+        override fun indexOf(element: T): Int = adapter.indexOf(element)
+
+        override fun contains(element: T): Boolean = adapter.contains(element)
+
+        override fun remove(element: T): Boolean = adapter.remove(element)
 
         override fun set(index: Int, element: T): T = adapter.set(index, element)
 
