@@ -44,14 +44,18 @@ class XamlConnectorIdentityTest {
                     interfaceDefinitions = listOf(WinRTInspectableInterfaceDefinition(nativeId, emptyList())),
                     defaultInterfaceId = nativeId,
                 )
+                var factoryInstance = RawAddress.Null
                 try {
                     ComWrappersSupport.createComposableCCWForObject(page, nativeId) { outer, innerOut, instanceOut ->
                         // The extra interface is available before the native composable factory returns.
                         IInspectableReference(outer.asRawComPtr(), IID.IInspectable, preventReleaseOnDispose = true).use { base ->
                             base.queryInterface(connectorId).getOrThrow().use { assertTrue(it.sameIdentity(base)) }
                         }
-                        PlatformAbi.writePointer(innerOut, native.detachReference(IID.IInspectable))
-                        PlatformAbi.writePointer(instanceOut, native.detachReference(nativeId))
+                        // Each factory output needs its own reference. detachReference
+                        // transfers the host baseline and cannot be used twice here.
+                        PlatformAbi.writePointer(innerOut, native.acquireReference(IID.IInspectable))
+                        factoryInstance = native.acquireReference(nativeId)
+                        PlatformAbi.writePointer(instanceOut, factoryInstance)
                         KnownHResults.S_OK.value
                     }.use { composed ->
                         page.reference = composed
@@ -72,6 +76,9 @@ class XamlConnectorIdentityTest {
                         }
                     }
                 } finally {
+                    // This synthetic instance has a separate IUnknown, rather than
+                    // WinUI's delegating outer identity and native aggregation lifetime.
+                    if (!PlatformAbi.isNull(factoryInstance)) WinRTPlatformApi.releaseRaw(factoryInstance)
                     native.close()
                 }
             }
