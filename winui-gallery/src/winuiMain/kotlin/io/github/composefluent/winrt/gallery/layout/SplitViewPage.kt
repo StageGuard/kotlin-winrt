@@ -14,7 +14,7 @@ internal class SplitViewPage : Page() {
     val NavLinks: MutableList<NavLink> = WinRTObservableList(listOf(NavLink("People", Symbol.People), NavLink("Globe", Symbol.Globe), NavLink("Message", Symbol.Message), NavLink("Mail", Symbol.Mail)))
     private var ready = false
     override fun initializeComponent() { super.initializeComponent(); ready = true; loaded.add { _, _ -> UpdateNavLinkItemLayout() } }
-    private fun NavLinksList_ItemClick(sender: Any?, args: ItemClickEventArgs) { (args.clickedItem as? NavLink)?.let { content.text = "${it.Label} Page" } }
+    private fun NavLinksList_ItemClick(sender: Any?, args: ItemClickEventArgs) { (args.clickedItem as? NavLink)?.let { xamlContent.text = "${it.Label} Page" } }
     private fun PanePlacement_Toggled(sender: Any?, args: RoutedEventArgs) {
         if (!ready) return
         splitView.panePlacement = if (checkNotNull(sender).asWinRT<ToggleSwitch>().isOn) SplitViewPanePlacement.Right else SplitViewPanePlacement.Left

@@ -85,26 +85,28 @@ class XamlSemanticExportTest {
                 override fun initializeComponent() {
                     check(constructed)
                     super.initializeComponent()
-                    val connected = myButton
+                    val connected = xamlMyButton
                     super.initializeComponent()
-                    check(connected === myButton)
+                    check(connected === xamlMyButton)
                     initializedTag = tag
                     initializationCount++
                     check(tag != "failHook") { "hook failed" }
                 }
-                private fun onClick(sender: Any?, args: microsoft.ui.xaml.RoutedEventArgs) { myButton.text += "clicked" }
+                private fun onClick(sender: Any?, args: microsoft.ui.xaml.RoutedEventArgs) { xamlMyButton.text += "clicked" }
             }
             fun exercise(): String {
                 val first = MainPage()
                 check(first.initializationCount == 1)
                 first.initializeComponent()
-                first.myButton.raise()
+                first.xamlMyButton.raise()
                 first.initializeComponent()
-                first.myButton.raise()
+                first.xamlMyButton.raise()
                 val factory: () -> MainPage = ::MainPage
                 val second = factory()
                 second.initializeComponent()
-                second.myButton.raise()
+                second.xamlMyButton.raise()
+                (first as microsoft.ui.xaml.controls.Page).myButton = "base content"
+                check((first as microsoft.ui.xaml.controls.Page).myButton == "base content")
                 check(first.getBindingConnector(0, null) == null)
                 val secondary = MainPage("secondary")
                 check(secondary.initializedTag == "secondary")
@@ -118,13 +120,13 @@ class XamlSemanticExportTest {
                 try { MainPage("failHook"); error("hook must fail") } catch (error: IllegalStateException) {
                     check(error.message == "hook failed")
                 }
-                return first.myButton.text + ":" + second.myButton.text
+                return first.xamlMyButton.text + ":" + second.xamlMyButton.text
             }
         """.trimIndent()) }
         // Tooling fixture only: the actual delegate and base resolve from SDK WinMD in the loader gate.
         val base = File(root, "Page.kt").apply { writeText("""
             package microsoft.ui.xaml.controls
-            open class Page
+            open class Page { open var myButton: Any? = null }
             class Button : microsoft.ui.xaml.controls.primitives.ButtonBase() { var text = "" }
         """.trimIndent()) }
         val button = File(root, "ButtonBase.kt").apply { writeText("""
@@ -231,22 +233,22 @@ class XamlSemanticExportTest {
             val pageClass = loader.loadClass("probe.MainPage")
             assertTrue(java.lang.reflect.Modifier.isPrivate(pageClass.getDeclaredMethod("onClick",
                 Any::class.java, loader.loadClass("microsoft.ui.xaml.RoutedEventArgs")).modifiers))
-            assertFalse(java.lang.reflect.Modifier.isStatic(pageClass.getDeclaredField("myButton").modifiers))
-            assertTrue(pageClass.methods.none { it.name == "setMyButton" })
+            assertFalse(java.lang.reflect.Modifier.isStatic(pageClass.getDeclaredField("xamlMyButton").modifiers))
+            assertTrue(pageClass.methods.none { it.name == "setXamlMyButton" })
             assertEquals("external:reference", loader.loadClass("consumer.ConsumerKt").getMethod("exercise").invoke(null))
         }
         val validSource = source.readText()
         source.writeText("""
             package probe
             class MainPage : microsoft.ui.xaml.controls.Page() {
-                private fun onClick(sender: Any?, args: microsoft.ui.xaml.RoutedEventArgs) { myButton.text += "clicked" }
+                private fun onClick(sender: Any?, args: microsoft.ui.xaml.RoutedEventArgs) { xamlMyButton.text += "clicked" }
             }
             fun exerciseDefault(): String {
                 val factory: () -> MainPage = ::MainPage
                 val page = factory()
-                val button = page.myButton
+                val button = page.xamlMyButton
                 page.initializeComponent()
-                check(button === page.myButton)
+                check(button === page.xamlMyButton)
                 check(microsoft.ui.xaml.Application.loads == 1)
                 button.raise()
                 return button.text

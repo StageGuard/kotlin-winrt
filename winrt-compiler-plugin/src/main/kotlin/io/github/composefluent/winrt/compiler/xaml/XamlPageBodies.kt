@@ -26,12 +26,24 @@ internal class XamlPageBodies(private val index: WinRTXamlDeclarationIndex, priv
             .associateBy { it.fqNameWhenAvailable?.asString() }
         for (page in index.pages) {
             val klass = requireNotNull(classes[page.className]) { "Missing Kotlin XAML class ${page.className}" }
+            val inheritedNames = mutableSetOf<String>()
+            val visited = mutableSetOf<IrClass>()
+            fun inherit(type: IrClass) {
+                if (!visited.add(type)) return
+                inheritedNames += type.declarations.filterIsInstance<IrProperty>().map { it.name.asString() }
+                type.superTypes.mapNotNull { it.classOrNull?.owner }.forEach(::inherit)
+            }
+            klass.superTypes.mapNotNull { it.classOrNull?.owner }.forEach(::inherit)
             fun function(name: Name) = klass.declarations.filterIsInstance<IrSimpleFunction>().single { it.name == name }.also {
                 check((it.origin as? IrDeclarationOrigin.GeneratedByPlugin)?.pluginKey == XamlDeclarationKey)
             }
             val properties = klass.declarations.filterIsInstance<IrProperty>().filter {
                 (it.origin as? IrDeclarationOrigin.GeneratedByPlugin)?.pluginKey == XamlDeclarationKey
-            }.associateBy { it.name.asString() }
+            }.associateBy { property ->
+                page.connections.mapNotNull { it.storageName() }.firstOrNull {
+                    xamlElementPropertyName(page, it, inheritedNames) == property.name.asString()
+                } ?: property.name.asString()
+            }
             val userDeclarations = klass.declarations.filterNot {
                 (it.origin as? IrDeclarationOrigin.GeneratedByPlugin)?.pluginKey == XamlDeclarationKey
             }.toList()
