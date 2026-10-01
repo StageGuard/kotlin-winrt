@@ -188,6 +188,7 @@ internal class XamlCompiledBindingBodies(
                     }
                     +irUnit()
                 })
+                branches += irElseBranch(irUnit())
             }
         }
         val writeBack = method(klass, xamlScopeWriteBackName)
@@ -206,6 +207,7 @@ internal class XamlCompiledBindingBodies(
                             +irUnit()
                         })
                     }
+                branches += irElseBranch(irUnit())
             }
         }
         val connect = method(klass, xamlScopeConnectName)
@@ -233,6 +235,7 @@ internal class XamlCompiledBindingBodies(
                         +irUnit()
                     })
                 }
+                branches += irElseBranch(irUnit())
             }
         }
         val create = method(klass, xamlScopeCreateName)
@@ -561,10 +564,22 @@ internal class XamlCompiledBindingBodies(
             "call", "index" -> {
                 val receiver = evaluate(requireNotNull(expression.receiver), builder, klass, root, namedTargets = namedTargets)
                 val name = if (expression.kind == "index") "get" else requireNotNull(expression.name).replaceFirstChar(Char::lowercase)
-                val function = requireNotNull(receiver.type.classOrNull).owner.functions.filter {
+                val candidates = requireNotNull(receiver.type.classOrNull).owner.functions.filter {
                     (it.name.asString() == name || it.name.asString() == expression.name) &&
                         it.parameters.count { p -> p.kind == IrParameterKind.Regular } == expression.arguments.size
-                }.singleOrNull() ?: error("Missing or ambiguous compiled XAML method ${receiver.type.classFqName}.$name")
+                }.toList()
+                // Native scalar classes also expose typed equals overloads. Resolve
+                // the exact argument signature before reporting ambiguity, rather
+                // than assuming JVM's smaller built-in method set on both targets.
+                val function = candidates.singleOrNull() ?: run {
+                    val argumentTypes = expression.arguments.map {
+                        evaluate(it, builder, klass, root, namedTargets = namedTargets).type.makeNotNull()
+                    }
+                    candidates.singleOrNull { candidate ->
+                        candidate.parameters.filter { it.kind == IrParameterKind.Regular }
+                            .map { it.type.makeNotNull() } == argumentTypes
+                    }
+                } ?: error("Missing or ambiguous compiled XAML method ${receiver.type.classFqName}.$name")
                 val parameters = function.parameters.filter { it.kind == IrParameterKind.Regular }
                 nullableCall(receiver, function.returnType, builder) { target -> irCall(function.symbol).apply {
                     dispatchReceiver = target
@@ -575,9 +590,13 @@ internal class XamlCompiledBindingBodies(
             "cast" -> {
                 val target = projection(requireNotNull(expression.typeName)).defaultType
                 val value = evaluate(requireNotNull(expression.receiver), builder, klass, root, namedTargets = namedTargets)
-                if (winRTFundamentalTypeForName(requireNotNull(expression.typeName)) != null || expression.typeName in classes)
-                    convert(value, target, builder, expression.typeName.orEmpty())
-                else irCall(runtime("asWinRT")).apply { type = target; typeArguments[0] = target; arguments[0] = value }
+                // CSharpPagePass2 propagates nullable path steps before updating
+                // their children. A cast must preserve an absent selection too.
+                nullableCall(value, target, builder) { present ->
+                    if (winRTFundamentalTypeForName(requireNotNull(expression.typeName)) != null || expression.typeName in classes)
+                        convert(present, target, builder, expression.typeName.orEmpty())
+                    else irCall(runtime("asWinRT")).apply { type = target; typeArguments[0] = target; arguments[0] = present }
+                }
             }
             "attached" -> {
                 val owner = requireNotNull(projection(requireNotNull(expression.typeName)).companionObject())

@@ -261,6 +261,9 @@ internal class XamlPageBodies(private val index: WinRTXamlDeclarationIndex, priv
                             +irUnit()
                         })
                     }
+                    // Connect ignores unknown IDs, including pages without any
+                    // generated fields or events. Native requires a nonempty when.
+                    branches += irBranch(irTrue(), irUnit())
                 }
             }
         }
