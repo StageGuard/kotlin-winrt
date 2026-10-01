@@ -305,12 +305,23 @@ object KotlinWinRTAuthoringScannerCli {
                     appendLine("          type = ${property.kotlinType.removeSuffix("?").substringBefore('<')}::class,")
                     appendLine("          isDependencyProperty = ${property.metadata.isDependencyProperty},")
                     appendLine("          get = { (it as ${candidate.className}).${property.metadata.name} },")
-                    if (winRTCollectionKindForAbiName(property.metadata.type.qualifiedName.orEmpty()) == WinRTCollectionInterfaceKind.Vector) {
+                    val containerKind = winRTCollectionKindForAbiName(property.metadata.type.qualifiedName.orEmpty())
+                    if (containerKind == WinRTCollectionInterfaceKind.Vector) {
                         val item = property.metadata.type.typeArguments.single()
                         val itemSource = WinRTTypeRef.fromDisplayName(property.kotlinType).typeArguments.single().typeName
                         appendLine("          collection = io.github.composefluent.winrt.runtime.WinRTXamlCollectionDefinition(")
                         appendLine("            type = MutableList::class, itemTypeName = ${item.typeName.kotlinLiteral()}, itemType = ${itemSource.removeSuffix("?").substringBefore('<')}::class,")
                         appendLine("            add = { instance, value -> (instance as ${property.kotlinType}).add(value as $itemSource); Unit }," )
+                        appendLine("          ),")
+                    }
+                    if (containerKind == WinRTCollectionInterfaceKind.Map) {
+                        val (key, item) = property.metadata.type.typeArguments
+                        val (keySource, itemSource) = WinRTTypeRef.fromDisplayName(property.kotlinType).typeArguments.map { it.typeName }
+                        appendLine("          dictionary = io.github.composefluent.winrt.runtime.WinRTXamlDictionaryDefinition(")
+                        appendLine("            type = MutableMap::class,")
+                        appendLine("            keyTypeName = ${key.typeName.kotlinLiteral()}, keyType = ${keySource.removeSuffix("?").substringBefore('<')}::class,")
+                        appendLine("            itemTypeName = ${item.typeName.kotlinLiteral()}, itemType = ${itemSource.removeSuffix("?").substringBefore('<')}::class,")
+                        appendLine("            add = { instance, key, value -> (instance as ${property.kotlinType})[key as $keySource] = value as $itemSource },")
                         appendLine("          ),")
                     }
                     if (!property.metadata.isReadOnly) {

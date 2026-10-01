@@ -34,8 +34,12 @@ class WinRTXamlMemberDefinition(
     val isDependencyProperty: Boolean = false,
     val collection: WinRTXamlCollectionDefinition? = null,
     val isAttachable: Boolean = false,
+    val dictionary: WinRTXamlDictionaryDefinition? = null,
 ) {
-    init { require(name.isNotBlank() && typeName.isNotBlank()) }
+    init {
+        require(name.isNotBlank() && typeName.isNotBlank())
+        require(collection == null || dictionary == null) { "A XAML member cannot have both vector and map insertion." }
+    }
 }
 
 /** CSharpTypeInfoPass2's ItemType and CollectionAdd, with generated typed Add calls. */
@@ -44,6 +48,16 @@ class WinRTXamlCollectionDefinition(
     val itemTypeName: String,
     val itemType: KClass<*>,
     val add: (Any, Any?) -> Unit,
+)
+
+/** CSharpTypeInfoPass2's KeyType, ItemType and DictionaryAdd with generated typed insertion. */
+class WinRTXamlDictionaryDefinition(
+    val type: KClass<*>,
+    val keyTypeName: String,
+    val keyType: KClass<*>,
+    val itemTypeName: String,
+    val itemType: KClass<*>,
+    val add: (Any, Any?, Any?) -> Unit,
 )
 
 fun registerWinRTXamlTypeDefinition(definition: WinRTXamlTypeDefinition) {

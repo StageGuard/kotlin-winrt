@@ -15,7 +15,13 @@ internal object WinUiAuthoredTypeMetadata {
     private val types = ConcurrentCacheMap<String, Type>()
     private val definitions = ConcurrentCacheMap<String, WinRTXamlTypeDefinition>()
     private val definitionsByType = ConcurrentCacheMap<KClass<*>, WinRTXamlTypeDefinition>()
-    private val collectionDefinitions = ConcurrentCacheMap<String, WinRTXamlCollectionDefinition>()
+    private data class Container(
+        val itemTypeName: String, val itemType: KClass<*>,
+        val keyTypeName: String? = null, val keyType: KClass<*>? = null,
+        val addToVector: ((Any, Any?) -> Unit)? = null,
+        val addToMap: ((Any, Any?, Any?) -> Unit)? = null,
+    )
+    private val containerDefinitions = ConcurrentCacheMap<String, Container>()
     private data class EnumType(val type: KClass<*>, val parse: (String) -> Any)
     private val enumTypes = ConcurrentCacheMap<String, EnumType>()
 
@@ -27,7 +33,13 @@ internal object WinUiAuthoredTypeMetadata {
         definitions.putIfAbsent(definition.name, definition)
         definitionsByType.putIfAbsent(definition.type, definition)
         definition.members.values.forEach { member ->
-            member.collection?.let { collectionDefinitions.putIfAbsent(member.typeName, it) }
+            member.collection?.let {
+                containerDefinitions.putIfAbsent(member.typeName, Container(it.itemTypeName, it.itemType, addToVector = it.add))
+            }
+            member.dictionary?.let {
+                containerDefinitions.putIfAbsent(member.typeName, Container(it.itemTypeName, it.itemType,
+                    it.keyTypeName, it.keyType, addToMap = it.add))
+            }
         }
     }
 
@@ -37,7 +49,7 @@ internal object WinUiAuthoredTypeMetadata {
     }
 
     fun clearForTests() {
-        types.clear(); definitions.clear(); definitionsByType.clear(); collectionDefinitions.clear(); enumTypes.clear()
+        types.clear(); definitions.clear(); definitionsByType.clear(); containerDefinitions.clear(); enumTypes.clear()
     }
 
     /** Reuses generated accessors for CsWinRT's source-generated ICustomProperty path.
@@ -62,7 +74,7 @@ internal object WinUiAuthoredTypeMetadata {
         // XBF refers to member types by name before asking IXamlMember.Type.
         // Generated XamlTypeInfo registers closed collection types in the same
         // lookup table as authored classes, preserving their typed Add helper.
-        collectionDefinitions[name]?.let { return createCollectionType(name, it, resolveType) }
+        containerDefinitions[name]?.let { return createContainerType(name, it, resolveType) }
         val type = types[name] ?: return PlatformAbi.nullPointer
         val definition = definitions[name]
         val baseName = definition?.baseName ?: type.baseName
@@ -195,9 +207,7 @@ internal object WinUiAuthoredTypeMetadata {
                     output { PlatformAbi.writeInt8(it, if (member.set == null) 1 else 0) },
                     output { PlatformAbi.writePointer(it, HString.create(member.name).handle) },
                     output { PlatformAbi.writePointer(it, resolve(owner.name)) },
-                    output { PlatformAbi.writePointer(it, member.collection?.let { collection ->
-                        createCollectionType(member.typeName, collection, resolveType)
-                    } ?: resolve(member.typeName, member.type)) },
+                    output { PlatformAbi.writePointer(it, resolve(member.typeName, member.type)) },
                     WinRTInspectableMethodDefinition(ComMethodSignatures.HResult_Ptr_Ptr) { args ->
                         val output = args[1] as RawAddress
                         PlatformAbi.writePointer(output, PlatformAbi.nullPointer)
@@ -219,19 +229,21 @@ internal object WinUiAuthoredTypeMetadata {
         return host.detachReference(WinUiXamlInterfaceIds.IXamlMember)
     }
 
-    private fun createCollectionType(name: String, collection: WinRTXamlCollectionDefinition,
+    private fun createContainerType(name: String, container: Container,
         resolveType: (String) -> RawAddress): RawAddress {
+        val (itemTypeName, itemType, keyTypeName, keyType, addToVector, addToMap) = container
         fun output(write: (RawAddress) -> Unit) = WinRTInspectableMethodDefinition(ComMethodSignatures.HResult_Ptr) {
             write(it[0] as RawAddress); KnownHResults.S_OK.value
         }
         fun pointer(value: () -> RawAddress) = output { PlatformAbi.writePointer(it, value()) }
         fun boolean(value: Boolean = false) = output { PlatformAbi.writeInt8(it, if (value) 1 else 0) }
         fun unavailable(signature: ComMethodSignature) = WinRTInspectableMethodDefinition(signature) { KnownHResults.E_NOTIMPL.value }
-        fun itemType(): RawAddress {
-            val authored = tryCreate(collection.itemTypeName, resolveType)
+        fun resolveElementType(typeName: String, type: KClass<*>): RawAddress {
+            val authored = tryCreate(typeName, resolveType)
             if (!PlatformAbi.isNull(authored)) return authored
-            val projected = resolveType(collection.itemTypeName)
-            return if (!PlatformAbi.isNull(projected)) projected else createSystemType(collection.itemTypeName, collection.itemType)
+            val projected = resolveType(typeName)
+            return if (!PlatformAbi.isNull(projected)) projected else createSystemType(typeName, type,
+                WinRTTypeClassifier.classify(type)?.xamlLiteralParser)
         }
         val marshaler = MarshalInspectable.any()
         val host = WinRTInspectableComObject(interfaceDefinitions = listOf(WinRTInspectableInterfaceDefinition(
@@ -240,17 +252,26 @@ internal object WinUiAuthoredTypeMetadata {
                 pointer { PlatformAbi.nullPointer }, // BaseType
                 pointer { PlatformAbi.nullPointer }, // ContentProperty
                 pointer { HString.create(name).handle },
-                boolean(), boolean(true), boolean(), boolean(), boolean(), boolean(),
-                pointer(::itemType), pointer { PlatformAbi.nullPointer }, pointer { PlatformAbi.nullPointer },
+                boolean(), boolean(addToVector != null), boolean(), boolean(addToMap != null), boolean(), boolean(),
+                pointer { resolveElementType(itemTypeName, itemType) },
+                pointer { keyTypeName?.let { resolveElementType(it, requireNotNull(keyType)) } ?: PlatformAbi.nullPointer },
+                pointer { PlatformAbi.nullPointer },
                 output { TypeProjection.copyMetadataNameTo(name, it) },
                 unavailable(ComMethodSignatures.HResult_Ptr), // ActivateInstance
                 unavailable(ComMethodSignatures.HResult_Ptr_Ptr), // CreateFromString
                 unavailable(ComMethodSignatures.HResult_Ptr_Ptr), // GetMember
                 WinRTInspectableMethodDefinition(ComMethodSignatures.HResult_Ptr_Ptr) { args ->
-                    collection.add(requireNotNull(marshaler.fromAbi(args[0])), marshaler.fromAbi(args[1]))
-                    KnownHResults.S_OK.value
+                    if (addToVector == null) KnownHResults.E_NOTIMPL.value else {
+                        addToVector(requireNotNull(marshaler.fromAbi(args[0])), marshaler.fromAbi(args[1]))
+                        KnownHResults.S_OK.value
+                    }
                 },
-                unavailable(ComMethodSignature.of(ComAbiValueKind.Pointer, ComAbiValueKind.Pointer, ComAbiValueKind.Pointer)),
+                WinRTInspectableMethodDefinition(ComMethodSignature.of(ComAbiValueKind.Pointer, ComAbiValueKind.Pointer, ComAbiValueKind.Pointer)) { args ->
+                    if (addToMap == null) KnownHResults.E_NOTIMPL.value else {
+                        addToMap(requireNotNull(marshaler.fromAbi(args[0])), marshaler.fromAbi(args[1]), marshaler.fromAbi(args[2]))
+                        KnownHResults.S_OK.value
+                    }
+                },
                 WinRTInspectableMethodDefinition(ComMethodSignature.of()) { KnownHResults.S_OK.value },
             ),
         )), defaultInterfaceId = WinUiXamlInterfaceIds.IXamlType)

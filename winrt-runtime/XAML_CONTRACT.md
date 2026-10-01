@@ -62,3 +62,10 @@ owns Property/MethodSemantics encoding, following CsWinRT
 the scanner's application declaration WinMD. `@WinRTXamlContentProperty` maps
 implicit child content to an explicitly typed property in both passes and in
 the generated runtime metadata.
+
+Writable Kotlin map properties expose the same dictionary contract as
+XamlCompiler's `XamlUserType`: `IsDictionary`, `KeyType`, `ItemType`, and a
+generated typed `AddToMap` callback. Writable lists expose `IsCollection` and
+`AddToVector`. Both use the shared container type lookup, including XBF type
+queries before `IXamlMember.Type` is requested. Read-only maps do not advertise
+an insertion callback.
