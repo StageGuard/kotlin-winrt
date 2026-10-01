@@ -54,10 +54,13 @@ abstract class CompileWinRTXamlTask @Inject constructor(
     val inputWindowsSdkFacadeFiles get() = objects.fileCollection().from(
         inputReferenceFiles.elements.map { windowsSdkUnionMetadataFiles(it.map { reference -> reference.asFile }) }, windowsSdkFacadeFiles)
     @get:InputDirectory @get:PathSensitive(PathSensitivity.RELATIVE)
-    val inputGenXbfDirectory get() = genXbfDirectory.map { it.asFile }.orElse(preparedMetadataManifest.map { manifest ->
-        val references = readPreparedMetadataCache(manifest.asFile.toPath()).files.map { it.toFile() } + referenceFiles.files
-        val winui = references.distinct().singleOrNull { it.name.equals("Microsoft.UI.Xaml.winmd", true) }
-            ?: error("Kotlin XAML requires one resolved Microsoft.UI.Xaml.winmd reference.")
+    val inputGenXbfDirectory get() = genXbfDirectory.map { it.asFile }.orElse(inputReferenceFiles.elements.map { references ->
+        // Keep the restore producer edge when GenXbf comes from compiler-only
+        // package references rather than the projection metadata manifest.
+        val winuiReferences = references.map { it.asFile }.filter { it.name.equals("Microsoft.UI.Xaml.winmd", true) }
+            .distinctBy { it.toPath().toAbsolutePath().normalize().toString().lowercase() }
+        val winui = winuiReferences.singleOrNull()
+            ?: error("Kotlin XAML requires one resolved Microsoft.UI.Xaml.winmd reference; found ${winuiReferences.size}: ${winuiReferences.joinToString()}.")
         winui.parentFile.parentFile.resolve("tools").also { tools ->
             require(File(tools, "x64/GenXbf.dll").isFile) {
                 "The selected WinUI package has no x64 GenXbf.dll at $tools; configure windows.xaml.genXbfDirectory."
@@ -92,7 +95,7 @@ abstract class CompileWinRTXamlTask @Inject constructor(
         File(output, "state.xml").delete()
         val compilerManifest = validateXamlCompilerPackage(compilerDirectory.get().asFile.toPath())
         validateXamlCompilerHost(compilerManifest)
-        validateXamlCompilerWinui(compilerManifest, preparedMetadataManifest.get().asFile,
+        validateXamlCompilerWinui(compilerManifest, inputReferenceFiles.files,
             inputGenXbfDirectory.get(), windowsAppSdkVersion.orNull)
         val roots = sourceRoots.files.filter { it.isDirectory }.sortedBy { it.absolutePath }
         val sources = linkedMapOf<String, File>()

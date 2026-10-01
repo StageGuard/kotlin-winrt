@@ -6,6 +6,7 @@ import org.gradle.api.file.RegularFile
 import org.gradle.api.provider.Provider
 import org.gradle.api.tasks.TaskProvider
 import org.gradle.api.tasks.SourceSetContainer
+import org.gradle.api.tasks.Delete
 import org.jetbrains.kotlin.gradle.plugin.KotlinApiPlugin
 import org.jetbrains.kotlin.gradle.plugin.KotlinJvmFactory
 import org.jetbrains.kotlin.gradle.dsl.KotlinMultiplatformExtension
@@ -43,6 +44,35 @@ internal fun configureWinRTXamlPipeline(
     val hasLibrarySources = project.provider { !extension.applicationEnabled.get() && !hasXaml.get() &&
         sourceRoots.get().filterNot { isKotlinWindowsToolkitPluginOwnedAuthoringSourceRoot(it.toPath()) }
             .any { root -> root.isDirectory && root.walkTopDown().any { it.isFile && it.extension == "kt" } } }
+    // Removing the last XAML file removes its compilations from the graph. Their
+    // tasks cannot clean previous output, so dispose only the owned XAML branches.
+    // The plain Kotlin model-library exporter remains an independent producer.
+    val removeStaleXaml = project.tasks.register("removeStaleWinRTXamlOutputs", Delete::class.java) { task ->
+        task.onlyIf { !hasXaml.get() }
+        task.delete(project.provider {
+            listOf("generated/kotlin-winrt/xaml", "intermediates/kotlin-winrt/xaml").flatMap { path ->
+                project.layout.buildDirectory.dir(path).get().asFile.listFiles().orEmpty()
+                    .filter { it.name != "library" && !(hasLibrarySources.get() && it.name == "application") }
+            }
+        })
+    }
+    candidates.configure { it.dependsOn(removeStaleXaml) }
+    project.tasks.withType(GenerateAppxResourcesArtifactTask::class.java).configureEach { it.dependsOn(removeStaleXaml) }
+    // Projection-disabled packages still supply XAML compiler metadata and the
+    // matching GenXbf. Resolve them through the existing authoritative restore.
+    val restore = project.tasks.named("restoreWinAppDependencies", RestoreWinAppDependenciesTask::class.java)
+    val compilerPackageReferences = restore.flatMap { it.winmdLockFile }.map { lock ->
+        val packages = extension.packageReferences.nugetPackages.filterNot { it.generateProjection }
+            .map { "${it.packageId}@${it.version.get()}" }
+        if (packages.isEmpty()) emptyList<File>() else
+            readWinAppProjectionWinmdFiles(listOf(lock.asFile), packages).map { it.toFile() }
+    }
+    project.tasks.withType(GenerateWinRTXamlApplicationHeaderTask::class.java).configureEach {
+        it.referenceFiles.from(compilerPackageReferences)
+    }
+    project.tasks.withType(CompileWinRTXamlTask::class.java).configureEach {
+        it.referenceFiles.from(compilerPackageReferences)
+    }
     val localCompilerDirectory = extension.xaml.compilerDirectory
     val sourceRootOwners = project.provider { winRTSourceRootOwners(project) }
     val resolveCompiler = project.tasks.register("resolveWinRTXamlCompiler", ResolveWinRTXamlCompilerTask::class.java) { task ->
@@ -91,6 +121,7 @@ internal fun configureWinRTXamlPipeline(
         })
         task.emitSources.set(hasXaml)
         task.onlyIf { hasXaml.get() || hasLibrarySources.get() }
+        task.dependsOn(removeStaleXaml)
     }
     val analyzeAll = project.tasks.register("analyzeWinRTXaml") { it.group = "kotlin-winrt" }
     project.tasks.withType(GenerateWinRTProjectionsTask::class.java).matching { it.name == "generateWinRTProjections" }.configureEach { task ->
@@ -102,6 +133,7 @@ internal fun configureWinRTXamlPipeline(
         project.fileTree(it.dir("dependency-schemas")) { spec -> spec.include("*.KotlinXaml.winmd") }
     }
     project.tasks.withType(GenerateWinRTIdentityTask::class.java).configureEach { task ->
+        task.dependsOn(removeStaleXaml)
         task.xamlSchemaFiles.from(hasXaml.flatMap { enabled ->
             if (enabled) applicationHeader.map { listOf(it.outputFile.get().asFile) }
             else project.providers.provider { emptyList<File>() }
