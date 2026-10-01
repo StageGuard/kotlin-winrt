@@ -8,6 +8,10 @@ import org.jetbrains.kotlin.backend.common.extensions.IrPluginContext
 import org.jetbrains.kotlin.backend.common.lower.DeclarationIrBuilder
 import org.jetbrains.kotlin.descriptors.DescriptorVisibilities
 import org.jetbrains.kotlin.ir.builders.declarations.buildField
+import org.jetbrains.kotlin.ir.builders.declarations.buildProperty
+import org.jetbrains.kotlin.ir.builders.declarations.addGetter
+import org.jetbrains.kotlin.ir.builders.irBlockBody
+import org.jetbrains.kotlin.ir.builders.irReturn
 import org.jetbrains.kotlin.ir.builders.irCall
 import org.jetbrains.kotlin.ir.builders.irCallWithSubstitutedType
 import org.jetbrains.kotlin.ir.builders.irGetField
@@ -297,7 +301,10 @@ private fun descriptorFieldExpression(
 ): IrExpression? {
     val shape = WinRTDelegateDescriptorShape(interfaceId, parameterKinds, returnKind)
     val key = file to shape
-    descriptorFields[key]?.let { field -> return builder.irGetField(null, field) }
+    fun read(field: IrField): IrExpression = field.correspondingPropertySymbol?.owner?.getter?.let {
+        builder.irCall(it.symbol)
+    } ?: builder.irGetField(null, field)
+    descriptorFields[key]?.let { field -> return read(field) }
 
     val helper = resolveRuntimeFunction(pluginContext, WINRT_CREATE_DESCRIPTOR_FQ_NAME, file)
         ?: return null
@@ -309,7 +316,7 @@ private fun descriptorFieldExpression(
         "kotlinWinRTDelegateDescriptor_${descriptorFieldFileSuffix(file)}_${descriptorFieldSuffix(shape)}",
     )
     val field = file.declarations
-        .filterIsInstance<IrField>()
+        .filterIsInstance<IrProperty>().mapNotNull { it.backingField }
         .singleOrNull { candidate -> candidate.name == fieldName }
         ?: pluginContext.irFactory.buildField {
             this.startOffset = startOffset
@@ -344,10 +351,33 @@ private fun descriptorFieldExpression(
                 endOffset,
                 initializer,
             )
-            file.declarations += created
+            // Native's lazy file initialization is attached to property accessors.
+            // A naked IrGetField in a class method can read the zero-initialized
+            // storage before the descriptor initializer has run.
+            val property = pluginContext.irFactory.buildProperty {
+                this.startOffset = startOffset
+                this.endOffset = endOffset
+                origin = IrDeclarationOrigin.DEFINED
+                name = fieldName
+                visibility = DescriptorVisibilities.PRIVATE
+                isVar = false
+            }.apply {
+                parent = file
+                backingField = created
+                created.correspondingPropertySymbol = symbol
+                val getter = addGetter {
+                    origin = IrDeclarationOrigin.DEFAULT_PROPERTY_ACCESSOR
+                    visibility = DescriptorVisibilities.PRIVATE
+                    this.returnType = created.type
+                }
+                getter.body = DeclarationIrBuilder(pluginContext, getter.symbol, startOffset, endOffset).irBlockBody {
+                    +irReturn(irGetField(null, created))
+                }
+            }
+            file.declarations += property
         }
     descriptorFields[key] = field
-    return builder.irGetField(null, field)
+    return read(field)
 }
 
 private data class WinRTDelegateDescriptorShape(
