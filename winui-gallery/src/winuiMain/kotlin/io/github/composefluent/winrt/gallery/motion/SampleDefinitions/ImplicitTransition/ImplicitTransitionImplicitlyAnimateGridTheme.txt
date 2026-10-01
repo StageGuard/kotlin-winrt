@@ -13,4 +13,6 @@ Implicitly animate when the Grid's theme changes
     </StackPanel>
 </Grid>
 --- kotlin
+ThemeExampleGrid.backgroundTransition = BrushTransition()
+
 private fun ThemeButton_Click(sender: Any?, args: RoutedEventArgs) { ThemeExampleGrid.requestedTheme = if (ThemeExampleGrid.requestedTheme == ElementTheme.Dark) ElementTheme.Light else ElementTheme.Dark; announce(ChangeThemeBtn, "UI local theme changed", "RectangleChangedNotificationActivityId") }

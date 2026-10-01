@@ -4,6 +4,8 @@
     <ResourceDictionary.MergedDictionaries>
         <ResourceDictionary Source="ms-appx:///io/github/composefluent/winrt/gallery/controls/CopyButtonStyles.xaml" />
         <ResourceDictionary Source="ms-appx:///io/github/composefluent/winrt/gallery/styles/GalleryGridStyles.xaml" />
+        <ResourceDictionary Source="ms-appx:///io/github/composefluent/winrt/gallery/fundamentals/controls/CounterControlStyles.xaml" />
+        <ResourceDictionary Source="ms-appx:///io/github/composefluent/winrt/gallery/fundamentals/controls/ValidatedPasswordBoxStyles.xaml" />
     </ResourceDictionary.MergedDictionaries>
     <ResourceDictionary.ThemeDictionaries>
         <ResourceDictionary x:Key="Default">
@@ -31,7 +33,10 @@
             <SolidColorBrush x:Key="GalleryOptionsBorder" Color="{ThemeResource SystemColorWindowTextColor}" />
         </ResourceDictionary>
     </ResourceDictionary.ThemeDictionaries>
+    <x:Double x:Key="ColorSectionSpacing">4</x:Double>
     <converters:NullableBooleanToBooleanConverter x:Key="nullableBooleanToBooleanConverter" />
+    <converters:DoubleToThicknessConverter x:Key="doubleToThicknessConverter" />
+    <converters:BrushToColorConverter x:Key="brushToColorConverter" />
     <Style x:Key="SubtitleHeadingTextBlockStyle" BasedOn="{StaticResource SubtitleTextBlockStyle}" TargetType="TextBlock">
         <Setter Property="AutomationProperties.HeadingLevel" Value="Level2" />
     </Style>

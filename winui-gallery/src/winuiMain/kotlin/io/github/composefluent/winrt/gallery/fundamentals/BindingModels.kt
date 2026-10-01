@@ -20,7 +20,24 @@ internal class ExampleViewModel : INotifyPropertyChanged {
     private fun changed(name: String) { handlers.toList().forEach { it(this, PropertyChangedEventArgs(name)) } }
 }
 
-internal class ListDetailItem(val Id: Int, val Title: String, val Text: String, val DateCreatedFormatted: String)
+internal class ListDetailItem(val Id: Int, val Title: String, val Text: String, val DateCreated: kotlin.time.Instant) {
+    // WinRT's formatter keeps this shared sample locale-aware on JVM and Native.
+    val DateCreatedFormatted: String
+        get() = windows.globalization.datetimeformatting.DateTimeFormatter("month.abbreviated day year hour minute").format(DateCreated)
+}
+
+internal fun bindingDate(year: Int, month: Int, day: Int, hour: Int, minute: Int): kotlin.time.Instant =
+    windows.globalization.Calendar().apply {
+        changeClock("24HourClock")
+        this.day = 1
+        this.year = year
+        this.month = month
+        this.day = day
+        this.hour = hour
+        this.minute = minute
+        second = 0
+        nanosecond = 0
+    }.getDateTime()
 
 internal class EmptyStringToVisibilityConverter : IValueConverter {
     override fun convert(value: Any?, targetType: KClass<*>?, parameter: Any?, language: String): Any? =

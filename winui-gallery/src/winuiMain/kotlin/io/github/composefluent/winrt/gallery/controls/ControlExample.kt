@@ -1,139 +1,110 @@
 package io.github.composefluent.winrt.gallery.controls
-
-import io.github.composefluent.winrt.gallery.GalleryCodeCatalog
-import io.github.composefluent.winrt.gallery.GallerySampleCode
-import io.github.composefluent.winrt.gallery.GalleryTheme
-import io.github.composefluent.winrt.gallery.kotlinCodePreview
-import io.github.composefluent.winrt.gallery.code.KotlinCodeDocument
-import io.github.composefluent.winrt.gallery.code.KotlinCodeSpan
-import io.github.composefluent.winrt.gallery.code.KotlinCodeKind
+import io.github.composefluent.winrt.gallery.*
+import io.github.composefluent.winrt.gallery.code.*
 import io.github.composefluent.winrt.runtime.WinRTXamlContentProperty
-import microsoft.ui.xaml.UIElement
-import microsoft.ui.xaml.Visibility
-import microsoft.ui.xaml.GridLength
-import microsoft.ui.xaml.GridUnitType
-import microsoft.ui.xaml.controls.UserControl
-
-/** Shared sample presenter following WinUI Gallery's ControlExample structure. */
+import io.github.composefluent.winrt.runtime.asWinRT
+import microsoft.ui.xaml.*
+import microsoft.ui.xaml.controls.*
+import microsoft.ui.xaml.media.*
 @WinRTXamlContentProperty("Example")
 internal class ControlExample : UserControl() {
     private var ready = false
+    private var sourceReady = false
     private var sourceSample: GallerySampleCode? = null
-    private var refreshSource: (() -> Unit)? = null
-    var Xaml: String = ""
-        set(value) { field = value; refreshSource?.invoke() }
-    var XamlSource: String = ""
-        set(value) { field = value; refreshSource?.invoke() }
     val Substitutions: MutableList<ControlExampleSubstitution> = mutableListOf()
-    var ExampleHeight: GridLength = GridLength(1.0, GridUnitType.Star)
     var WebViewHeight: Int = 400
     var WebViewWidth: Int = 800
-
-    var HeaderText: String = ""
-        set(value) {
-            field = value
-            if (ready) {
-                headerTextPresenter.text = value
-                headerTextPresenter.visibility = if (value.isBlank()) Visibility.Collapsed else Visibility.Visible
-            }
-        }
-
-    var SampleDefinition: String = ""
-        set(value) {
-            field = value
-            sourceSample = GalleryCodeCatalog.sampleDefinition(value)
-            sourceSample?.header?.takeIf(String::isNotBlank)?.let { HeaderText = it }
-        }
-
-    var Example: UIElement? = null
-        set(value) {
-            field = value
-            if (ready) examplePresenter.content = value
-        }
-
-    var Output: UIElement? = null
-        set(value) {
-            field = value
-            if (ready) {
-                outputPresenter.content = value
-                outputContainer.visibility = if (value == null) Visibility.Collapsed else Visibility.Visible
-            }
-        }
-
-    var Options: UIElement? = null
-        set(value) {
-            field = value
-            if (ready) {
-                optionsPresenter.content = value
-                optionsPresenter.visibility = if (value == null) Visibility.Collapsed else Visibility.Visible
-            }
-        }
-
+    var HeaderText: String
+        get() = getValue(HeaderTextProperty) as? String ?: ""
+        set(value) { setValue(HeaderTextProperty,value) }
+    var Example: UIElement?
+        get() = getValue(ExampleProperty) as UIElement?
+        set(value) { setValue(ExampleProperty,value) }
+    var Output: UIElement?
+        get() = getValue(OutputProperty) as UIElement?
+        set(value) { setValue(OutputProperty,value) }
+    var Options: UIElement?
+        get() = getValue(OptionsProperty) as UIElement?
+        set(value) { setValue(OptionsProperty,value) }
+    var Xaml: String
+        get() = getValue(XamlProperty) as? String ?: ""
+        set(value) { setValue(XamlProperty,value) }
+    var XamlSource: String
+        get() = getValue(XamlSourceProperty) as? String ?: ""
+        set(value) { setValue(XamlSourceProperty,value) }
+    var Kotlin: String
+        get() = getValue(KotlinProperty) as? String ?: ""
+        set(value) { setValue(KotlinProperty,value) }
+    var KotlinSource: String
+        get() = getValue(KotlinSourceProperty) as? String ?: ""
+        set(value) { setValue(KotlinSourceProperty,value) }
+    var SampleDefinition: String
+        get() = getValue(SampleDefinitionProperty) as? String ?: ""
+        set(value) { setValue(SampleDefinitionProperty,value) }
+    var SourceCodeVisibility: Visibility
+        get() = getValue(SourceCodeVisibilityProperty) as Visibility
+        set(value) { setValue(SourceCodeVisibilityProperty,value) }
+    var ExampleHeight: GridLength
+        get() = getValue(ExampleHeightProperty) as GridLength
+        set(value) { setValue(ExampleHeightProperty,value) }
+    var IsExperimental: Boolean
+        get() = getValue(IsExperimentalProperty) as Boolean
+        set(value) { setValue(IsExperimentalProperty,value) }
     override fun initializeComponent() {
-        super.initializeComponent()
-        ready = true
-        headerTextPresenter.text = HeaderText
-        headerTextPresenter.visibility = if (HeaderText.isBlank()) Visibility.Collapsed else Visibility.Visible
-        examplePresenter.content = Example
-        outputPresenter.content = Output
-        outputContainer.visibility = if (Output == null) Visibility.Collapsed else Visibility.Visible
-        optionsPresenter.content = Options
-        optionsPresenter.visibility = if (Options == null) Visibility.Collapsed else Visibility.Visible
-
+        super.initializeComponent(); ready = true
+        RefreshSampleDefinition()
+        UpdateHeader()
         val state = GalleryTheme.sampleBeingConstructed
-        val route = state?.sourceRoute
-        val index = state?.sourceExampleIndex ?: 0
-        if (state != null) {
-            state.sourceExampleIndex++
-            state.sampleBodies.add(examplePresenter)
-        }
-        var sourceReady = false
-        fun updateSource() {
-            val kotlin = sourceSample?.kotlin ?: route?.let { GalleryCodeCatalog.document(it, HeaderText, index) }
-            val xaml = if (Xaml.isNotEmpty()) KotlinCodeDocument("sample.xaml", Xaml,
-                listOf(KotlinCodeSpan(Xaml.length, KotlinCodeKind.Plain))) else
-                GalleryCodeCatalog.sourceDocument(XamlSource) ?: sourceSample?.xaml ?: route?.let { GalleryCodeCatalog.xamlDocument(it, HeaderText, index) }
-            if (kotlin != null) sourcePresenter.content = kotlinCodePreview(substitute(kotlin), xaml?.let(::substitute))
-        }
-        refreshSource = { if (sourceReady) updateSource() }
-        sourcePresenter.expanding.add { _, _ ->
-            if (!sourceReady) {
-                updateSource()
-                Substitutions.forEach { substitution -> substitution.addValueChanged { updateSource() } }
-                sourceReady = true
-            }
-        }
+        if (state != null) { state.sourceExampleIndex++; state.sampleBodies.add(ControlPresenter) }
+        if (ExampleHeight.gridUnitType == GridUnitType.Pixel) ControlPresenter.height = ExampleHeight.value
+        sourcePresenter.expanding.add { _,_ -> RefreshSource(); sourceReady = true }
+        SelectorBarControl.selectedItem = SelectorBarXamlItem
     }
-
-    private fun substitute(document: KotlinCodeDocument): KotlinCodeDocument {
-        val replacements = Regex("""\$\(([^)]+)\)""").findAll(document.source).map { match ->
-            match to requireNotNull(Substitutions.firstOrNull { it.Key == match.groupValues[1] }) {
-                "Unknown sample substitution ${match.groupValues[1]} in ${document.fileName}"
-            }.ValueAsString()
-        }.toList()
-        if (replacements.isEmpty()) return document
-        val source = buildString {
-            var start = 0
-            replacements.forEach { (match, value) ->
-                append(document.source, start, match.range.first); append(value)
-                start = match.range.last + 1
+    private fun UpdateHeader() { if (ready) HeaderTextPresenter.visibility = if (HeaderText.isBlank()) Visibility.Collapsed else Visibility.Visible }
+    private fun RefreshSampleDefinition() {
+        sourceSample = GalleryCodeCatalog.sampleDefinition(SampleDefinition)
+        sourceSample?.header?.takeIf(String::isNotBlank)?.let { HeaderText = it }
+        if (sourceReady) RefreshSource()
+    }
+    private fun RefreshSource() {
+        if (!ready) return
+        fun inline(name: String,source: String): KotlinCodeDocument = KotlinCodeDocument(name,source,listOf(KotlinCodeSpan(source.length,KotlinCodeKind.Plain)))
+        val xaml = if (Xaml.isNotEmpty()) inline("sample.xaml",Xaml) else GalleryCodeCatalog.sourceDocument(XamlSource) ?: sourceSample?.xaml
+        val kotlin = if (Kotlin.isNotEmpty()) inline("sample.kt",Kotlin) else GalleryCodeCatalog.sourceDocument(KotlinSource) ?: sourceSample?.kotlin
+        XamlPresenter.Substitutions = Substitutions
+        KotlinPresenter.Substitutions = Substitutions
+        xaml?.let { XamlPresenter.SetDocument(it) }
+        kotlin?.let { KotlinPresenter.SetDocument(it) }
+        fun showLanguage(item: SelectorBarItem, present: Boolean) {
+            if (!present) SelectorBarControl.items.remove(item)
+            else if (!SelectorBarControl.items.contains(item)) {
+                if (item == SelectorBarXamlItem) SelectorBarControl.items.add(0,item) else SelectorBarControl.items.add(item)
             }
-            append(document.source, start, document.source.length)
         }
-        fun mapOffset(offset: Int): Int {
-            var delta = 0
-            for ((match, value) in replacements) {
-                if (offset <= match.range.first) break
-                if (offset <= match.range.last + 1) return match.range.first + delta + value.length
-                delta += value.length - match.value.length
-            }
-            return offset + delta
-        }
-        var end = 0
-        val spans = document.spans.mapNotNull { span ->
-            val mapped = mapOffset(span.end)
-            if (mapped <= end) null else KotlinCodeSpan(mapped, span.kind).also { end = mapped }
-        }
-        return document.copy(source = source, spans = spans)
+        showLanguage(SelectorBarXamlItem,!xaml?.source.isNullOrBlank())
+        showLanguage(SelectorBarKotlinItem,!kotlin?.source.isNullOrBlank())
+        if (!SelectorBarControl.items.contains(SelectorBarControl.selectedItem))
+            SelectorBarControl.selectedItem = SelectorBarControl.items.firstOrNull()
+        UpdateLanguage()
+    }
+    private fun UpdateLanguage() {
+        XamlContentPresenter.visibility = if (SelectorBarControl.selectedItem == SelectorBarXamlItem) Visibility.Visible else Visibility.Collapsed
+        KotlinContentPresenter.visibility = if (SelectorBarControl.selectedItem == SelectorBarKotlinItem) Visibility.Visible else Visibility.Collapsed
+    }
+    private fun SelectorBarControl_SelectionChanged(sender: SelectorBar,args: SelectorBarSelectionChangedEventArgs) { if (ready) UpdateLanguage() }
+    private fun SelectorBarItem_Loaded(sender: Any?,args: RoutedEventArgs) { if (ready) RefreshSource() }
+    companion object {
+        val HeaderTextProperty: DependencyProperty = DependencyProperty.register("HeaderText",String::class,ControlExample::class,PropertyMetadata("", PropertyChangedCallback { sender,_ -> checkNotNull(sender).asWinRT<ControlExample>().UpdateHeader() }))
+        val ExampleProperty: DependencyProperty = DependencyProperty.register("Example",UIElement::class,ControlExample::class,PropertyMetadata(null))
+        val OutputProperty: DependencyProperty = DependencyProperty.register("Output",UIElement::class,ControlExample::class,PropertyMetadata(null))
+        val OptionsProperty: DependencyProperty = DependencyProperty.register("Options",UIElement::class,ControlExample::class,PropertyMetadata(null))
+        val XamlProperty: DependencyProperty = DependencyProperty.register("Xaml",String::class,ControlExample::class,PropertyMetadata("", PropertyChangedCallback { sender,_ -> checkNotNull(sender).asWinRT<ControlExample>().apply { if (sourceReady) RefreshSource() } }))
+        val XamlSourceProperty: DependencyProperty = DependencyProperty.register("XamlSource",String::class,ControlExample::class,PropertyMetadata("", PropertyChangedCallback { sender,_ -> checkNotNull(sender).asWinRT<ControlExample>().apply { if (sourceReady) RefreshSource() } }))
+        val KotlinProperty: DependencyProperty = DependencyProperty.register("Kotlin",String::class,ControlExample::class,PropertyMetadata("", PropertyChangedCallback { sender,_ -> checkNotNull(sender).asWinRT<ControlExample>().apply { if (sourceReady) RefreshSource() } }))
+        val KotlinSourceProperty: DependencyProperty = DependencyProperty.register("KotlinSource",String::class,ControlExample::class,PropertyMetadata("", PropertyChangedCallback { sender,_ -> checkNotNull(sender).asWinRT<ControlExample>().apply { if (sourceReady) RefreshSource() } }))
+        val SampleDefinitionProperty: DependencyProperty = DependencyProperty.register("SampleDefinition",String::class,ControlExample::class,PropertyMetadata("", PropertyChangedCallback { sender,_ -> checkNotNull(sender).asWinRT<ControlExample>().RefreshSampleDefinition() }))
+        val SourceCodeVisibilityProperty: DependencyProperty = DependencyProperty.register("SourceCodeVisibility",Visibility::class,ControlExample::class,PropertyMetadata(Visibility.Visible))
+        val ExampleHeightProperty: DependencyProperty = DependencyProperty.register("ExampleHeight",GridLength::class,ControlExample::class,PropertyMetadata(GridLength(1.0,GridUnitType.Star)))
+        val IsExperimentalProperty: DependencyProperty = DependencyProperty.register("IsExperimental",Boolean::class,ControlExample::class,PropertyMetadata(false))
     }
 }

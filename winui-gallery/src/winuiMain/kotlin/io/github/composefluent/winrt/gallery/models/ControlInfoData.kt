@@ -19,8 +19,11 @@ internal class ControlInfoDataItem(private val page: GalleryPageInfo) {
     val IsExperimental: Boolean get() = page.isExperimental
     val IncludedInBuild: Boolean get() = true
     val SourcePath: String get() = page.sourcePath
+    val RepositorySourcePath: String get() = page.repositorySourcePath
+    val Docs: List<ControlInfoDocLink> get() = page.docs.map { ControlInfoDocLink(it.title,it.uri) }
     override fun toString(): String = Title
 }
+internal class ControlInfoDocLink(val Title: String,val Uri: String)
 internal class ControlInfoDataGroup(val UniqueId: String, val Title: String, val IconGlyph: String,
     val Items: MutableList<ControlInfoDataItem>, val IsSpecialSection: Boolean = false) {
     override fun toString(): String = Title

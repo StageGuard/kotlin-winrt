@@ -20,5 +20,3 @@ Conditional Setters in a Style
     <TextBlock Text="Heading styled with conditional Setters"
                Style="{StaticResource ConditionalHeadingStyle}" />
 </Page>
---- kotlin
-

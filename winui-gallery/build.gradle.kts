@@ -139,7 +139,7 @@ windows {
             "Microsoft.UI.Xaml.Media.Animation", "Microsoft.UI.Xaml.Hosting",
             "Microsoft.UI.Xaml.Automation", "Microsoft.UI.Xaml.Automation.Peers",
             "Microsoft.UI.Composition", "Microsoft.UI.Composition.SystemBackdrops",
-            "Microsoft.UI.Windowing", "Microsoft.UI.Text", "Microsoft.UI.System", "Microsoft.UI.Content",
+            "Microsoft.UI.Windowing", "Microsoft.UI.Text", "Microsoft.UI.System", "Microsoft.UI.Content", "Microsoft.UI.Input",
             "Microsoft.Graphics.Canvas.Geometry",
             "Microsoft.Windows.Storage", "Microsoft.Windows.Storage.Pickers",
             "Microsoft.Windows.AppNotifications", "Microsoft.Windows.AppNotifications.Builder",
@@ -149,7 +149,7 @@ windows {
             "Windows.Media.Capture", "Windows.Media.Capture.Frames",
             "Windows.Media.Core", "Windows.Media.Playback", "Windows.Media.MediaProperties",
             "Windows.Storage", "Windows.Storage.Streams", "Windows.Storage.FileProperties",
-            "Windows.Devices.Geolocation", "Windows.Globalization",
+            "Windows.Devices.Geolocation", "Windows.Globalization", "Windows.Data.Xml.Dom",
             "Windows.Globalization.NumberFormatting",
             "Windows.Globalization.DateTimeFormatting", "Windows.UI.ViewManagement",
         ).forEach(::namespace)

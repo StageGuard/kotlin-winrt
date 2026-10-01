@@ -18,5 +18,3 @@ Conditional elements
                         Message="This InfoBar is included because the 'LegacyMode' flag is true." />
     </StackPanel>
 </Page>
---- kotlin
-

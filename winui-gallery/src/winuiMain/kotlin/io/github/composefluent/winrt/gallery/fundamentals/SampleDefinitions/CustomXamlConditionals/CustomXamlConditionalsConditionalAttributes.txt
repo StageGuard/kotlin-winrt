@@ -16,5 +16,3 @@ Conditional attributes
             legacy:Background="Gray"
             Foreground="White" />
 </Page>
---- kotlin
-

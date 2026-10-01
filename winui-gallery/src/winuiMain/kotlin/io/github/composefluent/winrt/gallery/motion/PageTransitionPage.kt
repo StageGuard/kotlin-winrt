@@ -13,7 +13,14 @@ import microsoft.ui.xaml.media.animation.*
 internal class PageTransitionPage : Page() {
     private var transitionInfo: NavigationTransitionInfo? = null
     private var ready = false
-    override fun initializeComponent() { super.initializeComponent(); ready = true; ContentFrame.navigate(SamplePage1::class) }
+    override fun initializeComponent() {
+        super.initializeComponent()
+        ready = true
+        ContentFrame.navigationFailed.add { _, args ->
+            println("Gallery page transition navigation failed: ${args.exception.stackTraceToString()}")
+        }
+        ContentFrame.navigate(SamplePage1::class)
+    }
     private fun ForwardButton1_Click(sender: Any?, args: RoutedEventArgs) {
         val page = if (ContentFrame.backStackDepth % 2 == 1) SamplePage1::class else SamplePage2::class
         val transition = transitionInfo

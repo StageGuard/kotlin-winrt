@@ -30,4 +30,5 @@ internal class ControlExampleSubstitution : DependencyObject() {
     }
 
     internal fun addValueChanged(listener: () -> Unit) { listeners += listener }
+    internal fun removeValueChanged(listener: () -> Unit) { listeners -= listener }
 }
