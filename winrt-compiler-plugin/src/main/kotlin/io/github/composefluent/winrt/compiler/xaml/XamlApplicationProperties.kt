@@ -13,6 +13,34 @@ import org.jetbrains.kotlin.ir.util.parentClassOrNull
 import org.jetbrains.kotlin.ir.util.fqNameWhenAvailable
 import org.jetbrains.kotlin.ir.expressions.IrConst
 
+/** One metadata mapping for property signatures, attached accessors and collection bases. */
+@OptIn(UnsafeDuringIrConstructionAPI::class)
+internal fun xamlApplicationTypeReference(type: IrType, types: Map<String, IndexedWinRTType>, applicationTypes: Set<String>): WinRTTypeRef {
+    val name = requireNotNull(type.classFqName?.asString()) { "XAML property requires a concrete type: $type" }
+    if (isWinRTVoidTypeName(name.removePrefix("kotlin."))) return WinRTTypeRef.named("System.Void")
+    val arguments = (type as? IrSimpleType)?.arguments.orEmpty().map {
+        xamlApplicationTypeReference(requireNotNull(it.typeOrNull) { "XAML property cannot use a star-projected type: $type" }, types, applicationTypes)
+    }
+    if (name == "kotlin.Array") return WinRTTypeRef.array(arguments.single())
+    winRTArrayElementForKotlinType(name)?.let { return WinRTTypeRef.array(WinRTTypeRef.named(it.toKotlinProjectionTypeName())) }
+    val primitive = winRTFundamentalTypeForName(name.removePrefix("kotlin."))
+    val indexed = resolveIndexedWinRTTypeByProjectedName(name, types)
+    val collection = winRTCollectionAbiNameForKotlinType(name)
+    val metadataName = when {
+        primitive != null -> primitive.toKotlinProjectionTypeName()
+        name == "kotlin.Any" -> "System.Object"
+        name in applicationTypes -> name
+        collection != null -> "$collection`${arguments.size}"
+        indexed != null -> indexed.qualifiedName.substringBefore('`') + if (arguments.isEmpty()) "" else "`${arguments.size}"
+        else -> error("XAML property type $name has no WinRT metadata projection")
+    }
+    val result = WinRTTypeRef.named(metadataName, arguments)
+    val isValueType = primitive?.isWinRTValueType == true ||
+        indexed?.kind in setOf(WinRTTypeKind.Enum.name, WinRTTypeKind.Struct.name) ||
+        type.classOrNull?.owner?.kind == org.jetbrains.kotlin.descriptors.ClassKind.ENUM_CLASS
+    return if (type.isNullable() && isValueType) WinRTTypeRef.named("Windows.Foundation.IReference`1", listOf(result)) else result
+}
+
 /** Public property visibility follows CsWinRT WinRTTypeWriter.AddPropertyDeclaration.
  * The temporary schema also describes representable private x:Bind inputs; generated
  * runtime registration filters them out. Component ABI export remains separate.
@@ -23,37 +51,13 @@ internal fun xamlApplicationProperties(
     types: Map<String, IndexedWinRTType>,
     applicationTypes: Set<String>,
     strictPublicProperties: Boolean = true,
+    includeInternal: Boolean = true,
 ): WinRTXamlApplicationTypeMembers {
     if (klass.kind == org.jetbrains.kotlin.descriptors.ClassKind.ENUM_CLASS) return WinRTXamlApplicationTypeMembers()
     fun visible(function: IrSimpleFunction?) = function != null &&
-        function.visibility in setOf(DescriptorVisibilities.PUBLIC, DescriptorVisibilities.INTERNAL)
+        (function.visibility == DescriptorVisibilities.PUBLIC || (includeInternal && function.visibility == DescriptorVisibilities.INTERNAL))
 
-    fun resolve(type: IrType): WinRTTypeRef {
-        val name = requireNotNull(type.classFqName?.asString()) { "XAML property requires a concrete type: $type" }
-        if (isWinRTVoidTypeName(name.removePrefix("kotlin."))) return WinRTTypeRef.named("System.Void")
-        val arguments = (type as? IrSimpleType)?.arguments.orEmpty().map {
-            resolve(requireNotNull(it.typeOrNull) { "XAML property cannot use a star-projected type: $type" })
-        }
-        if (name == "kotlin.Array") return WinRTTypeRef.array(arguments.single())
-        val primitive = winRTFundamentalTypeForName(name.removePrefix("kotlin."))
-        val indexed = resolveIndexedWinRTTypeByProjectedName(name, types)
-        val collection = winRTCollectionAbiNameForKotlinType(name)
-        val metadataName = when {
-            primitive != null -> primitive.toKotlinProjectionTypeName()
-            name == "kotlin.Any" -> "System.Object"
-            name in applicationTypes -> name
-            collection != null -> "$collection`${arguments.size}"
-            indexed != null -> indexed.qualifiedName.substringBefore('`') +
-                if (arguments.isEmpty()) "" else "`${arguments.size}"
-            else -> error("XAML property type $name has no WinRT metadata projection")
-        }
-        val result = WinRTTypeRef.named(metadataName, arguments)
-        val isValueType = primitive?.isWinRTValueType == true ||
-            indexed?.kind in setOf(WinRTTypeKind.Enum.name, WinRTTypeKind.Struct.name) ||
-            type.classOrNull?.owner?.kind == org.jetbrains.kotlin.descriptors.ClassKind.ENUM_CLASS
-        return if (type.isNullable() && isValueType)
-            WinRTTypeRef.named("Windows.Foundation.IReference`1", listOf(result)) else result
-    }
+    fun resolve(type: IrType): WinRTTypeRef = xamlApplicationTypeReference(type, types, applicationTypes)
 
     val owners = listOf(klass) + listOfNotNull(klass.companionObject())
     val dependencyPropertyNames = owners.filter { it.kind == org.jetbrains.kotlin.descriptors.ClassKind.OBJECT }

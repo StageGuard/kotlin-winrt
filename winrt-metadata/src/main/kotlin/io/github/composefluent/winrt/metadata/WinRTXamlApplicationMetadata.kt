@@ -36,6 +36,31 @@ data class WinRTXamlApplicationTypeMembers(
     init {
         require(properties.map { it.name }.distinct().size == properties.size)
         require(events.map { it.name }.distinct().size == events.size)
-        require(contentProperty == null || properties.any { it.name == contentProperty })
+        require(contentProperty == null || contentProperty.isNotBlank())
     }
+}
+
+/** XamlSchemaCodeInfo.GetFullGenericNestedName's IDL names, distinct from Kotlin API spelling.
+ * The CLR primitives use SByte/Byte/Single, arrays retain their rank, and closed generics retain arity.
+ */
+fun WinRTTypeRef.xamlStandardTypeName(): String = when (kind) {
+    WinRTTypeRefKind.Array -> requireNotNull(elementType).xamlStandardTypeName() + "[" + ",".repeat(arrayRank.coerceAtLeast(1) - 1) + "]"
+    WinRTTypeRefKind.Named -> {
+        val name = qualifiedName.orEmpty()
+        val fundamental = winRTFundamentalTypeForName(name.removePrefix("kotlin."))
+        val standardName = when {
+            fundamental != null -> when (fundamental) {
+                WinRTFundamentalType.Int8 -> "SByte"
+                WinRTFundamentalType.UInt8 -> "Byte"
+                WinRTFundamentalType.Float -> "Single"
+                else -> fundamental.name
+            }
+            isWinRTObjectTypeName(name) -> "Object"
+            isWinRTGuidTypeName(name) -> "Guid"
+            else -> name.substringBefore('`')
+        }
+        if (typeArguments.isEmpty()) standardName else "$standardName`${typeArguments.size}" +
+            typeArguments.joinToString(", ", "<", ">") { it.xamlStandardTypeName() }
+    }
+    else -> error("A XAML type needs a concrete metadata name: $typeName")
 }

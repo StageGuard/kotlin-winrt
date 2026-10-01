@@ -70,6 +70,23 @@ generated typed `AddToMap` callback. Writable lists expose `IsCollection` and
 queries before `IXamlMember.Type` is requested. Read-only maps do not advertise
 an insertion callback.
 
+Closed arrays, nullable values and collections carry explicit compiled type shapes.
+`FullName` uses XBF's standard names (for example `Int32[]` and
+``Windows.Foundation.IReference`1<Int32>``), while `UnderlyingType`, `BoxedType`,
+`ItemType` and `KeyType` preserve the corresponding metadata identity. Nested
+type arguments cannot be reconstructed from an erased Kotlin `KClass`.
+Nullable string conversion delegates to the inner type's converter; system type
+fallbacks leave SDK-owned parsing to the SDK metadata provider, as in C#.
+Classes implementing projected list or map interfaces carry the same typed
+insertion contract. Their schema uses closed InterfaceImpl TypeSpec signatures,
+following `WinRTTypeWriter.GetTypeSpecification`.
+
+Attached members retain the getter's target type, allow getter-only access, and
+advertise a dependency property only when its static DependencyProperty exists.
+Content properties can refer to inherited members. A definition's initializer
+initializes its own companion or object, and ordinary model classes receive
+bindable metadata without being registered as Windows Runtime components.
+
 XAML libraries publish their declaration schema in the existing library identity's
 `xamlSchemaRecords`, separately from `authoredMetadataRecords`. Consumers materialize
 these records only for XAML header analysis and compilation; they do not generate

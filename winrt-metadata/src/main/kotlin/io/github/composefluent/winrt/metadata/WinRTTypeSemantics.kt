@@ -40,6 +40,13 @@ fun winRTFundamentalTypeForName(typeName: String): WinRTFundamentalType? =
 fun isWinRTFundamentalTypeName(typeName: String): Boolean =
     winRTFundamentalTypeForName(typeName) != null
 
+/** Kotlin's primitive array classes, using the existing scalar classification. */
+fun winRTArrayElementForKotlinType(typeName: String): WinRTFundamentalType? {
+    val name = typeName.removePrefix("kotlin.")
+    if ('.' in name || !name.endsWith("Array")) return null
+    return winRTFundamentalTypeForName(name.removeSuffix("Array"))?.takeIf { it.isWinRTValueType }
+}
+
 fun isWinRTFundamentalTypeName(typeName: String, expectedType: WinRTFundamentalType): Boolean =
     winRTFundamentalTypeForName(typeName) == expectedType
 

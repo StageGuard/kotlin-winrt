@@ -12,15 +12,18 @@ class WinRTXamlTypeDefinition(
     val contentProperty: String? = null,
     members: List<WinRTXamlMemberDefinition> = emptyList(),
     val initializer: (() -> Unit)? = null,
+    val isBindable: Boolean = members.any { !it.isAttachable },
+    val createFromString: ((String) -> Any)? = null,
+    val shape: WinRTXamlValueTypeDefinition? = null,
+    val valueTypes: List<WinRTXamlValueTypeDefinition> = emptyList(),
+    val isWinRTComponent: Boolean = true,
 ) {
     val members: Map<String, WinRTXamlMemberDefinition> = members.associateBy { it.name }
 
     init {
         require(name.isNotBlank() && baseName.isNotBlank() && name != baseName)
         require(this.members.size == members.size) { "Duplicate XAML member on $name" }
-        require(contentProperty == null || contentProperty in this.members) {
-            "Unknown XAML content property $name.$contentProperty"
-        }
+        require(contentProperty == null || contentProperty.isNotBlank())
     }
 }
 
@@ -35,10 +38,39 @@ class WinRTXamlMemberDefinition(
     val collection: WinRTXamlCollectionDefinition? = null,
     val isAttachable: Boolean = false,
     val dictionary: WinRTXamlDictionaryDefinition? = null,
+    val targetTypeName: String? = null,
+    val targetType: KClass<*>? = null,
+    val valueTypes: List<WinRTXamlValueTypeDefinition> = emptyList(),
 ) {
     init {
         require(name.isNotBlank() && typeName.isNotBlank())
         require(collection == null || dictionary == null) { "A XAML member cannot have both vector and map insertion." }
+    }
+}
+
+/** Closed type information supplied by the compiler, rather than inferred from erased KClass.
+ * Corresponds to XamlUserType's array, item/key/boxed type and typed insertion delegates.
+ */
+class WinRTXamlValueTypeDefinition(
+    val name: String,
+    val type: KClass<*>,
+    val isArray: Boolean = false,
+    val itemTypeName: String? = null,
+    val itemType: KClass<*>? = null,
+    val keyTypeName: String? = null,
+    val keyType: KClass<*>? = null,
+    val boxedTypeName: String? = null,
+    val boxedType: KClass<*>? = null,
+    val addToVector: ((Any, Any?) -> Unit)? = null,
+    val addToMap: ((Any, Any?, Any?) -> Unit)? = null,
+) {
+    init {
+        require(name.isNotBlank())
+        require((itemTypeName == null) == (itemType == null))
+        require((keyTypeName == null) == (keyType == null))
+        require((boxedTypeName == null) == (boxedType == null))
+        require(addToVector == null || (itemType != null && addToMap == null))
+        require(addToMap == null || (itemType != null && keyType != null))
     }
 }
 
@@ -61,7 +93,12 @@ class WinRTXamlDictionaryDefinition(
 )
 
 fun registerWinRTXamlTypeDefinition(definition: WinRTXamlTypeDefinition) {
-    Projections.registerAuthoredRuntimeClassType(definition.type, definition.name, definition.baseName)
+    if (definition.isWinRTComponent) Projections.registerAuthoredRuntimeClassType(definition.type, definition.name, definition.baseName)
+    else {
+        // CsWinRT's bindable managed models have XAML metadata without a WinRT type signature.
+        TypeNameSupport.registerProjectionType(definition.type, definition.name)
+        WinUiAuthoredTypeMetadata.register(definition.type, definition.name, definition.baseName)
+    }
     WinUiAuthoredTypeMetadata.registerDefinition(definition)
 }
 

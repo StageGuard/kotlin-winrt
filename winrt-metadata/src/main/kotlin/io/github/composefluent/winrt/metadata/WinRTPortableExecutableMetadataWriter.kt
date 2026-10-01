@@ -130,7 +130,11 @@ private class WinmdBuilder(
         applicationMembers[type.runtimeClassName]?.events.orEmpty().sortedBy { it.name }
             .map { type.runtimeClassName to it }
     }
-    private val eventTypeSpecs = events.map { it.second.handlerType }.filter { it.typeArguments.isNotEmpty() }.distinct()
+    // CsWinRT WinRTTypeWriter.GetTypeSpecification also owns closed InterfaceImpl signatures.
+    private val implementedInterfaces = (interfaces.flatMap { it.implementedInterfaceNames } +
+        runtimeClasses.flatMap { it.interfaceNames }).map(WinRTTypeRef::fromDisplayName)
+    private val typeSpecs = (events.map { it.second.handlerType } + implementedInterfaces)
+        .filter { it.typeArguments.isNotEmpty() }.distinct()
     private val methods = runtimeClasses.flatMap { type ->
         applicationMembers[type.runtimeClassName]?.methods.orEmpty()
             .sortedWith(compareBy({ it.name }, { it.parameterTypes.joinToString { parameter -> parameter.typeName } }))
@@ -208,9 +212,9 @@ private class WinmdBuilder(
         }
         val typeRefs = (
             runtimeClasses.flatMap { descriptor ->
-                (listOf(descriptor.baseRuntimeClassName ?: "System.Object") + descriptor.interfaceNames).filterNot(localTypeNames::contains)
+                listOf(descriptor.baseRuntimeClassName ?: "System.Object").filterNot(localTypeNames::contains)
             } +
-                interfaces.flatMap { descriptor -> descriptor.implementedInterfaceNames.filterNot(localTypeNames::contains) } +
+                implementedInterfaces.flatMap(::signatureReferences).filterNot(localTypeNames::contains) +
                 attributeTypeNames + (properties.flatMap { signatureReferences(it.second.type) } +
                     methods.flatMap { (_, method) -> (method.parameterTypes + method.returnType).flatMap(::signatureReferences) } +
                     events.flatMap { signatureReferences(it.second.handlerType) } +
@@ -290,7 +294,7 @@ private class WinmdBuilder(
             (if (events.isEmpty()) 0L else (1L shl TABLE_EVENT_MAP) or (1L shl TABLE_EVENT)) or
             (if (properties.isEmpty()) 0L else (1L shl TABLE_PROPERTY_MAP) or (1L shl TABLE_PROPERTY)) or
             (if (properties.isEmpty() && events.isEmpty()) 0L else 1L shl TABLE_METHOD_SEMANTICS) or
-            (if (eventTypeSpecs.isEmpty()) 0L else 1L shl TABLE_TYPE_SPEC) or
+            (if (typeSpecs.isEmpty()) 0L else 1L shl TABLE_TYPE_SPEC) or
             (1L shl TABLE_ASSEMBLY) or
             (if (assemblyRefs.isEmpty()) 0L else 1L shl TABLE_ASSEMBLY_REF)
         writer.int32(0)
@@ -326,7 +330,7 @@ private class WinmdBuilder(
             writer.int32(properties.size)
         }
         if (properties.isNotEmpty() || events.isNotEmpty()) writer.int32(accessorCount + events.size * 2)
-        if (eventTypeSpecs.isNotEmpty()) writer.int32(eventTypeSpecs.size)
+        if (typeSpecs.isNotEmpty()) writer.int32(typeSpecs.size)
         writer.int32(1)
         if (assemblyRefs.isNotEmpty()) writer.int32(assemblyRefs.size)
         writer.int16(0)
@@ -421,14 +425,14 @@ private class WinmdBuilder(
             val typeDefRowId = requireNotNull(localTypeDefRowIds[descriptor.interfaceName])
             descriptor.implementedInterfaceNames.forEach { interfaceName ->
                 writer.index(typeDefRowId)
-                writer.index(codedTypeDefOrRef(typeRefs, localTypeDefRowIds, interfaceName))
+                writer.index(codedTypeDefOrRef(typeRefs, localTypeDefRowIds, WinRTTypeRef.fromDisplayName(interfaceName)))
             }
         }
         runtimeClasses.forEachIndexed { classIndex, descriptor ->
             val typeDefRowId = classIndex + 2 + interfaces.size
             descriptor.interfaceNames.forEach { interfaceName ->
                 writer.index(typeDefRowId)
-                writer.index(codedTypeDefOrRef(typeRefs, localTypeDefRowIds, interfaceName))
+                writer.index(codedTypeDefOrRef(typeRefs, localTypeDefRowIds, WinRTTypeRef.fromDisplayName(interfaceName)))
             }
         }
         attributeMemberRefs.forEach { memberRef ->
@@ -453,9 +457,7 @@ private class WinmdBuilder(
         }
         events.forEach { (_, event) ->
             writer.int16(0); writer.index(strings.index(event.name))
-            val specIndex = eventTypeSpecs.indexOf(event.handlerType)
-            writer.index(if (specIndex >= 0) ((specIndex + 1) shl 2) or 2 else
-                codedTypeDefOrRef(typeRefs, localTypeDefRowIds, requireNotNull(event.handlerType.qualifiedName)))
+            writer.index(codedTypeDefOrRef(typeRefs, localTypeDefRowIds, event.handlerType))
         }
         properties.forEachIndexed { index, (owner, _) ->
             if (index == 0 || properties[index - 1].first != owner) {
@@ -483,7 +485,7 @@ private class WinmdBuilder(
         semantics.sortedBy { it.association }.forEach { row ->
             writer.int16(row.flags); writer.index(row.method); writer.index(row.association)
         }
-        eventTypeSpecs.forEach { type -> writer.index(blobs.index(signature(type, typeRefs, localTypeDefRowIds))) }
+        typeSpecs.forEach { type -> writer.index(blobs.index(signature(type, typeRefs, localTypeDefRowIds))) }
         writer.int32(0x00008004)
         writer.int16(1)
         writer.int16(0)
@@ -702,6 +704,18 @@ private class WinmdBuilder(
         val typeRefRowId = typeRefs.indexOfFirst { typeRef -> typeRef.qualifiedName == qualifiedName } + 1
         require(typeRefRowId > 0) { "WinMD TypeRef '$qualifiedName' was not declared." }
         return (typeRefRowId shl CODED_TYPE_DEF_OR_REF_TAG_BITS) or CODED_TYPE_DEF_OR_REF_TYPE_REF
+    }
+
+    private fun codedTypeDefOrRef(
+        typeRefs: List<TypeRefRow>,
+        localTypeDefRowIds: Map<String, Int>,
+        type: WinRTTypeRef,
+    ): Int = if (type.typeArguments.isEmpty()) {
+        codedTypeDefOrRef(typeRefs, localTypeDefRowIds, requireNotNull(type.qualifiedName))
+    } else {
+        val rowId = typeSpecs.indexOf(type) + 1
+        require(rowId > 0) { "WinMD TypeSpec '${type.typeName}' was not declared." }
+        (rowId shl CODED_TYPE_DEF_OR_REF_TAG_BITS) or 2
     }
 
     private fun codedTypeDefOrRef(

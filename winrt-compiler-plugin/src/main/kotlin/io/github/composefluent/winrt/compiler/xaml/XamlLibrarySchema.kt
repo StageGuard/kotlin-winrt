@@ -3,6 +3,8 @@ package io.github.composefluent.winrt.compiler.xaml
 import io.github.composefluent.winrt.compiler.KotlinWinRTCommandLineProcessor
 import io.github.composefluent.winrt.compiler.authoring.readAuthoringMetadataIndex
 import io.github.composefluent.winrt.compiler.authoring.resolveIndexedWinRTTypeByProjectedName
+import io.github.composefluent.winrt.compiler.authoring.requiresComponentAuthoring
+import io.github.composefluent.winrt.compiler.authoring.WINRT_AUTHORED_RUNTIME_CLASS_ANNOTATION
 import io.github.composefluent.winrt.metadata.*
 import org.jetbrains.kotlin.backend.common.extensions.IrGenerationExtension
 import org.jetbrains.kotlin.backend.common.extensions.IrPluginContext
@@ -70,9 +72,15 @@ private class XamlLibrarySchema(private val root: Path, private val assembly: St
         val names = classes.mapTo(mutableSetOf()) { it.fqNameWhenAvailable!!.asString() } + references
             .filter { it.fileName.toString().endsWith(".KotlinXaml.winmd") }
             .flatMap { WinRTMetadataLoader.load(it).namespaces.flatMap { namespace -> namespace.types }.map { type -> type.qualifiedName } }
+        val interfaces = classes.associate { klass -> klass to klass.superTypes.mapNotNull { type ->
+            val name = type.classFqName?.asString().orEmpty()
+            if (resolveIndexedWinRTTypeByProjectedName(name, types)?.kind != WinRTTypeKind.Interface.name &&
+                winRTCollectionAbiNameForKotlinType(name) == null) null else
+                xamlApplicationTypeReference(type, types, names) to type.sourceType()
+        } }
         val members = classes.associate { klass ->
             klass.fqNameWhenAvailable!!.asString() to xamlApplicationProperties(klass, types, names,
-                strictPublicProperties = false).let { schema -> schema.copy(
+                strictPublicProperties = false, includeInternal = false).let { schema -> schema.copy(
                 properties = schema.properties.filter { property -> property.isPublic &&
                     klass.declarations.filterIsInstance<IrProperty>().any { it.name.asString() == property.name &&
                         it.getter?.visibility == DescriptorVisibilities.PUBLIC } },
@@ -88,8 +96,7 @@ private class XamlLibrarySchema(private val root: Path, private val assembly: St
                     ?.takeIf { it.kind == WinRTTypeKind.RuntimeClass.name }?.qualifiedName
             }
             WinRTXamlApplicationTypeDescriptor(klass.fqNameWhenAvailable!!.asString(), base,
-                klass.superTypes.mapNotNull { type -> resolveIndexedWinRTTypeByProjectedName(type.classFqName?.asString().orEmpty(), types)
-                    ?.takeIf { it.kind == WinRTTypeKind.Interface.name }?.qualifiedName },
+                interfaces.getValue(klass).map { it.first.typeName },
                 isActivatable = defaultConstructor(klass) != null, isSealed = klass.modality == Modality.FINAL,
                 enumEntries = if (klass.kind == ClassKind.ENUM_CLASS) klass.declarations.filterIsInstance<IrEnumEntry>()
                     .map { it.name.asString() } else null)
@@ -103,6 +110,7 @@ private class XamlLibrarySchema(private val root: Path, private val assembly: St
         Files.createDirectories(source.parent)
         source.writeText(buildString {
             appendLine("@file:Suppress(\"UNCHECKED_CAST\")")
+            appendLine("@file:OptIn(kotlin.ExperimentalUnsignedTypes::class)")
             appendLine("package io.github.composefluent.winrt.generated.xaml")
             appendLine("object $registrar {")
             appendLine("  private val registration: Unit = run {")
@@ -117,38 +125,41 @@ private class XamlLibrarySchema(private val root: Path, private val assembly: St
                 val baseType = klass.superTypes.firstOrNull { type -> type.classFqName?.asString() == descriptor.baseRuntimeClassName ||
                     resolveIndexedWinRTTypeByProjectedName(type.classFqName?.asString().orEmpty(), types)?.qualifiedName == descriptor.baseRuntimeClassName }
                 appendLine("      baseName = ${literal(descriptor.baseRuntimeClassName ?: "System.Object")}, baseType = ${baseType?.sourceType()?.substringBefore('<') ?: "kotlin.Any"}::class,")
+                fun componentTypes(klass: IrClass, seen: MutableSet<IrClass> = mutableSetOf()): List<io.github.composefluent.winrt.compiler.authoring.IndexedWinRTType> =
+                    if (!seen.add(klass)) emptyList() else klass.superTypes.flatMap { superType ->
+                        listOfNotNull(resolveIndexedWinRTTypeByProjectedName(superType.classFqName?.asString().orEmpty(), types)) +
+                            (superType.classOrNull?.owner?.let { componentTypes(it, seen) } ?: emptyList())
+                    }
+                appendLine("      isWinRTComponent = ${requiresComponentAuthoring(componentTypes(klass), klass.hasAnnotation(org.jetbrains.kotlin.name.FqName(WINRT_AUTHORED_RUNTIME_CLASS_ANNOTATION)))},")
                 if (descriptor.isActivatable) appendLine("      activate = { $name() },")
+                val initializer = if (klass.kind == ClassKind.OBJECT) name else klass.companionObject()?.let { "$name.${it.name.asString()}" }
+                initializer?.let { appendLine("      initializer = { $it; Unit },") }
                 members.getValue(name).contentProperty?.let { content ->
-                    if (members.getValue(name).properties.any { it.name == content }) appendLine("      contentProperty = ${literal(content)},")
+                    appendLine("      contentProperty = ${literal(content)},")
+                }
+                val convert: (String, String) -> String = { value, type -> "$value as $type" }
+                val shape = xamlCollectionRegistrationSources(interfaces.getValue(klass), convert)
+                if (shape.isNotEmpty()) {
+                    appendLine("      shape = ${shape.last()},")
+                    appendLine("      valueTypes = listOf(${shape.joinToString(",\n")}),")
                 }
                 appendLine("      members = listOf(")
                 for (member in members.getValue(name).properties.filterNot { it.isStatic }) {
                     val property = klass.declarations.filterIsInstance<IrProperty>().single { it.name.asString() == member.name }
                     val propertyType = property.getter!!.returnType
                     val kotlinType = propertyType.sourceType()
-                    appendLine("        io.github.composefluent.winrt.runtime.WinRTXamlMemberDefinition(")
-                    appendLine("          name = ${literal(member.name)}, typeName = ${literal(member.type.typeName)}, type = ${propertyType.classFqName!!.asString()}::class,")
-                    appendLine("          isDependencyProperty = ${member.isDependencyProperty}, get = { (it as $name).`${member.name}` },")
-                    if (!member.isReadOnly && property.setter?.visibility == DescriptorVisibilities.PUBLIC)
-                        appendLine("          set = { instance, value -> (instance as $name).`${member.name}` = value as $kotlinType },")
-                    val args = (propertyType as? IrSimpleType)?.arguments.orEmpty().mapNotNull { it.typeOrNull }
-                    when (winRTCollectionKindForAbiName(member.type.qualifiedName.orEmpty())) {
-                        WinRTCollectionInterfaceKind.Vector -> {
-                            val item = args.single()
-                            appendLine("          collection = io.github.composefluent.winrt.runtime.WinRTXamlCollectionDefinition(kotlin.collections.MutableList::class,")
-                            appendLine("            ${literal(member.type.typeArguments.single().typeName)}, ${item.classFqName!!.asString()}::class,")
-                            appendLine("            { instance, value -> (instance as $kotlinType).add(value as ${item.sourceType()}); Unit }),")
-                        }
-                        WinRTCollectionInterfaceKind.Map -> {
-                            val (key, item) = args
-                            appendLine("          dictionary = io.github.composefluent.winrt.runtime.WinRTXamlDictionaryDefinition(kotlin.collections.MutableMap::class,")
-                            appendLine("            ${literal(member.type.typeArguments[0].typeName)}, ${key.classFqName!!.asString()}::class,")
-                            appendLine("            ${literal(member.type.typeArguments[1].typeName)}, ${item.classFqName!!.asString()}::class,")
-                            appendLine("            { instance, key, value -> (instance as $kotlinType)[key as ${key.sourceType()}] = value as ${item.sourceType()} }),")
-                        }
-                        else -> Unit
-                    }
-                    appendLine("        ),")
+                    appendLine(xamlPropertyRegistrationSource(name, member, kotlinType, convert).prependIndent("        ") + ",")
+                }
+                val functions = (klass.declarations + klass.companionObject()?.declarations.orEmpty()).filterIsInstance<IrSimpleFunction>()
+                val accessors = members.getValue(name).methods.filter { it.isStatic && it.isPublic }.map { method ->
+                    val function = functions.single { function -> function.name.asString() == method.name && function.visibility == DescriptorVisibilities.PUBLIC &&
+                        runCatching { xamlApplicationTypeReference(function.returnType, types, names) == method.returnType &&
+                            function.parameters.filter { it.kind == IrParameterKind.Regular }.map { xamlApplicationTypeReference(it.type, types, names) } == method.parameterTypes
+                        }.getOrDefault(false) }
+                    XamlStaticAccessor(method, function.returnType.sourceType(), function.parameters.filter { it.kind == IrParameterKind.Regular }.map { it.type.sourceType() })
+                }
+                xamlAttachedRegistrationSources(name, members.getValue(name), accessors, convert).forEach {
+                    appendLine(it.prependIndent("        ") + ",")
                 }
                 appendLine("      )," )
                 appendLine("    ))")
