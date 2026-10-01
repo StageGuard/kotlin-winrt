@@ -95,12 +95,12 @@ G1 只验证编译器工具能力，不设计 WinRT 语义，不把探针中的�
 
 ## 目标与推荐默认方案
 
-- [ ] 同目录下的 `MainPage.kt` 与 `MainPage.xaml` 自动关联，不需要类注解或逐文件 Gradle 配置。
-- [ ] 保留 XAML 的 `x:Class`，以完整限定名确认真实 Kotlin 类身份；文件主名只用于发现与一致性校验。
-- [ ] 用户继续声明 `class MainPage : Page()`；优先通过已有编译器插件补充声明和实现，不要求用户改成生成基类。
-- [ ] 使用标准 Kotlin 语法和 FIR/IR 插件扩展点，不增加 `partial` 关键字。
-- [ ] 保留 XamlCompiler 的 DOM、语义分析、connection ID 重写和原生 GenXbf 流程。
-- [ ] 把 ABI、对象身份、生命周期放在 runtime/authoring；生成器只生成描述、成员和调用，不在样例中补运行时机制。
+- [x] 同目录下的 `MainPage.kt` 与 `MainPage.xaml` 自动关联，不需要类注解或逐文件 Gradle 配置。
+- [x] 保留 XAML 的 `x:Class`，以完整限定名确认真实 Kotlin 类身份；文件主名只用于发现与一致性校验。
+- [x] 用户继续声明 `class MainPage : Page()`；优先通过已有编译器插件补充声明和实现，不要求用户改成生成基类。
+- [x] 使用标准 Kotlin 语法和 FIR/IR 插件扩展点，不增加 `partial` 关键字。
+- [x] 保留 XamlCompiler 的 DOM、语义分析、connection ID 重写和原生 GenXbf 流程。
+- [x] 把 ABI、对象身份、生命周期放在 runtime/authoring；生成器只生成描述、成员和调用，不在样例中补运行时机制。
 
 第一版预期用户代码形态如下；类型导入及属性值装箱使用项目实际投影 API，示例不规定新的公共 API：
 
@@ -157,50 +157,50 @@ class MainPage : Page() {
 
 ## 编译链路首个里程碑与最终交付范围
 
-- [ ] Windows JVM：从原始 `.xaml` 构建出 XBF、生成成员及 PRI，并在原 WinUI Gallery 导航中加载迁移后的 Button 页面。
-- [ ] 页面保持直接继承现有 WinUI 投影基类；不需要注解或手写连接器。
-- [ ] `x:Name` 在用户 Kotlin 源码中可解析、类型检查通过，加载后引用真实控件。
-- [ ] 普通 XAML 事件连接到用户的 private 实例处理方法。
-- [ ] 生成连接器通过页面自身 COM 身份可查询；关闭页面后回调和引用按现有生命周期约定释放。
+- [x] Windows JVM：从原始 `.xaml` 构建出 XBF、生成成员及 PRI，并在原 WinUI Gallery 导航中加载迁移后的 Button 页面。
+- [x] 页面保持直接继承现有 WinUI 投影基类；不需要注解或手写连接器。
+- [x] `x:Name` 在用户 Kotlin 源码中可解析、类型检查通过，加载后引用真实控件。
+- [x] 普通 XAML 事件连接到用户的 private 实例处理方法。
+- [x] 生成连接器通过页面自身 COM 身份可查询；关闭页面后回调和引用按现有生命周期约定释放。
 - [ ] 清洁构建、无改动重建、修改/删除/重命名 XAML 均有正确结果。
 
 以上是中间里程碑，不能据此结束任务。最终交付必须完成现有 Gallery 的 XAML + Kotlin 迁移并保持原有页面、资源与交互。首个里程碑暂不要求完整 `x:Bind`、任意 Kotlin ViewModel、自定义标记类型激活、DataTemplate 绑定作用域或 `x:Load`；但 Gallery 迁移或其专门演示页面实际需要的能力属于本任务后续必要切片，必须先回到对应上游模块实现，再迁移使用方。热重载和设计器仍在后续范围。命中尚未实现的特性时明确诊断，禁止静默忽略。无 `x:Class` 的资源字典作为资源处理，不能误关联到 Kotlin 类。
 
 ## 阶段 0：重新确认前置条件与固定责任边界
 
-- [ ] 阅读两仓库适用的 AGENTS；查看 `git status`、现有分支及活跃工作，保护用户和其他任务改动。
-- [ ] 阅读 `.cswinrt/src/WinRT.Runtime/ComWrappersSupport.cs` 的接口表、`.cswinrt/src/cswinrt/code_writers.h` 的 composable 构造、`.cswinrt/src/Authoring/WinRT.SourceGenerator/WinRTTypeWriter.cs` 的类型/成员 authoring。
-- [ ] 检查当前投影是否已生成 `IComponentConnector`、`IXamlMetadataProvider`、`IXamlType`、`IXamlMember`、`Application.LoadComponent`，区分缺失投影与缺失 runtime 能力。
-- [ ] 用项目 Kotlin 版本核实 FIR 成员生成、额外接口及 IR 实现 API；检查现有插件如何接入 JVM 与 Native。
-- [ ] 固定 XAML 与投影之间的名称映射输入：WinRT 全名、Kotlin FQN、投影属性/事件 API、源位置。复用现有规范化模型，禁止在 C# 后端另写一套推测性 Kotlin 类型映射。
-- [ ] 确认 XamlCompiler 当前可用构建入口和 GenXbf 依赖。先使用现有构建配置；不可为了研究目标安装无关工具或重写整个 WinUI 构建系统。
-- [ ] 核实 fork 的 remote、现有 `.github/workflows/pr-build.yml` 和发布权限/惯例，定位能够独立打包的编译器构建产物；不假设需要构建整个 WinUI 仓库。
-- [ ] 只读盘点现有 `winui-gallery`，建立 V0 迁移矩阵；以实际导航注册与页面工厂为准，不把 README 的历史页数当作完整清单。此时不提前改 UI。
+- [x] 阅读两仓库适用的 AGENTS；查看 `git status`、现有分支及活跃工作，保护用户和其他任务改动。
+- [x] 阅读 `.cswinrt/src/WinRT.Runtime/ComWrappersSupport.cs` 的接口表、`.cswinrt/src/cswinrt/code_writers.h` 的 composable 构造、`.cswinrt/src/Authoring/WinRT.SourceGenerator/WinRTTypeWriter.cs` 的类型/成员 authoring。
+- [x] 检查当前投影是否已生成 `IComponentConnector`、`IXamlMetadataProvider`、`IXamlType`、`IXamlMember`、`Application.LoadComponent`，区分缺失投影与缺失 runtime 能力。
+- [x] 用项目 Kotlin 版本核实 FIR 成员生成、额外接口及 IR 实现 API；检查现有插件如何接入 JVM 与 Native。
+- [x] 固定 XAML 与投影之间的名称映射输入：WinRT 全名、Kotlin FQN、投影属性/事件 API、源位置。复用现有规范化模型，禁止在 C# 后端另写一套推测性 Kotlin 类型映射。
+- [x] 确认 XamlCompiler 当前可用构建入口和 GenXbf 依赖。先使用现有构建配置；不可为了研究目标安装无关工具或重写整个 WinUI 构建系统。
+- [x] 核实 fork 的 remote、现有 `.github/workflows/pr-build.yml` 和发布权限/惯例，定位能够独立打包的编译器构建产物；不假设需要构建整个 WinUI 仓库。
+- [x] 只读盘点现有 `winui-gallery`，建立 V0 迁移矩阵；以实际导航注册与页面工厂为准，不把 README 的历史页数当作完整清单。此时不提前改 UI。
 
 验收：能够指出每个缺口的所属模块和参考源码。此阶段不先扩展 gallery 或手写投影。
 
 ## 阶段 1：runtime 的 XAML 契约与生命周期
 
-- [ ] 补齐最小连接器调用、对象转换及 WinRT 返回值所有权契约；沿用既有 GUID、vtable、HRESULT、委托和 CCW 机制。
-- [ ] 明确页面的 composed outer/inner 身份：`LoadComponent` 操作的页面与 `QueryInterface(IComponentConnector)` 返回的接口必须属于同一 COM 对象身份。
-- [ ] 支持每个页面独立的命名元素存储与加载状态；不要用无生命周期约束的全局强引用 Map 模拟实例字段。
-- [ ] 明确事件订阅、弱引用/强引用和撤销责任；复用已有 event token、delegate 与 disposal 基础设施。
-- [ ] 定义页面初始化的安全调用时机及重复调用行为。检查现有 `lowerAuthoredTypeConstructors`，避免插件随意在基类构造阶段加载 XAML，造成派生对象未初始化就回调。
-- [ ] 为后续生成式 metadata 描述建立最小共享契约；第一版只实现实际所需能力，不能把类型身份 provider 标成完整 markup activation 支持。
-- [ ] 添加针对身份、指针所有权、事件回调和加载状态的必要 runtime 验证，记录对应 CsWinRT 源码映射。
+- [x] 补齐最小连接器调用、对象转换及 WinRT 返回值所有权契约；沿用既有 GUID、vtable、HRESULT、委托和 CCW 机制。
+- [x] 明确页面的 composed outer/inner 身份：`LoadComponent` 操作的页面与 `QueryInterface(IComponentConnector)` 返回的接口必须属于同一 COM 对象身份。
+- [x] 支持每个页面独立的命名元素存储与加载状态；不要用无生命周期约束的全局强引用 Map 模拟实例字段。
+- [x] 明确事件订阅、弱引用/强引用和撤销责任；复用已有 event token、delegate 与 disposal 基础设施。
+- [x] 定义页面初始化的安全调用时机及重复调用行为。检查现有 `lowerAuthoredTypeConstructors`，避免插件随意在基类构造阶段加载 XAML，造成派生对象未初始化就回调。
+- [x] 为后续生成式 metadata 描述建立最小共享契约；第一版只实现实际所需能力，不能把类型身份 provider 标成完整 markup activation 支持。
+- [x] 添加针对身份、指针所有权、事件回调和加载状态的必要 runtime 验证，记录对应 CsWinRT 源码映射。
 
 验收：在不依赖业务样例补丁的前提下，上游 ABI/身份契约可支撑连接器和加载。若现有契约已经满足，复用并验证，不新建重复抽象。
 
 ## 阶段 2：metadata、XAML 索引与编译阶段协议
 
-- [ ] 设计有 schema version 的确定性 XAML 索引，至少包含相对资源路径、`x:Class`、根类型、命名元素及类型、事件名称/处理函数名、源位置和功能标记。
-- [ ] Kotlin 类型描述保留基类、接口、属性/方法签名、可见性、可空性及 WinRT/Kotlin 名称映射。编译期应用类型与公开 WinRT 组件导出必须区分。
-- [ ] 扩展现有 PE/WinMD writer 的必要成员形状；优先验证真实 XamlCompiler loader 对现有 authored WinMD 的读取，不能仅以 Kotlin 自己能读回为验收。
-- [ ] 私有事件处理函数等 Kotlin 特有符号通过附加描述保留，不为满足编译器反射而自动导出为公共 WinRT ABI。
-- [ ] 第一版优先解决页面与普通事件所需的有限 schema 适配。不要提前重写整个 `System.Reflection` / `System.Xaml` 类型体系；任意 ViewModel 与完整绑定留在后续范围。
-- [ ] 固定无循环的阶段协议：XAML 结构预分析产生 FIR 所需声明输入；Kotlin 语义分析产出应用符号；最终 XAML 分析产生连接/实现计划与 XBF；最终 Kotlin 编译消费稳定计划。
-- [ ] 预分析优先复用 XamlCompiler Pass 1 的 DOM/harvester。若需要新的分析模式，在编译器现有管线内增加明确模式，不在 Gradle 里另建 XAML 语义解析器。
-- [ ] 按执行协议实现临时 Kotlin 语义编译，明确其生成声明如何获得占位实现、输出目录如何隔离，以及最终产物不得包含占位实现。不能简单让主编译任务依赖自己的输出。
+- [x] 设计有 schema version 的确定性 XAML 索引，至少包含相对资源路径、`x:Class`、根类型、命名元素及类型、事件名称/处理函数名、源位置和功能标记。
+- [x] Kotlin 类型描述保留基类、接口、属性/方法签名、可见性、可空性及 WinRT/Kotlin 名称映射。编译期应用类型与公开 WinRT 组件导出必须区分。
+- [x] 扩展现有 PE/WinMD writer 的必要成员形状；优先验证真实 XamlCompiler loader 对现有 authored WinMD 的读取，不能仅以 Kotlin 自己能读回为验收。
+- [x] 私有事件处理函数等 Kotlin 特有符号通过附加描述保留，不为满足编译器反射而自动导出为公共 WinRT ABI。
+- [x] 第一版优先解决页面与普通事件所需的有限 schema 适配。不要提前重写整个 `System.Reflection` / `System.Xaml` 类型体系；任意 ViewModel 与完整绑定留在后续范围。
+- [x] 固定无循环的阶段协议：XAML 结构预分析产生 FIR 所需声明输入；Kotlin 语义分析产出应用符号；最终 XAML 分析产生连接/实现计划与 XBF；最终 Kotlin 编译消费稳定计划。
+- [x] 预分析优先复用 XamlCompiler Pass 1 的 DOM/harvester。若需要新的分析模式，在编译器现有管线内增加明确模式，不在 Gradle 里另建 XAML 语义解析器。
+- [x] 按执行协议实现临时 Kotlin 语义编译，明确其生成声明如何获得占位实现、输出目录如何隔离，以及最终产物不得包含占位实现。不能简单让主编译任务依赖自己的输出。
 
 验收：最小页面的索引与类型输入可重现，XamlCompiler 能正确辨认页面和事件签名，输入删除后不存在陈旧符号。
 
@@ -208,23 +208,23 @@ class MainPage : Page() {
 
 ### XamlCompiler 后端
 
-- [ ] 在 `Language.cs` 注册 Kotlin 与各 pass 输出策略。将 managed metadata projection、C++ 专用路径等职责从简单的 `IsManaged/IsNative` 二分中窄范围解耦；保留其他语言既有行为。
-- [ ] 接入 `XamlCodeGenerator`；为 `ICodeGenOutput`、`LanguageSpecificString`、`TypeForCodeGen`、`XamlSchemaCodeInfo` 增加 Kotlin 所需输出。
-- [ ] 集中处理类型名、泛型、数组、转义、字面量、可空性、cast 与事件调用，使用阶段 2 的投影映射。不得把 C# `global::`、CLR collection 或 C++ 类型语法直接带入 Kotlin。
-- [ ] 复用 connection ID rewriter；生成声明索引与最终连接计划，并按需输出 Kotlin 辅助源码。不要在外部 `.kt` 中再次声明用户类来伪装 partial。
-- [ ] T4 如被使用，确认 `.tt` 与纳入编译的生成 `.cs` 同步方式，并更新相应 project includes；禁止只改模板却留下旧编译实现。
+- [x] 在 `Language.cs` 注册 Kotlin 与各 pass 输出策略。将 managed metadata projection、C++ 专用路径等职责从简单的 `IsManaged/IsNative` 二分中窄范围解耦；保留其他语言既有行为。
+- [x] 接入 `XamlCodeGenerator`；为 `ICodeGenOutput`、`LanguageSpecificString`、`TypeForCodeGen`、`XamlSchemaCodeInfo` 增加 Kotlin 所需输出。
+- [x] 集中处理类型名、泛型、数组、转义、字面量、可空性、cast 与事件调用，使用阶段 2 的投影映射。不得把 C# `global::`、CLR collection 或 C++ 类型语法直接带入 Kotlin。
+- [x] 复用 connection ID rewriter；生成声明索引与最终连接计划，并按需输出 Kotlin 辅助源码。不要在外部 `.kt` 中再次声明用户类来伪装 partial。
+- [ ] skipped: T4 如被使用，确认 `.tt` 与纳入编译的生成 `.cs` 同步方式，并更新相应 project includes；禁止只改模板却留下旧编译实现。
 
 ### kotlin-winrt 编译器插件
 
-- [ ] 在现有 registrar 中增加 FIR registrar；以索引中的完整类名筛选目标，而非依赖注解 predicate。
-- [ ] 用 `FirDeclarationGenerationExtension` 提供命名元素属性、初始化方法及连接器方法声明。
-- [ ] 用 `FirSupertypeGenerationExtension` 加入必要接口；处理用户已声明接口、override 与成员冲突，不盲目重复插入。
-- [ ] 用 FIR checker 提供 `x:Class` 不匹配、基类冲突、重复命名、事件签名错误等诊断；诊断尽量带 XAML 文件与行列信息。
-- [ ] 在现有 IR 管线为 FIR 生成声明补字段、访问器和方法体；给生成声明使用可识别 origin/key，确保重复运行和不同插件不会互相覆盖。
-- [ ] 对 private 事件处理函数生成位于用户类内部的调用桥接，或在同类生成方法体内直接调用正确 IR symbol；不扩大用户成员可见性，不使用反射绕过。
-- [ ] 接入现有 authoring 信息收集顺序，使新增接口和成员可被后续 CCW 描述看到；明确 FIR 元数据、IR 与 WinMD 输出之间的时序。
-- [ ] 构造后自动调用 `initializeComponent()`；核实 runtime/composition 已建立回调所需身份，禁止在基类或尚未完成的派生构造阶段加载 XAML。验证普通调用、构造函数引用、次构造函数、跨模块消费、authoring 激活、初始化异常与生成加载逻辑的幂等性；示例覆盖 `initializeComponent()` 并先调用 `super.initializeComponent()`。
-- [ ] JVM 与 Native 共享生成语义；平台限制放到现有 target adaptation。生成实现不得依赖 JVM 反射或仅写 `.class` 的旁路作为永久架构。
+- [x] 在现有 registrar 中增加 FIR registrar；以索引中的完整类名筛选目标，而非依赖注解 predicate。
+- [x] 用 `FirDeclarationGenerationExtension` 提供命名元素属性、初始化方法及连接器方法声明。
+- [x] 用 `FirSupertypeGenerationExtension` 加入必要接口；处理用户已声明接口、override 与成员冲突，不盲目重复插入。
+- [x] 用 FIR checker 提供 `x:Class` 不匹配、基类冲突、重复命名、事件签名错误等诊断；诊断尽量带 XAML 文件与行列信息。
+- [x] 在现有 IR 管线为 FIR 生成声明补字段、访问器和方法体；给生成声明使用可识别 origin/key，确保重复运行和不同插件不会互相覆盖。
+- [x] 对 private 事件处理函数生成位于用户类内部的调用桥接，或在同类生成方法体内直接调用正确 IR symbol；不扩大用户成员可见性，不使用反射绕过。
+- [x] 接入现有 authoring 信息收集顺序，使新增接口和成员可被后续 CCW 描述看到；明确 FIR 元数据、IR 与 WinMD 输出之间的时序。
+- [ ] doing: 构造后自动调用 `initializeComponent()`；核实 runtime/composition 已建立回调所需身份，禁止在基类或尚未完成的派生构造阶段加载 XAML。验证普通调用、构造函数引用、次构造函数、跨模块消费、authoring 激活、初始化异常与生成加载逻辑的幂等性；示例覆盖 `initializeComponent()` 并先调用 `super.initializeComponent()`。
+- [x] JVM 与 Native 共享生成语义；平台限制放到现有 target adaptation。生成实现不得依赖 JVM 反射或仅写 `.class` 的旁路作为永久架构。
 
 验收：用户 Kotlin 函数能引用 XAML 生成成员，private 事件桥接能编译，无注解、无生成基类、无 Kotlin fork；生成器回归证明原有 C#/C++ 相关行为未被破坏。
 
@@ -234,40 +234,40 @@ class MainPage : Page() {
 
 默认分发渠道为维护仓库的 GitHub Releases，发布自带工具清单的归档包。若该仓库已有满足固定版本/校验/长期下载要求的发布机制，复用它并在插件中统一解析，不能同时维护两套默认渠道。具体 tag 和 asset 命名在实现时按仓库现有规范固定，不猜测尚不存在的下载地址。
 
-- [ ] 在 `compose-fluent/microsoft-ui-xaml` 增加专用于定制 XamlCompiler 的 Windows 工作流，复用现有依赖还原和编译入口，构建 `src/XamlCompiler` 所需范围。
-- [ ] PR 工作流生成可下载的验证 artifact；正式分发通过专用版本 tag 或显式手动发布工作流进入 GitHub Release。Gradle 默认消费长期保留的 Release asset，不能依赖会过期的 Actions artifact。
-- [ ] 发布包包含可运行入口、必要 managed/native 依赖、工具清单、许可/归属文件和 SHA-256 校验清单；输出可追溯的 fork commit、上游版本及工具版本。运行期临时输出不混入发布包。
-- [ ] 工具清单明确：schema version、Kotlin XAML 协议版本、支持的 feature 列表、host OS/架构、入口相对路径、运行方式和运行前置条件，以及适配的 WinUI/GenXbf 依赖范围。工具版本与协议版本分别管理。
-- [ ] 优先形成自包含工具包；若现有构建要求外部 .NET runtime，先在清单中声明并由解析器检测，不能留下只有 CI 构建机才能运行的隐含依赖。先覆盖实际验证过的 host 架构，再扩展其他包。
-- [ ] GenXbf 来自与所选 Windows App SDK/WinUI 配套的官方依赖或允许分发的构建产物：明确来源、版本与解析方法。若不随包分发，由 Gradle 使用现有依赖解析获得并传入路径；禁止从开发机任意安装目录挑一个 DLL。
-- [ ] CI 在不含开发仓库绝对路径的干净目录解包运行入口，验证协议识别、最小 Kotlin XAML 编译及 XBF 输出；发布只在该检查通过后进行。
-- [ ] 正式版本按不可变内容管理，修复通过新版本发布；仓库来源、tag、包校验和均可追溯。首次发布的实际 URL/版本记录为插件消费输入。
+- [x] 在 `compose-fluent/microsoft-ui-xaml` 增加专用于定制 XamlCompiler 的 Windows 工作流，复用现有依赖还原和编译入口，构建 `src/XamlCompiler` 所需范围。
+- [x] PR 工作流生成可下载的验证 artifact；正式分发通过专用版本 tag 或显式手动发布工作流进入 GitHub Release。Gradle 默认消费长期保留的 Release asset，不能依赖会过期的 Actions artifact。
+- [x] 发布包包含可运行入口、必要 managed/native 依赖、工具清单、许可/归属文件和 SHA-256 校验清单；输出可追溯的 fork commit、上游版本及工具版本。运行期临时输出不混入发布包。
+- [x] 工具清单明确：schema version、Kotlin XAML 协议版本、支持的 feature 列表、host OS/架构、入口相对路径、运行方式和运行前置条件，以及适配的 WinUI/GenXbf 依赖范围。工具版本与协议版本分别管理。
+- [x] 优先形成自包含工具包；若现有构建要求外部 .NET runtime，先在清单中声明并由解析器检测，不能留下只有 CI 构建机才能运行的隐含依赖。先覆盖实际验证过的 host 架构，再扩展其他包。
+- [x] GenXbf 来自与所选 Windows App SDK/WinUI 配套的官方依赖或允许分发的构建产物：明确来源、版本与解析方法。若不随包分发，由 Gradle 使用现有依赖解析获得并传入路径；禁止从开发机任意安装目录挑一个 DLL。
+- [x] CI 在不含开发仓库绝对路径的干净目录解包运行入口，验证协议识别、最小 Kotlin XAML 编译及 XBF 输出；发布只在该检查通过后进行。
+- [x] 正式版本按不可变内容管理，修复通过新版本发布；仓库来源、tag、包校验和均可追溯。首次发布的实际 URL/版本记录为插件消费输入。
 
 ### P2：Kotlin/WinRT Gradle 插件消费
 
 工具下载/解包由 `windows-toolkit-gradle-plugin` 负责，FIR/IR 编译器插件只消费 Gradle 传入的索引和计划，不在编译期间联网。
 
-- [ ] 在现有 Windows tooling 配置下增加定制 XamlCompiler 的版本与本地路径覆盖项，复用现有工具解析/缓存设施。固定一个随插件发布并验证过的默认版本，不使用 `latest` 或动态版本范围。
-- [ ] 插件维护默认版本的 manifest/asset 校验信息，明确所需协议和 feature；应用显式覆盖版本时仍必须通过协议/能力与依赖兼容检查，不因版本数字较新就假定兼容。
-- [ ] 工具按编译任务的 Windows host 架构解析。即使目标为 `mingwX64`，也不能用目标信息代替 host 信息选择编译器或其 GenXbf。
-- [ ] 用执行期任务/服务解析工具；配置期不联网。缓存 key 至少包含来源、版本、host 架构及内容校验，支持原子下载/解包、并发构建、失败重试及已有缓存下的离线构建。
-- [ ] 在调用前验证 manifest、入口文件及兼容依赖；缺工具、网络失败、校验不符或协议不兼容明确失败。不得静默回退到 Windows SDK/NuGet 自带的不支持 Kotlin 的 stock XamlCompiler。
-- [ ] 提供明确的本地开发 override，让 fork checkout 的编译输出可用于迭代；它使用同样的协议校验和任务输入指纹，不能作为发布插件的默认值，也不能把 `I:\\...` 路径写入产物。
-- [ ] 将实际工具内容/版本、GenXbf 版本、协议和相关 feature 纳入 XAML 编译任务输入；工具变更必须使对应缓存失效。已发布编译器不得被打包进 Gallery 的应用运行时。
-- [ ] 至少一次跨仓库验收：从实际 CI Release 获取工具，在无 fork checkout 的 Windows 环境构建迁移后的 Gallery。使用本地 override 成功只能作为开发验证，不能代替发布链路验收。
+- [x] 在现有 Windows tooling 配置下增加定制 XamlCompiler 的版本与本地路径覆盖项，复用现有工具解析/缓存设施。固定一个随插件发布并验证过的默认版本，不使用 `latest` 或动态版本范围。
+- [x] 插件维护默认版本的 manifest/asset 校验信息，明确所需协议和 feature；应用显式覆盖版本时仍必须通过协议/能力与依赖兼容检查，不因版本数字较新就假定兼容。
+- [x] 工具按编译任务的 Windows host 架构解析。即使目标为 `mingwX64`，也不能用目标信息代替 host 信息选择编译器或其 GenXbf。
+- [x] 用执行期任务/服务解析工具；配置期不联网。缓存 key 至少包含来源、版本、host 架构及内容校验，支持原子下载/解包、并发构建、失败重试及已有缓存下的离线构建。
+- [x] 在调用前验证 manifest、入口文件及兼容依赖；缺工具、网络失败、校验不符或协议不兼容明确失败。不得静默回退到 Windows SDK/NuGet 自带的不支持 Kotlin 的 stock XamlCompiler。
+- [x] 提供明确的本地开发 override，让 fork checkout 的编译输出可用于迭代；它使用同样的协议校验和任务输入指纹，不能作为发布插件的默认值，也不能把 `I:\\...` 路径写入产物。
+- [x] 将实际工具内容/版本、GenXbf 版本、协议和相关 feature 纳入 XAML 编译任务输入；工具变更必须使对应缓存失效。已发布编译器不得被打包进 Gallery 的应用运行时。
+- [ ] doing: 至少一次跨仓库验收：从实际 CI Release 获取工具，在无 fork checkout 的 Windows 环境构建迁移后的 Gallery。使用本地 override 成功只能作为开发验证，不能代替发布链路验收。
 
 ### projection、authoring 与 Gradle/资源接入
 
-- [ ] 仅通过现有生成器产出缺失投影，不手写扩张 `winrt-projections`。
-- [ ] 把生成连接器方法接入页面现有 TypeDetails/CCW，验证接口查询与原页面身份一致；仅给 Kotlin 类加接口不等于完成 ABI 支持。
-- [ ] 接入 Application metadata provider 的应用类型查询及 SDK fallback。若第一版不实现自定义类型激活，明确诊断其使用，不用激活基类替代派生类。
-- [ ] 在现有 Gradle 插件中添加 XAML discovery、预分析、语义输入、最终编译任务，使用结构化 `input.json`/`output.json` 协议。
-- [ ] 第一版同目录规则：每个参与当前 compilation 的 `.kt` 文件发现同主名 `.xaml`，要求 `x:Class` 对应该文件中唯一目标类；多类文件可以存在，但必须无歧义。平台/source-set 选择使用 Gradle 实际 compilation 输入。
-- [ ] 大小写、规范化路径、同名异包、重复 `x:Class`、跨 source-set 重复资源必须有确定规则与错误信息。不要通过任意文件系统顺序选一个候选。
-- [ ] 声明 XAML、Kotlin 符号输入、WinMD、投影映射、工具版本、语言目标和资源配置为必要任务输入，隔离 JVM/Native 产物及缓存。
-- [ ] 通过工具输出清单管理生成文件；删除/改名 XAML 时清除仅由该任务拥有的旧产物。不得清空共享生成目录或用户源码。
-- [ ] 复用现有 makepri、staging 和 bootstrap；保证 XAML 逻辑 URI、XBF 文件与 PRI 索引一致。选择与编译器进程架构匹配的 GenXbf，勿误用应用目标架构。
-- [ ] CLI 诊断必须传播失败码与 XAML 位置；不能把缺少 compiler/GenXbf/PRI 处理为成功跳过。
+- [x] 仅通过现有生成器产出缺失投影，不手写扩张 `winrt-projections`。
+- [x] 把生成连接器方法接入页面现有 TypeDetails/CCW，验证接口查询与原页面身份一致；仅给 Kotlin 类加接口不等于完成 ABI 支持。
+- [x] 接入 Application metadata provider 的应用类型查询及 SDK fallback。若第一版不实现自定义类型激活，明确诊断其使用，不用激活基类替代派生类。
+- [x] 在现有 Gradle 插件中添加 XAML discovery、预分析、语义输入、最终编译任务，使用结构化 `input.json`/`output.json` 协议。
+- [x] 第一版同目录规则：每个参与当前 compilation 的 `.kt` 文件发现同主名 `.xaml`，要求 `x:Class` 对应该文件中唯一目标类；多类文件可以存在，但必须无歧义。平台/source-set 选择使用 Gradle 实际 compilation 输入。
+- [x] 大小写、规范化路径、同名异包、重复 `x:Class`、跨 source-set 重复资源必须有确定规则与错误信息。不要通过任意文件系统顺序选一个候选。
+- [x] 声明 XAML、Kotlin 符号输入、WinMD、投影映射、工具版本、语言目标和资源配置为必要任务输入，隔离 JVM/Native 产物及缓存。
+- [x] 通过工具输出清单管理生成文件；删除/改名 XAML 时清除仅由该任务拥有的旧产物。不得清空共享生成目录或用户源码。
+- [x] 复用现有 makepri、staging 和 bootstrap；保证 XAML 逻辑 URI、XBF 文件与 PRI 索引一致。选择与编译器进程架构匹配的 GenXbf，勿误用应用目标架构。
+- [x] CLI 诊断必须传播失败码与 XAML 位置；不能把缺少 compiler/GenXbf/PRI 处理为成功跳过。
 
 验收：一个正常 Gradle 构建入口可自动解析定制编译器并完成整个流程，无逐文件手动配置；clean、增量和已有缓存的离线构建均正确。编译器版本与插件版本的兼容关系可查。
 
@@ -291,28 +291,28 @@ class MainPage : Page() {
 
 ### 每页迁移规则（Luna 按此逐页执行）
 
-- [ ] 迁移矩阵至少包含：route、现有工厂/类文件、目标 XAML/类名、原有示例和交互、上游能力依赖、迁移状态、JVM/Native 验收状态。记录在本地执行状态文档中，所有现有页面均须覆盖。
-- [ ] 尽量完整保留 WinUI Gallery 上游 XAML 的静态可视树、布局、样式、资源与 `ControlExample` 组织方式，只修改 Kotlin 类型/处理函数映射等必要适配；缺少自定义控件或绑定能力时先补上游支持，不把展开包装布局作为最终方案。Kotlin 保留事件处理、状态、数据、导航及确实需要过程式 API 的行为。程序化动画、系统集成或刻意演示动态创建的局部代码可以保留，但逐项说明原因，不能用来保留整页纯代码布局。
-- [ ] 为函数式页面引入与 `.xaml` 同主名的实际 code-behind 类，选择满足现有宿主契约的 Page/UserControl 等根类型。`@GalleryPage` 同时支持无参数构造的 `UIElement` 子类，直接注册页面类并由 KSP 生成构造调用，不要求额外的包装工厂；保留已有函数注册兼容，迁移后的旧工厂不得继续重复构建同一可视树。
-- [ ] 现有公共容器需要 XAML 自定义类型支持时，先补全 authoring/metadata/generator 契约，不在 Gallery 写自定义 XAML 加载器或手工 vtable。
-- [ ] 不改 route、分组、标题、示例数和数据语义来减少迁移工作；不为所有页面新增 `@XamlPage`。Gallery 原有导航注解可保留，它们不承担 XAML 关联责任。
-- [ ] 每页至少通过原有入口打开，检查其所有示例和交互后再标记完成。发现缺少模板/绑定/资源能力时，暂停该页迁移、完成对应上游切片，再返回；缺项不能作为最终保留纯代码整页的理由。
-- [ ] 每完成一页或一个共享依赖不可分割的小组即提交；允许迁移期间新旧页面共存，最终默认入口不得用旧实现 fallback 掩盖 XAML 失败。
+- [x] 迁移矩阵至少包含：route、现有工厂/类文件、目标 XAML/类名、原有示例和交互、上游能力依赖、迁移状态、JVM/Native 验收状态。记录在本地执行状态文档中，所有现有页面均须覆盖。
+- [x] 尽量完整保留 WinUI Gallery 上游 XAML 的静态可视树、布局、样式、资源与 `ControlExample` 组织方式，只修改 Kotlin 类型/处理函数映射等必要适配；缺少自定义控件或绑定能力时先补上游支持，不把展开包装布局作为最终方案。Kotlin 保留事件处理、状态、数据、导航及确实需要过程式 API 的行为。程序化动画、系统集成或刻意演示动态创建的局部代码可以保留，但逐项说明原因，不能用来保留整页纯代码布局。
+- [x] 为函数式页面引入与 `.xaml` 同主名的实际 code-behind 类，选择满足现有宿主契约的 Page/UserControl 等根类型。`@GalleryPage` 同时支持无参数构造的 `UIElement` 子类，直接注册页面类并由 KSP 生成构造调用，不要求额外的包装工厂；保留已有函数注册兼容，迁移后的旧工厂不得继续重复构建同一可视树。
+- [x] 现有公共容器需要 XAML 自定义类型支持时，先补全 authoring/metadata/generator 契约，不在 Gallery 写自定义 XAML 加载器或手工 vtable。
+- [x] 不改 route、分组、标题、示例数和数据语义来减少迁移工作；不为所有页面新增 `@XamlPage`。Gallery 原有导航注解可保留，它们不承担 XAML 关联责任。
+- [ ] doing: 每页至少通过原有入口打开，检查其所有示例和交互后再标记完成。发现缺少模板/绑定/资源能力时，暂停该页迁移、完成对应上游切片，再返回；缺项不能作为最终保留纯代码整页的理由。
+- [x] 每完成一页或一个共享依赖不可分割的小组即提交；允许迁移期间新旧页面共存，最终默认入口不得用旧实现 fallback 掩盖 XAML 失败。
 
 ### 最终验收条件
 
-- [ ] V0 矩阵中所有现有页面均完成迁移；如运行前现有页面存在问题，先记录基线并区分迁移回归，不把原有未验证状态写成已验证。
-- [ ] Windows JVM 以 Gallery 原启动方式实际打开窗口，默认页面/导航均使用 XAML + Kotlin；点击按钮进入 Kotlin private 方法并更新命名控件，不能只以编译通过或进程存在判定成功。
+- [x] V0 矩阵中所有现有页面均完成迁移；如运行前现有页面存在问题，先记录基线并区分迁移回归，不把原有未验证状态写成已验证。
+- [x] Windows JVM 以 Gallery 原启动方式实际打开窗口，默认页面/导航均使用 XAML + Kotlin；点击按钮进入 Kotlin private 方法并更新命名控件，不能只以编译通过或进程存在判定成功。
 - [ ] 遍历全部现有路由，逐页验证交互；壳层同时覆盖搜索、收藏/最近记录、主题切换、窗口尺寸、键盘导航，以及原已实现的深链/通知等入口。
 - [ ] 对迁移前后界面进行视觉检查：布局、间距、滚动、文本、图标、资源、明暗主题及高对比度行为保持；不得通过删内容或改成占位布局通过验收。
-- [ ] 资源/样式/模板/绑定专门演示页使用对应 XAML 能力，源码展开同时呈现实际 XAML 和 Kotlin；演示文案必须与实际执行路径一致。
-- [ ] 最终 Gallery 构建使用 fork 的 CI 发布版本，关闭本地工具 override；记录实际编译器版本/协议/校验值，确认源码中没有开发 checkout 路径依赖。
-- [ ] 验证同页多个实例各自持有状态；重复初始化无重复订阅；关闭与回收不出现悬挂回调或明显引用滞留。
+- [x] 资源/样式/模板/绑定专门演示页使用对应 XAML 能力，源码展开同时呈现实际 XAML 和 Kotlin；演示文案必须与实际执行路径一致。
+- [x] 最终 Gallery 构建使用 fork 的 CI 发布版本，关闭本地工具 override；记录实际编译器版本/协议/校验值，确认源码中没有开发 checkout 路径依赖。
+- [ ] doing: 验证同页多个实例各自持有状态；重复初始化无重复订阅；关闭与回收不出现悬挂回调或明显引用滞留。
 - [ ] 验证无改动重建、改变控件类型/名称、改变事件签名、删除和重命名 XAML 的正确增量行为。
-- [ ] 验证诊断至少覆盖：错误 `x:Class`、基类不兼容、成员冲突、错误处理函数签名，以及当前仍未支持的语法；如已支持某种绑定，其用例必须验证成功而非保留“预期失败”。
-- [ ] 按 runtime → metadata → generator/plugin → Gradle → sample 顺序执行针对性验证，避免每次全量构建。
-- [ ] 在 Windows 对 `mingwX64` 分别验证插件声明/IR 与迁移后的 Gallery；保留现有共享 source set。若 Native 尚未通过，明确列出缺口，只报告 JVM 迁移已验证，不宣称完整双目标完成。
-- [ ] 单独评估 IDE 对无注解 FIR 生成成员的识别。Gradle 编译成功不等于补全和跳转成功；如需要 IDE 插件接入，记录实际支持状态，不宣称已具备完整 IDE 体验。
+- [x] 验证诊断至少覆盖：错误 `x:Class`、基类不兼容、成员冲突、错误处理函数签名，以及当前仍未支持的语法；如已支持某种绑定，其用例必须验证成功而非保留“预期失败”。
+- [x] 按 runtime → metadata → generator/plugin → Gradle → sample 顺序执行针对性验证，避免每次全量构建。
+- [x] 在 Windows 对 `mingwX64` 分别验证插件声明/IR 与迁移后的 Gallery；保留现有共享 source set。若 Native 尚未通过，明确列出缺口，只报告 JVM 迁移已验证，不宣称完整双目标完成。
+- [x] 单独评估 IDE 对无注解 FIR 生成成员的识别。Gradle 编译成功不等于补全和跳转成功；如需要 IDE 插件接入，记录实际支持状态，不宣称已具备完整 IDE 体验。
 
 ## 推荐提交边界与交付
 
@@ -331,11 +331,11 @@ class MainPage : Page() {
 
 下面前五项中 Gallery 迁移实际需要的部分已经包含在本次最终目标内，按依赖关系在迁移对应页面前补齐；超出 Gallery 需求的通用化再单独推进。不得以本节的“后续”性质跳过 Gallery 必需功能。
 
-- [ ] 自定义 Kotlin XAML 类型构造及完整 `IXamlType`/`IXamlMember` 描述。
-- [ ] `x:Bind OneTime`，随后 OneWay/TwoWay、INPC、集合通知、转换器及更新生命周期。
-- [ ] DataTemplate 的独立 connector/binding scope、`x:Load` 和延迟创建/卸载。
-- [ ] 任意 Kotlin ViewModel 的 schema 适配，不强制其导出为 WinRT 组件。
-- [ ] App.xaml、资源库和跨模块 provider 的完整覆盖。
+- [ ] doing: 自定义 Kotlin XAML 类型构造及完整 `IXamlType`/`IXamlMember` 描述。
+- [ ] doing: `x:Bind OneTime`，随后 OneWay/TwoWay、INPC、集合通知、转换器及更新生命周期。
+- [ ] doing: DataTemplate 的独立 connector/binding scope、`x:Load` 和延迟创建/卸载。
+- [ ] doing: 任意 Kotlin ViewModel 的 schema 适配，不强制其导出为 WinRT 组件。
+- [ ] doing: App.xaml、资源库和跨模块 provider 的完整覆盖。
 - [ ] 更完整的 IDE 支持、导航、设计器与热重载；均不作为第一版隐含承诺。
 
 ## 外部参考
