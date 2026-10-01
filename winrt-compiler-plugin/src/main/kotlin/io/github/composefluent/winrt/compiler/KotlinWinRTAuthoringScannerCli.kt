@@ -205,7 +205,7 @@ object KotlinWinRTAuthoringScannerCli {
                 ((if (type.name in pageNames) listOf("Microsoft.UI.Xaml.Markup.IComponentConnector")
                 else type.candidate?.winRTInterfaceNames.orEmpty()) + interfaces(type.name).map { it.first.typeName }).distinct(),
                 isActivatable = type.source.enumEntries(type.klass) == null && !type.source.isObjectDeclaration(type.klass) && !type.source.isAbstractClass(type.klass) &&
-                    type.source.hasPublicDefaultActivationConstructor(type.klass),
+                    type.source.hasPublicDefaultActivationConstructor(type.klass, allowDefaultArguments = true),
                 isSealed = !type.source.isUnsealedAuthoredClass(type.klass),
                 enumEntries = type.source.enumEntries(type.klass))
         }
@@ -324,7 +324,7 @@ object KotlinWinRTAuthoringScannerCli {
                 appendLine("      baseName = ${(candidate.schemaBaseName ?: "System.Object").kotlinLiteral()},")
                 appendLine("      baseType = ${if (candidate.schemaBaseName == null) "Any" else source.superTypeNames(klass).first()}::class,")
                 appendLine("      isWinRTComponent = ${candidate.candidate != null},")
-                if (!source.isObjectDeclaration(klass) && !source.isAbstractClass(klass) && source.hasPublicDefaultActivationConstructor(klass)) appendLine("      activate = { ${candidate.className}() },")
+                if (!source.isObjectDeclaration(klass) && !source.isAbstractClass(klass) && source.hasPublicDefaultActivationConstructor(klass, allowDefaultArguments = true)) appendLine("      activate = { ${candidate.className}() },")
                 source.staticInitializerOwner(klass)?.let { owner ->
                     appendLine("      initializer = { ${candidate.className}${if (owner.isEmpty()) "" else ".$owner"}; Unit },")
                 }
@@ -1007,7 +1007,7 @@ object KotlinWinRTAuthoringScannerCli {
         fun isValueClass(classNode: LighterASTNode): Boolean =
             hasModifier(classNode, KtTokens.VALUE_KEYWORD, KtTokens.INLINE_KEYWORD)
 
-        fun hasPublicDefaultActivationConstructor(classNode: LighterASTNode): Boolean {
+        fun hasPublicDefaultActivationConstructor(classNode: LighterASTNode, allowDefaultArguments: Boolean = false): Boolean {
             // CsWinRT Authoring examines this type's InstanceConstructors.
             // Nested classes' constructors do not affect the containing type.
             val constructors = classNode.children().filter { it.tokenType == KtNodeTypes.PRIMARY_CONSTRUCTOR } +
@@ -1017,7 +1017,11 @@ object KotlinWinRTAuthoringScannerCli {
                 return true
             }
             return constructors.any { constructor ->
-                isPublicConstructor(constructor) && !constructor.hasValueParameters()
+                isPublicConstructor(constructor) && constructor.valueParameters().all { parameter ->
+                    // XAML application activators call ordinary Kotlin constructors.
+                    // Public component ABI authoring still requires zero declared arguments.
+                    allowDefaultArguments && parameter.children().any { it.tokenType == KtTokens.EQ }
+                }
             }
         }
 
@@ -1031,12 +1035,12 @@ object KotlinWinRTAuthoringScannerCli {
         private fun isPublicConstructor(constructorNode: LighterASTNode): Boolean =
             !hasModifier(constructorNode, KtTokens.PRIVATE_KEYWORD, KtTokens.INTERNAL_KEYWORD, KtTokens.PROTECTED_KEYWORD)
 
-        private fun LighterASTNode.hasValueParameters(): Boolean =
+        private fun LighterASTNode.valueParameters(): List<LighterASTNode> =
             children()
                 .firstOrNull { child -> child.tokenType == KtNodeTypes.VALUE_PARAMETER_LIST }
                 ?.children()
                 .orEmpty()
-                .any { child -> child.tokenType == KtNodeTypes.VALUE_PARAMETER }
+                .filter { child -> child.tokenType == KtNodeTypes.VALUE_PARAMETER }
 
         fun className(classNode: LighterASTNode): String? {
             var seenDeclarationKeyword = false

@@ -38,13 +38,17 @@ Identity-only registrations retain their existing nonconstructible behavior.
 
 The Kotlin source scanner now emits an application-only WinMD before
 XamlCompiler pass 1. It recognizes adjacent same-basename Kotlin/XAML classes,
-their WinRT bases, no-argument constructors, and explicitly typed public or
+their WinRT bases, constructors callable without arguments, and explicitly typed public or
 internal instance properties. An explicitly declared type is required for a
 property exposed to XAML because the first compiler pass precedes Kotlin IR.
 The scanner emits Kotlin registration sources with direct constructors and
 getter/setter calls. The page's generated load method registers all application
 types before invoking `Application.LoadComponent`. Kotlin semantic compilation
 then emits the authoritative application WinMD for pass 2.
+
+Application-only XAML model activators accept constructors whose parameters all
+have Kotlin defaults, matching semantic export's direct `Type()` factory. Public
+WinRT component authoring retains CsWinRT's separate zero-parameter ABI rule.
 
 Gallery pages and shared controls use the pre-analysis WinMD, isolated semantic
 compilation, final XAML compilation, and main Kotlin compilation stages.
