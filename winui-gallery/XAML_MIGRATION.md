@@ -175,13 +175,26 @@ inspection. Native and IDE status are recorded independently.
 | Example layout | controls/ControlExample / SampleThemeListener | Original adaptive XAML and animations; compiled |
 | Source display and copy | controls/SampleCodePresenter / processor / code-document | Original presenter with XAML/Kotlin highlighting and substitutions; compiled |
 | Styles and templates | Styles dictionaries / ItemTemplates / GalleryExampleResources | XAML resources and dictionary connector scopes; compiled |
+| Shared style library | resources / GalleryGridStyles / GalleryTextBlockStyles | Resource-only XBF variants consumed on both targets; original URIs preserved |
+| Shared plain model | models / collections/Recipe | Inferred XAML schema and typed accessors consumed on both targets; no WinRT component export |
 | Toolkit behaviors | toolkit/ImplicitAnimations / Case / SwitchPresenter | Kotlin XAML types and attached dependency properties; compiled |
 
 ## Target and IDE acceptance
 
-- JVM: complete XBF/Kotlin/authoring/PRI build passes; current shell and full route startup pass is in progress.
-- mingwX64: shares source and generated contracts; actual Native semantic and application builds are in progress.
+- JVM: complete XBF/Kotlin/authoring/PRI package build passes. The current package opens ItemsRepeater with the shared Recipe model and style dictionaries; all five existing basic-control interaction checks pass.
+- mingwX64: both clean Windows CI builds produce signed Release MSIX packages with the released compiler. The CI Native package opens ItemsRepeater on the local Windows host and passes all five existing basic-control interaction checks. Local semantic/XBF compilation and XAML ABI checks pass; local Release linking encountered a shared-heap exhaustion and then an unexplained daemon exit, so the current Native runtime check uses the CI binary.
 - IDE: CLI FIR/IR integration exists. This repository does not ship a Kotlin IDE plugin for no-annotation discovery, a XAML designer or hot reload. Gradle success is not IDE completion/navigation validation.
+
+The real resource-library build graph passes no-change, dictionary edit, rename,
+last-XAML removal and restoration checks on both targets. The real Gallery JVM
+graph also passes a batch change of control type, element name and handler
+parameter type, followed by restoration of the original sources. No additional
+validation harness is shipped for these checks.
+
+The current Computer Use runtime cannot initialize its Windows helper. The
+earlier route activation results and current CLI interaction checks therefore
+remain separate from the outstanding complete UI interaction, visual parity and
+close/reclaim acceptance. Those plan items remain incomplete.
 
 The root `PLAN.md` is unchanged. The independent approved plan tracks completed
 implementation items separately from acceptance that has not been performed.
