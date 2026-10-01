@@ -20,7 +20,7 @@
                         CornerRadius="{ThemeResource OverlayCornerRadius}"
                         Loaded="ShadowRect_Loaded">
                         <Border.Shadow>
-                            <ThemeShadow x:Name="shadow" />
+                            <ThemeShadow x:Name="exampleShadow" />
                         </Border.Shadow>
                     </Border>
                 </Grid>
