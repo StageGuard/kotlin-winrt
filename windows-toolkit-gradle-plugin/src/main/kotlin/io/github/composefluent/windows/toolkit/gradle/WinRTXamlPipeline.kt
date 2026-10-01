@@ -112,12 +112,18 @@ internal fun configureWinRTXamlPipeline(
     }
     candidates.configure { task ->
         task.xamlSupportSources.from(hasXaml.flatMap { enabled ->
-            if (enabled) applicationHeader.flatMap { it.sourceOutputDirectory } else project.providers.provider { null }
+            // File collections resolve their providers while calculating task dependencies.
+            // A project without XAML must contribute a present, empty collection.
+            if (enabled) applicationHeader.map { listOf(it.sourceOutputDirectory.get().asFile) }
+            else project.providers.provider { emptyList<File>() }
         })
-        task.sourceRootOwners.putAll(sourceRootOwners.flatMap { owners -> applicationHeader.flatMap { it.sourceOutputDirectory }.map { output ->
-            owners.values.distinct().associate { owner -> output.dir("sourceSets/$owner").asFile.absolutePath to owner } +
-                (output.dir("shared").asFile.absolutePath to "winuiMain")
-        } })
+        task.sourceRootOwners.putAll(hasXaml.flatMap { enabled ->
+            if (!enabled) project.providers.provider { emptyMap<String, String>() }
+            else sourceRootOwners.flatMap { owners -> applicationHeader.flatMap { it.sourceOutputDirectory }.map { output ->
+                owners.values.distinct().associate { owner -> output.dir("sourceSets/$owner").asFile.absolutePath to owner } +
+                    (output.dir("shared").asFile.absolutePath to "winuiMain")
+            } }
+        })
     }
     // This callback is registered after standalone projection compilation. Its libraries are
     // already attached to each business compilation, so no final application output is needed.
