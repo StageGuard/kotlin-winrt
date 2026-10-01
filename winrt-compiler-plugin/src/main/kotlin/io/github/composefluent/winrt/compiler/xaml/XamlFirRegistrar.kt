@@ -5,8 +5,6 @@ import org.jetbrains.kotlin.GeneratedDeclarationKey
 import org.jetbrains.kotlin.descriptors.Visibilities
 import org.jetbrains.kotlin.fir.FirSession
 import org.jetbrains.kotlin.fir.declarations.FirClassLikeDeclaration
-import org.jetbrains.kotlin.fir.declarations.processAllDeclarations
-import org.jetbrains.kotlin.fir.resolve.providers.symbolProvider
 import org.jetbrains.kotlin.fir.extensions.*
 import org.jetbrains.kotlin.fir.plugin.*
 import org.jetbrains.kotlin.fir.symbols.impl.*
@@ -49,15 +47,6 @@ internal fun WinRTXamlBindingDeclaration.bindBackName(connection: WinRTXamlConne
 internal fun WinRTXamlConnectionDeclaration.storageName(): String? =
     if (isTemplateChild) null else fieldName ?: if (bindings.isNotEmpty()) "_kotlinXamlConnection$id" else null
 
-internal fun xamlElementPropertyName(page: WinRTXamlPageDeclaration, name: String,
-    inheritedNames: Set<String>): String {
-    if (name !in inheritedNames) return name
-    val elementNames = page.connections.mapNotNull { it.storageName() }.toSet()
-    var result = "xaml" + name.replaceFirstChar(Char::uppercaseChar)
-    while (result in inheritedNames || result in elementNames) result = "xaml" + result.replaceFirstChar(Char::uppercaseChar)
-    return result
-}
-
 // Same namespace casing contract as KotlinProjectionTypeResolver.projectionClassNameForQualifiedName.
 internal fun xamlProjectionClassId(name: String): ClassId = ClassId(
     FqName(name.substringBeforeLast('.', "").lowercase()), Name.identifier(name.substringAfterLast('.')),
@@ -68,34 +57,15 @@ internal class XamlFirRegistrar(index: WinRTXamlDeclarationIndex) : FirExtension
     override fun ExtensionRegistrarContext.configurePlugin() {
         +FirDeclarationGenerationExtension.Factory { XamlDeclarations(it, pages) }
         +FirSupertypeGenerationExtension.Factory { XamlSupertypes(it, pages) }
+        +org.jetbrains.kotlin.fir.analysis.extensions.FirAdditionalCheckersExtension.Factory { XamlNameCheckers(it, pages) }
     }
 }
 
 private class XamlDeclarations(session: FirSession, private val pages: Map<ClassId, WinRTXamlPageDeclaration>) :
     FirDeclarationGenerationExtension(session) {
-    private fun inheritedNames(owner: FirClassSymbol<*>): Set<String> {
-        val visited = mutableSetOf<ClassId>()
-        val names = mutableSetOf<String>()
-        fun visit(type: FirClassSymbol<*>) {
-            if (!visited.add(type.classId)) return
-            type.processAllDeclarations(session) { if (it is FirPropertySymbol) names += it.name.asString() }
-            type.resolvedSuperTypes.mapNotNull { it.classId?.let { id ->
-                session.symbolProvider.getClassLikeSymbolByClassId(id) as? FirClassSymbol<*> } }.forEach(::visit)
-        }
-        // Callable names are requested during supertype resolution, before the
-        // page's own FirUserTypeRefs have become resolved type refs. The XAML
-        // declaration already identifies the SDK root, whose symbols are available.
-        val page = pages.getValue(owner.classId)
-        (session.symbolProvider.getClassLikeSymbolByClassId(xamlProjectionClassId(page.baseTypeName))
-            as? FirClassSymbol<*>)?.let(::visit)
-        return names
-    }
-
     override fun getCallableNamesForClass(classSymbol: FirClassSymbol<*>, context: MemberGenerationContext): Set<Name> {
         val page = pages[classSymbol.classId] ?: return emptySet()
-        val inherited = inheritedNames(classSymbol)
-        return page.connections.mapNotNull { it.storageName()?.let { name ->
-            Name.identifier(xamlElementPropertyName(page, name, inherited)) } }.toSet() +
+        return page.connections.mapNotNull { it.storageName()?.let(Name::identifier) }.toSet() +
             setOf(xamlStateName, xamlConstructionStateName, xamlConstructionName, xamlLoadName, xamlInitializeName, xamlConnectName, xamlBindingName) +
             if (page.hasCompiledBindings()) setOf(xamlBindingStateName, xamlUpdateBindingsName, xamlBindingsChangedName,
                 xamlBindingsLoadingName, xamlBindingsUnloadedName, xamlRefreshBindingsName) + page.bindBackNames() +
@@ -106,9 +76,7 @@ private class XamlDeclarations(session: FirSession, private val pages: Map<Class
         val owner = context?.owner ?: return emptyList()
         val page = pages[owner.classId] ?: return emptyList()
         val name = callableId.callableName
-        val inherited = inheritedNames(owner)
-        val element = page.connections.singleOrNull { it.storageName()?.let { storage ->
-            xamlElementPropertyName(page, storage, inherited) } == name.asString() }
+        val element = page.connections.singleOrNull { it.storageName() == name.asString() }
         val state = name == xamlStateName || name == xamlConstructionStateName
         val type = if (state) xamlStateId else if (name == xamlBindingStateName) xamlBindingStateId
             else element?.typeName?.let(::xamlProjectionClassId) ?: return emptyList()

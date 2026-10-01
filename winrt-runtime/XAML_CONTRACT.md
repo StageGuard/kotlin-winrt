@@ -79,8 +79,7 @@ Both XAML passes recognize dependency model names as their original Kotlin names
 The existing compiler support identity carries the runtime registrars, while AppX
 resource variants carry the compiled XAML/XBF payload.
 
-When an `x:Name` conflicts with an inherited Kotlin property, its generated accessor
-uses `xaml<Name>` (for example, `content` becomes `xamlContent`). The XAML name stays
-unchanged and the inherited property retains its getter/setter and ABI behavior.
-Further name collisions add another `xaml` prefix. FIR and IR share this naming rule
-on JVM and Native; ordinary element names keep their original spelling.
+When an `x:Name` conflicts with an inherited Kotlin property, FIR reports an error
+including the XAML path, line, column, and conflicting property. Rename the element
+explicitly in XAML and Kotlin. Generated accessors retain the literal XAML name;
+no automatic prefix or alias is introduced on JVM or Native.
