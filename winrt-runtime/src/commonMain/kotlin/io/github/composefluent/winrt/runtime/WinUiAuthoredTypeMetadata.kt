@@ -154,9 +154,7 @@ internal object WinUiAuthoredTypeMetadata {
                         val activate = definition?.activate
                         if (activate == null) KnownHResults.E_NOTIMPL.value else {
                             if (FeatureSwitches.traceCcw) println("winrt-xaml-metadata: activate $name")
-                            val instance = activate()
-                            if (instance is WinRTXamlComponent) initializeWinRTXamlComponent(instance)
-                            PlatformAbi.writePointer(args[0] as RawAddress, WinRTObjectMarshaller.fromManaged(instance))
+                            PlatformAbi.writePointer(args[0] as RawAddress, publishInstance(activate()))
                             KnownHResults.S_OK.value
                         }
                     }, // Never substitute native base activation for an authored constructor.
@@ -165,7 +163,7 @@ internal object WinUiAuthoredTypeMetadata {
                         val parser = definition?.createFromString
                         if (parser == null) KnownHResults.E_NOTIMPL.value else {
                             val input = HString.fromHandle(args[0] as RawAddress, owner = false).use { it.toKString() }
-                            PlatformAbi.writePointer(args[1] as RawAddress, WinRTObjectMarshaller.fromManaged(parser(input)))
+                            PlatformAbi.writePointer(args[1] as RawAddress, publishInstance(parser(input)))
                             KnownHResults.S_OK.value
                         }
                     }, // CreateFromString
@@ -206,6 +204,11 @@ internal object WinUiAuthoredTypeMetadata {
             defaultInterfaceId = WinUiXamlInterfaceIds.IXamlType,
         )
         return host.detachReference(WinUiXamlInterfaceIds.IXamlType)
+    }
+
+    private fun publishInstance(instance: Any): RawAddress {
+        if (instance is WinRTXamlComponent) initializeWinRTXamlComponent(instance)
+        return WinRTObjectMarshaller.fromManaged(instance)
     }
 
     private fun createMember(owner: WinRTXamlTypeDefinition, member: WinRTXamlMemberDefinition,

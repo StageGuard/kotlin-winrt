@@ -60,6 +60,8 @@ internal fun xamlApplicationProperties(
     fun resolve(type: IrType): WinRTTypeRef = xamlApplicationTypeReference(type, types, applicationTypes)
 
     val owners = listOf(klass) + listOfNotNull(klass.companionObject())
+    fun visibleOwner(owner: IrClass) = owner === klass || owner.visibility == DescriptorVisibilities.PUBLIC ||
+        (includeInternal && owner.visibility == DescriptorVisibilities.INTERNAL)
     val dependencyPropertyNames = owners.filter { it.kind == org.jetbrains.kotlin.descriptors.ClassKind.OBJECT }
         .flatMap { it.declarations.filterIsInstance<IrProperty>() }
         .filter { it.getter?.returnType?.classFqName?.asString() == "microsoft.ui.xaml.DependencyProperty" }
@@ -72,7 +74,7 @@ internal fun xamlApplicationProperties(
             } }
         .sortedBy { it.second.name.asString() }
         .mapNotNull { (owner, property) ->
-            val public = visible(property.getter)
+            val public = visible(property.getter) && visibleOwner(owner)
             val static = owner.kind == org.jetbrains.kotlin.descriptors.ClassKind.OBJECT
             val type = if (strictPublicProperties && public && !static) resolve(property.getter!!.returnType) else
                 runCatching { resolve(property.getter!!.returnType) }.getOrNull() ?: return@mapNotNull null
@@ -96,7 +98,7 @@ internal fun xamlApplicationProperties(
             if (types[handlerType.qualifiedName?.substringBefore('`')]?.kind != WinRTTypeKind.Delegate.name) return@mapNotNull null
             WinRTXamlApplicationEvent(name, handlerType)
         }
-    val methods = (listOf(klass) + listOfNotNull(klass.companionObject())).flatMap { owner ->
+    val methods = owners.flatMap { owner ->
         owner.declarations.filterIsInstance<IrSimpleFunction>()
             .filter { it.origin == IrDeclarationOrigin.DEFINED && it.overriddenSymbols.isEmpty() &&
                 !it.isSuspend && it.typeParameters.isEmpty() &&
@@ -107,13 +109,20 @@ internal fun xamlApplicationProperties(
                 WinRTXamlApplicationMethod(function.name.asString(), resolve(function.returnType),
                     function.parameters.filter { it.kind == IrParameterKind.Regular }.map { resolve(it.type) },
                     isStatic = owner.kind == org.jetbrains.kotlin.descriptors.ClassKind.OBJECT,
-                    isPublic = visible(function))
+                    isPublic = visible(function) && visibleOwner(owner))
             }.getOrNull() }
     }
-    val contentProperty = klass.annotations.firstOrNull { call ->
-        call.symbol.owner.parentClassOrNull?.fqNameWhenAvailable?.asString() ==
-            "io.github.composefluent.winrt.runtime.WinRTXamlContentProperty"
+    fun stringAnnotation(name: String) = klass.annotations.firstOrNull { call ->
+        call.symbol.owner.parentClassOrNull?.fqNameWhenAvailable?.asString() == "io.github.composefluent.winrt.runtime.$name"
     }?.arguments?.firstOrNull()?.let { (it as? IrConst)?.value as? String }
+    val parser = stringAnnotation("WinRTXamlCreateFromString")?.let { value ->
+        if ('.' !in value) value else {
+            val owner = value.substringBeforeLast('.')
+            val local = "${klass.fqNameWhenAvailable!!.asString().substringBeforeLast('.')}.$owner"
+            (if (owner !in applicationTypes && local in applicationTypes) local else owner) + "." + value.substringAfterLast('.')
+        }
+    }
     return WinRTXamlApplicationTypeMembers(properties = properties, events = events, methods = methods,
-        contentProperty = contentProperty)
+        contentProperty = stringAnnotation("WinRTXamlContentProperty"),
+        createFromStringMethod = parser)
 }

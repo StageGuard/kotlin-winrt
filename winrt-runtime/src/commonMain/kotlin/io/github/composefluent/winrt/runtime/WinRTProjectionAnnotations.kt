@@ -90,6 +90,11 @@ annotation class WinRTAuthoredRuntimeClass(
 @Target(AnnotationTarget.CLASS)
 annotation class WinRTXamlContentProperty(val name: String)
 
+/** Maps WinUI CreateFromStringAttribute.MethodName to a public companion/object factory. */
+@Retention(AnnotationRetention.BINARY)
+@Target(AnnotationTarget.CLASS)
+annotation class WinRTXamlCreateFromString(val methodName: String)
+
 @Retention(AnnotationRetention.RUNTIME)
 @Target(AnnotationTarget.CLASS)
 annotation class GeneratedWinRTExposedExternalType(

@@ -82,7 +82,7 @@ private class XamlLibrarySchema(private val root: Path, private val assembly: St
             klass.fqNameWhenAvailable!!.asString() to xamlApplicationProperties(klass, types, names,
                 strictPublicProperties = false, includeInternal = false).let { schema -> schema.copy(
                 properties = schema.properties.filter { property -> property.isPublic &&
-                    klass.declarations.filterIsInstance<IrProperty>().any { it.name.asString() == property.name &&
+                    (klass.declarations + klass.companionObject()?.declarations.orEmpty()).filterIsInstance<IrProperty>().any { it.name.asString() == property.name &&
                         it.getter?.visibility == DescriptorVisibilities.PUBLIC } },
                 methods = schema.methods.filter { method -> method.isPublic &&
                     (klass.declarations + klass.companionObject()?.declarations.orEmpty()).filterIsInstance<IrSimpleFunction>()
@@ -132,11 +132,13 @@ private class XamlLibrarySchema(private val root: Path, private val assembly: St
                     }
                 appendLine("      isWinRTComponent = ${requiresComponentAuthoring(componentTypes(klass), klass.hasAnnotation(org.jetbrains.kotlin.name.FqName(WINRT_AUTHORED_RUNTIME_CLASS_ANNOTATION)))},")
                 if (descriptor.isActivatable) appendLine("      activate = { $name() },")
-                val initializer = if (klass.kind == ClassKind.OBJECT) name else klass.companionObject()?.let { "$name.${it.name.asString()}" }
+                val initializer = if (klass.kind == ClassKind.OBJECT) name else klass.companionObject()
+                    ?.takeIf { it.visibility == DescriptorVisibilities.PUBLIC }?.let { "$name.${it.name.asString()}" }
                 initializer?.let { appendLine("      initializer = { $it; Unit },") }
                 members.getValue(name).contentProperty?.let { content ->
                     appendLine("      contentProperty = ${literal(content)},")
                 }
+                xamlCreateFromStringMethodSource(name, members)?.let { factory -> appendLine("      createFromString = { $factory(it) },") }
                 val convert: (String, String) -> String = { value, type -> "$value as $type" }
                 val shape = xamlCollectionRegistrationSources(interfaces.getValue(klass), convert)
                 if (shape.isNotEmpty()) {
@@ -153,6 +155,7 @@ private class XamlLibrarySchema(private val root: Path, private val assembly: St
                 val functions = (klass.declarations + klass.companionObject()?.declarations.orEmpty()).filterIsInstance<IrSimpleFunction>()
                 val accessors = members.getValue(name).methods.filter { it.isStatic && it.isPublic }.map { method ->
                     val function = functions.single { function -> function.name.asString() == method.name && function.visibility == DescriptorVisibilities.PUBLIC &&
+                        (function.parentClassOrNull?.kind == ClassKind.OBJECT) == method.isStatic &&
                         runCatching { xamlApplicationTypeReference(function.returnType, types, names) == method.returnType &&
                             function.parameters.filter { it.kind == IrParameterKind.Regular }.map { xamlApplicationTypeReference(it.type, types, names) } == method.parameterTypes
                         }.getOrDefault(false) }

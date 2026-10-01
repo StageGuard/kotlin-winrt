@@ -32,11 +32,13 @@ data class WinRTXamlApplicationTypeMembers(
     val contentProperty: String? = null,
     val events: List<WinRTXamlApplicationEvent> = emptyList(),
     val methods: List<WinRTXamlApplicationMethod> = emptyList(),
+    val createFromStringMethod: String? = null,
 ) {
     init {
         require(properties.map { it.name }.distinct().size == properties.size)
         require(events.map { it.name }.distinct().size == events.size)
         require(contentProperty == null || contentProperty.isNotBlank())
+        require(createFromStringMethod == null || createFromStringMethod.isNotBlank())
     }
 }
 

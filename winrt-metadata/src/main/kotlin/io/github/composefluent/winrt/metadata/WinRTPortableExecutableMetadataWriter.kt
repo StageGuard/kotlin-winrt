@@ -184,6 +184,7 @@ private class WinmdBuilder(
             .apply { addAll(runtimeClasses.map { it.runtimeClassName }) }
         val attributeTypeNames = buildSet {
             if (applicationMembers.values.any { it.contentProperty != null }) add(XAML_CONTENT_PROPERTY)
+            if (applicationMembers.values.any { it.createFromStringMethod != null }) add(XAML_CREATE_FROM_STRING)
             if (runtimeClasses.isNotEmpty() || interfaces.isNotEmpty()) {
                 add(WINDOWS_FOUNDATION_METADATA_VERSION)
             }
@@ -208,7 +209,8 @@ private class WinmdBuilder(
             // A compiler-only Kotlin model schema may have no SDK dependency. CLR
             // constructors/members still describe it; component ABI attributes
             // remain mandatory on writeAuthoredWinmd's separate path.
-            !isApplicationSchema || externalTypeAssemblies?.containsKey(name) != false || name == XAML_CONTENT_PROPERTY
+            !isApplicationSchema || externalTypeAssemblies?.containsKey(name) != false ||
+                name in setOf(XAML_CONTENT_PROPERTY, XAML_CREATE_FROM_STRING)
         }
         val typeRefs = (
             runtimeClasses.flatMap { descriptor ->
@@ -511,6 +513,7 @@ private class WinmdBuilder(
     private fun attributeMemberRefs(typeRefs: List<TypeRefRow>): List<AttributeMemberRefRow> =
         listOf(
             XAML_CONTENT_PROPERTY to emptyList<Int>(),
+            XAML_CREATE_FROM_STRING to emptyList<Int>(),
             WINDOWS_FOUNDATION_METADATA_DEFAULT to emptyList<Int>(),
             WINDOWS_FOUNDATION_METADATA_OVERRIDABLE to emptyList(),
             WINDOWS_FOUNDATION_METADATA_GUID to listOf(ELEMENT_TYPE_STRING),
@@ -604,15 +607,17 @@ private class WinmdBuilder(
         }
         runtimeClasses.forEachIndexed { index, descriptor ->
             val typeDefRowId = index + 2 + interfaces.size
-            applicationMembers[descriptor.runtimeClassName]?.contentProperty?.let { content ->
+            fun stringAttribute(type: String, field: String, content: String) {
                 val value = BinaryWriter().apply {
                     int16(1); int16(1) // prolog, one named field
                     int8(0x53); int8(ELEMENT_TYPE_STRING)
-                    serializedString("Name"); serializedString(content)
+                    serializedString(field); serializedString(content)
                 }.toByteArray()
                 rows += CustomAttributeRow(hasCustomAttributeToken(typeDefRowId, CODED_HAS_CUSTOM_ATTRIBUTE_TYPE_DEF),
-                    memberRefRowIds.getValue(XAML_CONTENT_PROPERTY), blobs.index(value))
+                    memberRefRowIds.getValue(type), blobs.index(value))
             }
+            applicationMembers[descriptor.runtimeClassName]?.contentProperty?.let { stringAttribute(XAML_CONTENT_PROPERTY, "Name", it) }
+            applicationMembers[descriptor.runtimeClassName]?.createFromStringMethod?.let { stringAttribute(XAML_CREATE_FROM_STRING, "MethodName", it) }
             memberRefRowIds[WINDOWS_FOUNDATION_METADATA_VERSION]?.let { memberRefRowId ->
                 rows += CustomAttributeRow(
                     parentToken = hasCustomAttributeToken(
@@ -912,6 +917,7 @@ private class WinmdBuilder(
         const val TABLE_PROPERTY = 23
         const val TABLE_METHOD_SEMANTICS = 24
         const val XAML_CONTENT_PROPERTY = "Microsoft.UI.Xaml.Markup.ContentPropertyAttribute"
+        const val XAML_CREATE_FROM_STRING = "Microsoft.UI.Xaml.Markup.CreateFromStringAttribute"
         const val TABLE_INTERFACE_IMPL = 9
         const val TABLE_MEMBER_REF = 10
         const val TABLE_CUSTOM_ATTRIBUTE = 12

@@ -87,6 +87,16 @@ Content properties can refer to inherited members. A definition's initializer
 initializes its own companion or object, and ordinary model classes receive
 bindable metadata without being registered as Windows Runtime components.
 
+`@WinRTXamlCreateFromString("Parse")` names a public companion/object factory
+accepting one String and returning the represented value. A fully qualified
+factory on another type is also supported. Both schema passes emit WinUI's
+`CreateFromStringAttribute.MethodName`, and the owning module compiles the typed
+factory delegate for `IXamlType.CreateFromString`. No runtime method reflection
+is used. Factory results that are XAML components complete initialization before
+being marshaled, just as activation results do. Private companions do not export
+public static members, while representable private inputs remain available to
+the page's compiled bindings.
+
 XAML libraries publish their declaration schema in the existing library identity's
 `xamlSchemaRecords`, separately from `authoredMetadataRecords`. Consumers materialize
 these records only for XAML header analysis and compilation; they do not generate

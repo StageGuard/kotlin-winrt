@@ -30,6 +30,24 @@ internal data class XamlStaticAccessor(
     val parameterTypes: List<String>,
 )
 
+/** DirectUISchemaContext resolves a public static factory with one String parameter. */
+internal fun xamlCreateFromStringMethodSource(
+    typeName: String,
+    members: Map<String, WinRTXamlApplicationTypeMembers>,
+): String? {
+    val name = members.getValue(typeName).createFromStringMethod ?: return null
+    val qualified = if ('.' in name) name else "$typeName.$name"
+    val owner = qualified.substringBeforeLast('.')
+    val methodName = qualified.substringAfterLast('.')
+    require(owner.isNotBlank() && methodName.isNotBlank()) { "$typeName has an invalid CreateFromString method: $name" }
+    val schema = members[owner] ?: return "$owner.`$methodName`"
+    val factory = schema.methods.singleOrNull { method -> method.isPublic && method.isStatic &&
+        method.name.equals(methodName, ignoreCase = true) && method.parameterTypes.size == 1 &&
+        method.parameterTypes.single().xamlStandardTypeName() == "String" && !isWinRTVoidTypeName(method.returnType.typeName) }
+    require(factory != null) { "$typeName CreateFromString method $qualified must be a public companion/object factory with one String parameter and a return value" }
+    return "$owner.`${factory.name}`"
+}
+
 /** Prefer the mutable contract when a collection implements several projected interfaces. */
 internal fun xamlCollectionRegistrationSources(
     interfaces: List<Pair<WinRTTypeRef, String>>,
