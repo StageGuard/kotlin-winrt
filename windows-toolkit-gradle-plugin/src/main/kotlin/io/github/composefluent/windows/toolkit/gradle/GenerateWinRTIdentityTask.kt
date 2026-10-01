@@ -91,6 +91,10 @@ abstract class GenerateWinRTIdentityTask : DefaultTask() {
     @get:PathSensitive(PathSensitivity.RELATIVE)
     abstract val authoredMetadataFiles: ConfigurableFileCollection
 
+    /** Application schema is compiler input, never an exported/activatable component. */
+    @get:InputFiles @get:Optional @get:PathSensitive(PathSensitivity.NONE)
+    abstract val xamlSchemaFiles: ConfigurableFileCollection
+
     @get:InputFiles
     @get:Optional
     @get:PathSensitive(PathSensitivity.RELATIVE)
@@ -142,6 +146,7 @@ abstract class GenerateWinRTIdentityTask : DefaultTask() {
                 appendLine("  \"nugetPackages\": ${nugetPackages.get().toJsonArray()},")
                 appendLine("  \"runtimeAssetRecords\": ${runtimeAssetRecordsToJsonArray(readRuntimeAssetRecords(runtimeAssetFiles.files))},")
                 appendLine("  \"authoredMetadataRecords\": ${authoredMetadataRecordsToJsonArray(readAuthoredMetadataRecords(authoredMetadataFiles.files))},")
+                appendLine("  \"xamlSchemaRecords\": ${authoredMetadataRecordsToJsonArray(readXamlSchemaRecords(xamlSchemaFiles.files))},")
                 appendLine("  \"authoringMetadataIndexRows\": ${readAuthoringMetadataIndexRows(authoringMetadataIndexFiles.files).toJsonArray()},")
                 appendLine("  \"authoredHostManifestRecords\": ${authoredHostManifestRecordsToJsonArray(readAuthoredHostManifestRecords(authoredHostManifestFiles.files))},")
                 appendLine("  \"authoredTargetArtifactRecords\": ${authoredTargetArtifactRecordsToJsonArray(readAuthoredTargetArtifactRecords(authoredTargetArtifactFiles.files))},")
@@ -445,6 +450,13 @@ private fun runtimeAssetRecordsToJsonArray(records: List<RuntimeAssetRecord>): S
 
 internal fun authoredMetadataRecordsToJsonArray(records: List<AuthoredMetadataRecord>): String =
     records.joinToString(prefix = "[", postfix = "]") { it.toJsonObject() }
+
+internal fun readXamlSchemaRecords(files: Iterable<File>): List<AuthoredMetadataRecord> =
+    files.filter(File::isFile).mapNotNull { file ->
+        val assembly = io.github.composefluent.winrt.metadata.WinRTMetadataLoader
+            .loadTypeAssemblyNames(listOf(file.toPath())).values.distinct().singleOrNull() ?: return@mapNotNull null
+        AuthoredMetadataRecord("$assembly.winmd", Base64.getEncoder().encodeToString(file.readBytes()))
+    }.sortedBy { it.fileName }
 
 private fun compilerSupportFileRecordsToJsonArray(records: List<CompilerSupportFileRecord>): String =
     records.joinToString(prefix = "[", postfix = "]") { it.toJsonObject() }

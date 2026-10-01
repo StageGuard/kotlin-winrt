@@ -32,6 +32,8 @@ abstract class GenerateWinRTXamlApplicationHeaderTask @Inject constructor(
 
     @get:Internal
     abstract val referenceFiles: ConfigurableFileCollection
+    @get:InputFiles @get:Optional @get:PathSensitive(PathSensitivity.NONE)
+    abstract val dependencyIdentityFiles: ConfigurableFileCollection
     @get:InputFiles @get:PathSensitive(PathSensitivity.NONE)
     val inputReferenceFiles get() = objects.fileCollection().from(
         preparedMetadataManifest.map { readPreparedMetadataCache(it.asFile.toPath()).files }, referenceFiles)
@@ -58,6 +60,12 @@ abstract class GenerateWinRTXamlApplicationHeaderTask @Inject constructor(
         val sourceOutput = sourceOutputDirectory.get().asFile
         fileSystem.delete { it.delete(sourceOutput) }
         sourceOutput.mkdirs()
+        val records = dependencyIdentityFiles.files.flatMap { readDependencyAuthoredMetadataRecords(it, "xamlSchemaRecords") }
+        records.groupBy { it.fileName.lowercase() }.forEach { (name, copies) ->
+            require(copies.map { it.contentBase64 }.distinct().size == 1) { "Conflicting dependency XAML schema: $name" }
+        }
+        val dependencySchemas = writeDependencyAuthoredMetadataRecords(records,
+            sourceOutput.toPath().resolve("dependency-schemas"))
         exec.javaexec { spec ->
             spec.classpath = scannerClasspath
             spec.mainClass.set("io.github.composefluent.winrt.compiler.KotlinWinRTAuthoringScannerCli")
@@ -77,7 +85,7 @@ abstract class GenerateWinRTXamlApplicationHeaderTask @Inject constructor(
                     .sortedBy { it.absolutePath }.forEach {
                     add("--source-root"); add(it.absolutePath)
                 }
-                inputReferenceFiles.files.sortedBy { it.absolutePath }.forEach {
+                (inputReferenceFiles.files + dependencySchemas.map { it.toFile() }).sortedBy { it.absolutePath }.forEach {
                     add("--reference"); add(it.absolutePath)
                 }
             })

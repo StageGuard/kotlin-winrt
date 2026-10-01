@@ -21,7 +21,7 @@ import java.io.File
 import java.nio.file.Files
 import java.nio.file.Path
 
-/** Private Kotlin handlers stay in this compile-time sidecar, never in the public WinMD ABI. */
+/** Private handlers remain private in application schema, never in the public component ABI. */
 @OptIn(ExperimentalCompilerApi::class)
 internal object XamlSemanticOptions {
     private val keys = listOf("xamlDeclarations", "xamlSemanticOutput", "xamlReferences", "xamlReferencesFile", "xamlApplicationHeader", "xamlImplementation")
@@ -88,7 +88,10 @@ private class XamlSemanticExport(
         val authored = mutableListOf<WinRTXamlApplicationTypeDescriptor>()
         val applicationMembers = mutableMapOf<String, WinRTXamlApplicationTypeMembers>()
         val headerTypes = applicationHeader?.let { WinRTMetadataLoader.load(it).namespaces.flatMap { it.types } }.orEmpty()
-        val applicationTypes = (declarations.pages.map { it.className } + headerTypes.map { it.qualifiedName }).toSet()
+        val dependencyTypes = references.filter { it.fileName.toString().endsWith(".KotlinXaml.winmd") }
+            .flatMap { WinRTMetadataLoader.load(it).namespaces.flatMap { namespace -> namespace.types } }
+        val applicationTypes = (declarations.pages.map { it.className } + headerTypes.map { it.qualifiedName } +
+            dependencyTypes.map { it.qualifiedName }).toSet()
         val pages = declarations.pages.sortedBy { it.className }.map { page ->
             val (klass, file) = requireNotNull(classes.singleOrNull { it.first.fqNameWhenAvailable?.asString() == page.className }) {
                 "XAML ${page.resourcePath}: missing top-level Kotlin class ${page.className}"
@@ -155,7 +158,8 @@ private class XamlSemanticExport(
         }
         Files.createDirectories(output.toAbsolutePath().parent)
         WinRTPortableExecutableMetadataWriter.writeXamlSchemaWinmd(
-            "KotlinXaml", authored, applicationMembers, output.resolveSibling("KotlinXaml.winmd"),
+            applicationHeader?.let { WinRTMetadataLoader.loadTypeAssemblyNames(listOf(it)).values.distinct().singleOrNull() }
+                ?: "KotlinXaml", authored, applicationMembers, output.resolveSibling("KotlinXaml.winmd"),
             WinRTMetadataLoader.loadTypeAssemblyNames(references),
             types.values.filter { it.kind == WinRTTypeKind.Enum.name || it.kind == WinRTTypeKind.Struct.name }
                 .mapTo(mutableSetOf()) { it.qualifiedName },

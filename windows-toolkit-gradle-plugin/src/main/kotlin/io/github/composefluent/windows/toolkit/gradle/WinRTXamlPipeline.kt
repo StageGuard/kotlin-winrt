@@ -80,6 +80,10 @@ internal fun configureWinRTXamlPipeline(
         task.scannerJvmArgs.set(listOf("-Xmx512m", "-Xss512k", "-XX:+UseSerialGC", "-XX:ReservedCodeCacheSize=32m"))
         task.outputFile.set(project.layout.buildDirectory.file("generated/kotlin-winrt/xaml/application/KotlinXaml.winmd"))
         task.sourceOutputDirectory.set(project.layout.buildDirectory.dir("generated/kotlin-winrt/xaml/application/src"))
+        task.dependencyIdentityFiles.from(project.provider {
+            project.tasks.named("generateWinRTProjections", GenerateWinRTProjectionsTask::class.java)
+                .get().dependencyIdentityFiles
+        })
         task.onlyIf { hasXaml.get() }
     }
     val analyzeAll = project.tasks.register("analyzeWinRTXaml") { it.group = "kotlin-winrt" }
@@ -88,6 +92,16 @@ internal fun configureWinRTXamlPipeline(
             if (enabled) applicationHeader.flatMap { it.sourceOutputDirectory.file("registrars.tsv") } else project.providers.provider { null }
         })
     }
+    val dependencySchemas = applicationHeader.flatMap { it.sourceOutputDirectory }.map {
+        project.fileTree(it.dir("dependency-schemas")) { spec -> spec.include("*.KotlinXaml.winmd") }
+    }
+    project.tasks.withType(GenerateWinRTIdentityTask::class.java).configureEach { task ->
+        task.xamlSchemaFiles.from(hasXaml.flatMap { enabled ->
+            if (enabled) applicationHeader.map { listOf(it.outputFile.get().asFile) }
+            else project.providers.provider { emptyList<File>() }
+        })
+    }
+    project.tasks.withType(CompileWinRTXamlTask::class.java).configureEach { it.referenceFiles.from(dependencySchemas) }
     fun compilationInputs(suffix: String, roots: Provider<List<File>>): WinRTXamlCompilationInputs {
         val header = project.tasks.register("generateWinRTXamlApplicationHeader$suffix", GenerateWinRTXamlApplicationHeaderTask::class.java) { task ->
             task.sourceRoots.from(roots)
@@ -99,6 +113,7 @@ internal fun configureWinRTXamlPipeline(
             task.outputFile.set(project.layout.buildDirectory.file("generated/kotlin-winrt/xaml/$suffix/application/KotlinXaml.winmd"))
             task.sourceOutputDirectory.set(project.layout.buildDirectory.dir("generated/kotlin-winrt/xaml/$suffix/application/src"))
             task.emitSources.set(false)
+            task.referenceFiles.from(dependencySchemas)
         }
         val declarations = project.tasks.register("analyzeWinRTXaml$suffix", CompileWinRTXamlTask::class.java) { task ->
             configure(task)

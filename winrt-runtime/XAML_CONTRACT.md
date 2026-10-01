@@ -69,3 +69,12 @@ generated typed `AddToMap` callback. Writable lists expose `IsCollection` and
 `AddToVector`. Both use the shared container type lookup, including XBF type
 queries before `IXamlMember.Type` is requested. Read-only maps do not advertise
 an insertion callback.
+
+XAML libraries publish their declaration schema in the existing library identity's
+`xamlSchemaRecords`, separately from `authoredMetadataRecords`. Consumers materialize
+these records only for XAML header analysis and compilation; they do not generate
+projections or activation hosts for the application schema. Each library uses a
+`<module>.KotlinXaml` assembly identity and a matching dependency WinMD filename.
+Both XAML passes recognize dependency model names as their original Kotlin names.
+The existing compiler support identity carries the runtime registrars, while AppX
+resource variants carry the compiled XAML/XBF payload.

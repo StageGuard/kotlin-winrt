@@ -126,14 +126,20 @@ object KotlinWinRTAuthoringScannerCli {
                 name
             }
         val selected = (pageNames + referencedXamlTypes(options.sourceRoots, classes.keys)).toMutableSet()
+        // Dependency application schemas retain Kotlin names; they are not projected
+        // SDK types and must never enter component authoring/projection generation.
+        val dependencyTypes = options.references.filter { it.name.endsWith(".KotlinXaml.winmd") }
+            .flatMap { WinRTMetadataLoader.load(it).namespaces.flatMap { namespace -> namespace.types } }
+        val applicationNames = classes.keys + dependencyTypes.map { it.qualifiedName }
         val schemas = mutableMapOf<String, XamlSourceMembers>()
         val sourceSchemas = mutableMapOf<String, Result<XamlSourceMembers>>()
         fun sourceSchema(name: String): Result<XamlSourceMembers> = sourceSchemas.getOrPut(name) {
             val type = classes.getValue(name)
             runCatching { if (type.source.enumEntries(type.klass) != null)
                 XamlSourceMembers(WinRTXamlApplicationTypeMembers(), emptyList())
-            else type.source.xamlApplicationMembers(type.klass, classes.keys, index,
-                classes.values.filter { it.source.enumEntries(it.klass) != null }.mapTo(mutableSetOf()) { it.name }) }
+            else type.source.xamlApplicationMembers(type.klass, applicationNames, index,
+                classes.values.filter { it.source.enumEntries(it.klass) != null }.mapTo(mutableSetOf()) { it.name } +
+                    dependencyTypes.filter { it.kind == WinRTTypeKind.Enum }.map { it.qualifiedName }) }
         }
         // Private x:Bind inputs belong only to the compiler's temporary schema. An
         // unrelated private implementation object must not pull an unprojectable
@@ -181,7 +187,7 @@ object KotlinWinRTAuthoringScannerCli {
                 enumEntries = type.source.enumEntries(type.klass))
         }
         WinRTPortableExecutableMetadataWriter.writeXamlSchemaWinmd(
-            "KotlinXaml", descriptors, members, options.output,
+            options.xamlAssemblyName?.let { "$it.KotlinXaml" } ?: "KotlinXaml", descriptors, members, options.output,
             WinRTMetadataLoader.loadTypeAssemblyNames(options.references),
             index.values.filter { it.kind == WinRTTypeKind.Enum.name || it.kind == WinRTTypeKind.Struct.name }
                 .mapTo(mutableSetOf()) { it.qualifiedName },
