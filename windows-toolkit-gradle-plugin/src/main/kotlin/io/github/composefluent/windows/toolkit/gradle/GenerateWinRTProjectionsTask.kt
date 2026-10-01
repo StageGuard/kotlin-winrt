@@ -390,7 +390,10 @@ internal abstract class GenerateWinRTProjectionsWorkAction : WorkAction<Generate
                 )
                 KotlinWinRTAuthoringCandidateFile.read(candidatesFile)
             }
-        val hasPreparedStaticSources = parameters.preparedStaticSourceDirectory.orNull
+        // Prepared metadata can cache SDK source blueprints even when this module
+        // imports metadata solely for XAML schemas. Only materialize declarations
+        // that this module will compile; otherwise its identity falsely owns them.
+        val hasPreparedStaticSources = parameters.emitProjectionSources.get() && parameters.preparedStaticSourceDirectory.orNull
             ?.asFile
             ?.toPath()
             ?.let { preparedRoot -> materializeCachedPreparedSources(preparedRoot, generatedRoot) } == true
@@ -719,11 +722,7 @@ internal fun dependencyProjectedTypeNames(
     identityFiles
         .flatMap { identityFile ->
             dependencyProjectedTypeNames(model, readProjectionSurfaceIdentity(identityFile)) +
-                readAuthoringMetadataIndexRows(identityFile).mapNotNull { row ->
-                    parseAuthoringMetadataIndexRows(listOf(row), identityFile.absolutePath).values
-                        .firstOrNull()
-                        ?.qualifiedName
-                } +
+                readDependencyAuthoredTypeNames(identityFile) +
                 readAuthoredHostManifestRecords(identityFile)
                     .flatMap { record -> record.activatableClasses + record.activatableClassTargets.keys }
         }
@@ -735,7 +734,7 @@ internal fun dependencyProjectionSurfaceTypeNames(
     identityFiles
         .flatMap { identityFile ->
             val identity = readProjectionSurfaceIdentity(identityFile)
-            identity.includeTypes + identity.currentShapeProjectedTypes()
+            identity.includeTypes + identity.currentShapeProjectedTypes() + readDependencyAuthoredTypeNames(identityFile)
         }
         .distinct()
         .sorted()

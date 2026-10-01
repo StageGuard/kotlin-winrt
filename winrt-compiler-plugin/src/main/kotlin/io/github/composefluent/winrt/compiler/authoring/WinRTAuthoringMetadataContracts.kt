@@ -4,6 +4,7 @@ import io.github.composefluent.winrt.metadata.WinRTMetadataModel
 import io.github.composefluent.winrt.metadata.WinRTTypeKind
 import io.github.composefluent.winrt.metadata.isWinRTObjectTypeName
 import io.github.composefluent.winrt.metadata.winRTMappedTypeForKotlinName
+import io.github.composefluent.winrt.metadata.winRTMappedTypeForAbiName
 import io.github.composefluent.winrt.runtime.Guid
 import java.nio.file.Files
 import java.nio.file.Path
@@ -16,6 +17,15 @@ data class IndexedWinRTType(
     val baseTypeName: String,
     val iid: Guid? = null,
 )
+
+/** CsWinRT AotOptimizer.AddWinRTInterfaceToVtable gives ordinary managed models
+ * mapped-interface CCWs without making them activatable exported components.
+ * The runtime owns these adapters; explicit authoring still opts into a component.
+ */
+internal fun requiresComponentAuthoring(types: List<IndexedWinRTType>, explicit: Boolean): Boolean =
+    types.isNotEmpty() && (explicit || types.any {
+        it.kind != WinRTTypeKind.Interface.name || winRTMappedTypeForAbiName(it.qualifiedName.substringBefore('`'))?.mappedQualifiedName == null
+    })
 
 data class KotlinWinRTAuthoredTypeCandidate(
     val packageName: String,
@@ -37,6 +47,7 @@ data class KotlinWinRTAuthoredRuntimeClassAnnotation(
     val overridableInterfaceNames: List<String> = emptyList(),
     val activatableFactoryInterfaceName: String? = null,
     val staticFactoryInterfaceNames: List<String> = emptyList(),
+    val isPresent: Boolean = false,
 ) {
     val hasMetadata: Boolean
         get() = baseClassName != null ||

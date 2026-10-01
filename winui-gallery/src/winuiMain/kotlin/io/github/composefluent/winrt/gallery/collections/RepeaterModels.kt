@@ -16,10 +16,6 @@ internal class Bar(val Length: Double, val MaxLength: Int) {
 internal class NestedCategory(val CategoryName: String, items: List<String>) {
     val CategoryItems: MutableList<String> = WinRTObservableList(items)
 }
-internal class Recipe(val Num: Int, val Name: String, val Color: String, val IngList: List<String>) {
-    val Ingredients: String = IngList.joinToString("\n", "\n")
-    val NumIngredients: Int get() = IngList.size
-}
 internal class MyItemsSource(items: List<Recipe>) : AbstractMutableList<Recipe>(), IKeyIndexMapping, INotifyCollectionChanged {
     private val inner: WinRTObservableList<Recipe> = WinRTObservableList(items)
     override val size: Int get() = inner.size

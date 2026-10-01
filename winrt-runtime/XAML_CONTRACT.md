@@ -79,6 +79,16 @@ Both XAML passes recognize dependency model names as their original Kotlin names
 The existing compiler support identity carries the runtime registrars, while AppX
 resource variants carry the compiled XAML/XBF payload.
 
+Model-only Kotlin libraries use an isolated semantic compilation to export their
+public XAML schema, including inferred property types. Their normal JAR/KLIB
+contains generated accessors and a registrar published through the same library
+identity. Unsupported implementation members are omitted from this schema;
+XAML page schemas retain strict diagnostics. Windows SDK metadata is compiler
+input for collection and nullable value type signatures, and does not require
+generating SDK bindings in the model library. Ordinary classes implementing
+runtime-mapped interfaces such as `INotifyPropertyChanged` use the existing CCW
+adapters; only explicit authoring or an unmapped ABI shape requires a component.
+
 When an `x:Name` conflicts with an inherited Kotlin property, FIR reports an error
 including the XAML path, line, column, and conflicting property. Rename the element
 explicitly in XAML and Kotlin. Generated accessors retain the literal XAML name;

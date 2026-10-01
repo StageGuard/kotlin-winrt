@@ -14,6 +14,8 @@ import org.jetbrains.kotlin.gradle.targets.jvm.KotlinJvmTarget
 import java.io.File
 
 internal fun isXamlSemanticTask(name: String) = name.startsWith("compileKotlinWinRTXamlSemantic") ||
+    name.startsWith("compileKotlinWinRTXamlLibrarySemantic") ||
+    name.startsWith("compileWinRTXamlLibrarySemantic") ||
     name.startsWith("compileWinRTXamlSemantic")
 
 // Kotlin 2.4.0 exposes no public factory for cloning KMP fragments into a standalone
@@ -38,6 +40,9 @@ internal fun configureWinRTXamlPipeline(
     val hasXaml = project.provider {
         xamlSourceRoots.get().any { root -> root.isDirectory && root.walkTopDown().any { it.isFile && it.extension.equals("xaml", true) } }
     }
+    val hasLibrarySources = project.provider { !extension.applicationEnabled.get() && !hasXaml.get() &&
+        sourceRoots.get().filterNot { isKotlinWindowsToolkitPluginOwnedAuthoringSourceRoot(it.toPath()) }
+            .any { root -> root.isDirectory && root.walkTopDown().any { it.isFile && it.extension == "kt" } } }
     val localCompilerDirectory = extension.xaml.compilerDirectory
     val sourceRootOwners = project.provider { winRTSourceRootOwners(project) }
     val resolveCompiler = project.tasks.register("resolveWinRTXamlCompiler", ResolveWinRTXamlCompilerTask::class.java) { task ->
@@ -84,7 +89,8 @@ internal fun configureWinRTXamlPipeline(
             project.tasks.named("generateWinRTProjections", GenerateWinRTProjectionsTask::class.java)
                 .get().dependencyIdentityFiles
         })
-        task.onlyIf { hasXaml.get() }
+        task.emitSources.set(hasXaml)
+        task.onlyIf { hasXaml.get() || hasLibrarySources.get() }
     }
     val analyzeAll = project.tasks.register("analyzeWinRTXaml") { it.group = "kotlin-winrt" }
     project.tasks.withType(GenerateWinRTProjectionsTask::class.java).matching { it.name == "generateWinRTProjections" }.configureEach { task ->
@@ -143,6 +149,8 @@ internal fun configureWinRTXamlPipeline(
     // This callback is registered after standalone projection compilation. Its libraries are
     // already attached to each business compilation, so no final application output is needed.
     project.afterEvaluate {
+        if (hasLibrarySources.get()) configureWinRTXamlLibraryPipeline(project, metadataIndex, metadataManifest,
+            applicationHeader, compilerPluginClasspath)
         if (!hasXaml.get()) return@afterEvaluate
         val kmp = project.extensions.findByType(KotlinMultiplatformExtension::class.java)
         if (kmp != null) {

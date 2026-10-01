@@ -66,6 +66,8 @@ abstract class GenerateWinRTXamlApplicationHeaderTask @Inject constructor(
         }
         val dependencySchemas = writeDependencyAuthoredMetadataRecords(records,
             sourceOutput.toPath().resolve("dependency-schemas"))
+        sourceOutput.resolve("references.txt").writeText((inputReferenceFiles.files.map { it.absolutePath } +
+            dependencySchemas.map { it.toFile().absolutePath }).distinct().sorted().joinToString("\n", postfix = "\n"))
         exec.javaexec { spec ->
             spec.classpath = scannerClasspath
             spec.mainClass.set("io.github.composefluent.winrt.compiler.KotlinWinRTAuthoringScannerCli")

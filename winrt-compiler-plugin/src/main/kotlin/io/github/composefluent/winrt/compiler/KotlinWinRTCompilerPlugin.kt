@@ -4,6 +4,7 @@ import io.github.composefluent.winrt.compiler.xaml.XamlSemanticOptions
 import io.github.composefluent.winrt.compiler.xaml.XamlFirRegistrar
 import io.github.composefluent.winrt.compiler.xaml.XamlPageBodies
 import io.github.composefluent.winrt.compiler.xaml.XamlConstruction
+import io.github.composefluent.winrt.compiler.xaml.XamlLibraryOptions
 import org.jetbrains.kotlin.fir.extensions.FirExtensionRegistrarAdapter
 
 import io.github.composefluent.winrt.compiler.callsites.WinRTProjectionSupportLayout
@@ -16,6 +17,7 @@ import io.github.composefluent.winrt.compiler.authoring.KotlinWinRTProjectionTyp
 import io.github.composefluent.winrt.compiler.authoring.PROJECTION_PACKAGE_PREFIX
 import io.github.composefluent.winrt.compiler.authoring.WINRT_AUTHORED_RUNTIME_CLASS_ANNOTATION
 import io.github.composefluent.winrt.compiler.authoring.inheritedOverridableInterfaceNames
+import io.github.composefluent.winrt.compiler.authoring.requiresComponentAuthoring
 import io.github.composefluent.winrt.compiler.authoring.projectionPackageToMetadataName
 import io.github.composefluent.winrt.compiler.authoring.projectionTypeIndexRecordForSourceType
 import io.github.composefluent.winrt.compiler.authoring.readAuthoringMetadataIndex
@@ -120,7 +122,7 @@ import java.nio.file.Path
 @OptIn(ExperimentalCompilerApi::class)
 class KotlinWinRTCommandLineProcessor : CommandLineProcessor {
     override val pluginId: String = PLUGIN_ID
-    override val pluginOptions: Collection<AbstractCliOption> = XamlSemanticOptions.options + listOf(
+    override val pluginOptions: Collection<AbstractCliOption> = XamlSemanticOptions.options + XamlLibraryOptions.options + listOf(
         CliOption(
             optionName = "metadataIndex",
             valueDescription = "<path>",
@@ -201,6 +203,7 @@ class KotlinWinRTCommandLineProcessor : CommandLineProcessor {
         configuration: CompilerConfiguration,
     ) {
         if (XamlSemanticOptions.process(option.optionName, value, configuration)) return
+        if (XamlLibraryOptions.process(option.optionName, value, configuration)) return
         if (option.optionName == "metadataIndex") {
             configuration.put(METADATA_INDEX_KEY, value)
         } else if (option.optionName == "typeIndexOutput") {
@@ -263,6 +266,10 @@ class KotlinWinRTCompilerPluginRegistrar : CompilerPluginRegistrar() {
     override val supportsK2: Boolean = true
 
     override fun ExtensionStorage.registerExtensions(configuration: CompilerConfiguration) {
+        XamlLibraryOptions.export(configuration)?.let {
+            IrGenerationExtension.registerExtension(it)
+            return
+        }
         XamlSemanticOptions.compilation(configuration)?.let { xaml ->
             FirExtensionRegistrarAdapter.registerExtension(XamlFirRegistrar(xaml.declarations))
             val xamlRegistrars = if (xaml.semanticExport == null) readCompilerSupportManifestIfConfigured(
@@ -685,7 +692,7 @@ class KotlinWinRTIrGenerationExtension(
         val annotation = authoredRuntimeClassAnnotation(klass, winRTTypes)
         val inheritedWinRTTypes = inheritedWinRTTypes(klass, winRTTypes)
         val resolvedWinRTTypes = annotation.resolvedTypes + inheritedWinRTTypes
-        if (resolvedWinRTTypes.isEmpty()) {
+        if (!requiresComponentAuthoring(resolvedWinRTTypes, annotation.isPresent)) {
             return null
         }
         val packageName = sourceTypeName.substringBeforeLast('.', missingDelimiterValue = "")
@@ -806,6 +813,7 @@ class KotlinWinRTIrGenerationExtension(
             }
             .map(IndexedWinRTType::qualifiedName)
         return ResolvedAuthoredRuntimeClassAnnotation(
+            isPresent = true,
             resolvedTypes = listOfNotNull(resolvedBase) + resolvedInterfaces,
             overridableInterfaceNames = resolvedOverridableInterfaces,
             activatableFactoryInterfaceName = resolvedActivatableFactoryInterface,
@@ -818,6 +826,7 @@ class KotlinWinRTIrGenerationExtension(
         val overridableInterfaceNames: List<String>,
         val activatableFactoryInterfaceName: String?,
         val staticFactoryInterfaceNames: List<String>,
+        val isPresent: Boolean = false,
     ) {
         companion object {
             val Empty = ResolvedAuthoredRuntimeClassAnnotation(emptyList(), emptyList(), null, emptyList())

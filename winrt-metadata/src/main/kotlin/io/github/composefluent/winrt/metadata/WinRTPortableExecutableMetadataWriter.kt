@@ -36,7 +36,7 @@ object WinRTPortableExecutableMetadataWriter {
             WinmdClass(it.runtimeClassName, it.baseRuntimeClassName, it.interfaceNames,
                 isActivatable = it.isActivatable, isSealed = it.isSealed, enumEntries = it.enumEntries)
         },
-            externalTypeAssemblies = externalTypeAssemblies, applicationMembers = members,
+            externalTypeAssemblies = externalTypeAssemblies, applicationMembers = members, isApplicationSchema = true,
             valueTypeNames = valueTypeNames + runtimeClasses.filter { it.enumEntries != null }.map { it.runtimeClassName }).build())
     }
 
@@ -112,6 +112,7 @@ private class WinmdBuilder(
     private val externalTypeAssemblies: Map<String, String>? = null,
     private val applicationMembers: Map<String, WinRTXamlApplicationTypeMembers> = emptyMap(),
     private val valueTypeNames: Set<String> = emptySet(),
+    private val isApplicationSchema: Boolean = false,
 ) {
     // WinRTTypeWriter.VisitEnumDeclaration owns value__, literal FieldDefs and constants.
     private val fields = runtimeClasses.flatMap { type ->
@@ -199,6 +200,11 @@ private class WinmdBuilder(
                     add(WINDOWS_FOUNDATION_METADATA_OVERRIDABLE)
                 }
             }
+        }.filterTo(mutableSetOf()) { name ->
+            // A compiler-only Kotlin model schema may have no SDK dependency. CLR
+            // constructors/members still describe it; component ABI attributes
+            // remain mandatory on writeAuthoredWinmd's separate path.
+            !isApplicationSchema || externalTypeAssemblies?.containsKey(name) != false || name == XAML_CONTENT_PROPERTY
         }
         val typeRefs = (
             runtimeClasses.flatMap { descriptor ->

@@ -8,6 +8,7 @@ import io.github.composefluent.winrt.compiler.authoring.KotlinWinRTAuthoringCand
 import io.github.composefluent.winrt.compiler.authoring.PROJECTION_PACKAGE_PREFIX
 import io.github.composefluent.winrt.compiler.authoring.WINRT_AUTHORED_RUNTIME_CLASS_ANNOTATION
 import io.github.composefluent.winrt.compiler.authoring.inheritedOverridableInterfaceNames
+import io.github.composefluent.winrt.compiler.authoring.requiresComponentAuthoring
 import io.github.composefluent.winrt.compiler.authoring.projectionPackageToMetadataName
 import io.github.composefluent.winrt.compiler.authoring.readAuthoringMetadataIndex
 import io.github.composefluent.winrt.compiler.authoring.resolveIndexedWinRTType
@@ -515,7 +516,7 @@ object KotlinWinRTAuthoringScannerCli {
             }
             .map(IndexedWinRTType::qualifiedName)
         val resolvedWinRTTypes = listOfNotNull(annotatedBase) + annotatedInterfaces + inheritedWinRTTypes
-        if (resolvedWinRTTypes.isEmpty()) {
+        if (!requiresComponentAuthoring(resolvedWinRTTypes, annotation.isPresent)) {
             return null
         }
         require(source.isRuntimeClassDeclaration(klass)) {
@@ -1064,6 +1065,7 @@ object KotlinWinRTAuthoringScannerCli {
                 ?: return KotlinWinRTAuthoredRuntimeClassAnnotation()
             val positionalArguments = annotationPositionalArguments(annotationText)
             return KotlinWinRTAuthoredRuntimeClassAnnotation(
+                isPresent = true,
                 baseClassName = (
                     annotationStringArgument(annotationText, "baseClassName")
                         .takeIf(String::isNotBlank)

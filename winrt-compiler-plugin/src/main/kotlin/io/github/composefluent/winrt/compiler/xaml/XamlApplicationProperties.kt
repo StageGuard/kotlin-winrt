@@ -22,6 +22,7 @@ internal fun xamlApplicationProperties(
     klass: IrClass,
     types: Map<String, IndexedWinRTType>,
     applicationTypes: Set<String>,
+    strictPublicProperties: Boolean = true,
 ): WinRTXamlApplicationTypeMembers {
     if (klass.kind == org.jetbrains.kotlin.descriptors.ClassKind.ENUM_CLASS) return WinRTXamlApplicationTypeMembers()
     fun visible(function: IrSimpleFunction?) = function != null &&
@@ -69,7 +70,7 @@ internal fun xamlApplicationProperties(
         .mapNotNull { (owner, property) ->
             val public = visible(property.getter)
             val static = owner.kind == org.jetbrains.kotlin.descriptors.ClassKind.OBJECT
-            val type = if (public && !static) resolve(property.getter!!.returnType) else
+            val type = if (strictPublicProperties && public && !static) resolve(property.getter!!.returnType) else
                 runCatching { resolve(property.getter!!.returnType) }.getOrNull() ?: return@mapNotNull null
             if (isWinRTVoidTypeName(type.typeName)) return@mapNotNull null
             WinRTXamlApplicationProperty(property.name.asString(), type,
