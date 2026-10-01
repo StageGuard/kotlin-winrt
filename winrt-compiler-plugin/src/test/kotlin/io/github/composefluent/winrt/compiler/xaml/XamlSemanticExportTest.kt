@@ -39,6 +39,13 @@ class XamlSemanticExportTest {
             writeText(directories.flatMap { it.listFiles()!!.filter { file -> file.extension == "winmd" } }
                 .map { it.absolutePath }.sorted().joinToString("\n"))
         }
+        val header = File(root, "Header.winmd")
+        WinRTPortableExecutableMetadataWriter.writeXamlSchemaWinmd(
+            "Header", listOf(WinRTXamlApplicationTypeDescriptor(
+                "probe.MainPage", "Microsoft.UI.Xaml.Controls.Page")), emptyMap(), header.toPath(),
+            WinRTMetadataLoader.loadTypeAssemblyNames(directories.flatMap {
+                it.listFiles()!!.filter { file -> file.extension == "winmd" }.map { file -> file.toPath() }
+            }))
         val compilerInput = buildJsonObject {
             put("ProjectPath", File(root, "probe.proj").absolutePath); put("ProjectName", "probe")
             put("Language", "Kotlin"); put("LanguageSourceExtension", ".kt"); put("IsPass1", true)
@@ -48,6 +55,7 @@ class XamlSemanticExportTest {
             put("ReferenceAssemblies", JsonArray(directories.flatMap { it.listFiles()!!.filter { it.extension == "winmd" }.sorted() }.map(::item)))
             put("ReferenceAssemblyPaths", JsonArray((directories + File(System.getenv("WINDIR"), "Microsoft.NET/Framework64/v4.0.30319")).map(::item)))
             put("XamlPages", JsonArray(listOf(item(xaml))))
+            put("LocalAssembly", JsonArray(listOf(item(header))))
         }
         fun invokeXaml(name: String, input: JsonObject): JsonObject {
             val inputFile = File(root, "$name.input.json").apply { writeText(input.toString()) }
@@ -150,6 +158,10 @@ class XamlSemanticExportTest {
             }
         """.trimIndent()) }
         val symbols = File(root, "symbols.json")
+        val registrar = File(root, "Definitions.kt").apply { writeText("""
+            package io.github.composefluent.winrt.generated.xaml
+            object KotlinXamlApplicationDefinitionsProbe { fun registerAll() {} }
+        """.trimIndent()) }
         fun compile(final: Boolean = false): Pair<ExitCode, String> {
             val classpath = listOf(Unit::class.java, WinRTXamlLoadState::class.java).joinToString(File.pathSeparator) {
                 File(it.protectionDomain.codeSource.location.toURI()).absolutePath
@@ -159,7 +171,8 @@ class XamlSemanticExportTest {
             else mapOf("metadataIndex" to index.absolutePath, "xamlSemanticOutput" to symbols.absolutePath, "xamlReferencesFile" to referenceFile.absolutePath)
             val arguments = listOf("-no-stdlib", "-no-reflect", "-jvm-target", "17", "-classpath", classpath,
                 "-Xplugin=${System.getProperty("winrt.test.fullPluginJar")}", "-d", File(root, if (final) "final" else "semantic-only").absolutePath,
-                source.absolutePath, base.absolutePath, argsType.absolutePath, button.absolutePath, connector.absolutePath, uri.absolutePath) +
+                source.absolutePath, base.absolutePath, argsType.absolutePath, button.absolutePath, connector.absolutePath,
+                uri.absolutePath, registrar.absolutePath) +
                 options.flatMap { (key, value) -> listOf("-P", "plugin:io.github.composefluent.winrt.compiler:$key=$value") }
             val diagnostics = ByteArrayOutputStream()
             val result = PrintStream(diagnostics).use { K2JVMCompiler().exec(it, *arguments.toTypedArray()) }
@@ -174,7 +187,9 @@ class XamlSemanticExportTest {
         assertEquals(listOf("System.Object", "Microsoft.UI.Xaml.RoutedEventArgs"),
             handler.getValue("ParameterTypeNames").jsonArray.map { it.jsonPrimitive.content })
         val page = WinRTMetadataLoader.load(File(root, "KotlinXaml.winmd").toPath()).namespaces.single().types.single()
-        assertTrue(page.methods.none { it.name == "onClick" })
+        // Application schema includes private methods for XAML access checks; it is
+        // distinct from the authored component's exported ABI.
+        assertEquals(WinRTMethodVisibility.Private, page.methods.single { it.name == "onClick" }.visibility)
         val finalOutput = invokeXaml("final", JsonObject(compilerInput + mapOf(
             "IsPass1" to JsonPrimitive(false), "KotlinSymbols" to output,
             "LocalAssembly" to JsonArray(listOf(item(File(root, "KotlinXaml.winmd")))),

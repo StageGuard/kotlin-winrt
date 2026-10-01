@@ -386,7 +386,8 @@ private class WinmdBuilder(
             properties.filter { it.first == type.runtimeClassName }.forEach { (_, property) ->
                 val signature = signature(property.type, typeRefs, localTypeDefRowIds)
                 val convention = if (property.isStatic) 0 else 0x20
-                val flags = if (property.isStatic) 0x0896 else 0x0886
+                val flags = 0x0880 or (if (property.isStatic) 0x10 else 0) or
+                    (if (property.isPublic) 0x06 else 0x01)
                 method("get_${property.name}", flags, byteArrayOf(convention.toByte(), 0) + signature)
                 if (!property.isReadOnly) method("put_${property.name}", flags, byteArrayOf(convention.toByte(), 1, 1) + signature)
             }
@@ -400,7 +401,8 @@ private class WinmdBuilder(
             }
             // CsWinRT WinRTTypeWriter.AddMethodDeclaration preserves staticness and typed signatures.
             methods.filter { it.first == type.runtimeClassName }.forEach { (_, declaration) ->
-                method(declaration.name, if (declaration.isStatic) 0x0096 else 0x0086,
+                method(declaration.name, 0x0080 or (if (declaration.isStatic) 0x10 else 0) or
+                    (if (declaration.isPublic) 0x06 else 0x01),
                     BinaryWriter().apply {
                         int8(if (declaration.isStatic) 0 else CALL_CONV_HASTHIS)
                         compressedUInt(declaration.parameterTypes.size)
