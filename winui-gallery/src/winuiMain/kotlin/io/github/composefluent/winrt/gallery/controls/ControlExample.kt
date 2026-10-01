@@ -64,20 +64,22 @@ internal class ControlExample : UserControl() {
     private fun RefreshSampleDefinition() {
         sourceSample = GalleryCodeCatalog.sampleDefinition(SampleDefinition)
         sourceSample?.header?.takeIf(String::isNotBlank)?.let { HeaderText = it }
-        // SelectorBarItem.Loaded can still be pending when an expander opens.
-        // Refresh synchronously with a changed definition so markup-only samples
-        // never retain the initial Kotlin tab until their next Loaded callback.
-        if (ready && (sourceSample != null || sourceReady)) RefreshSource()
+        // Update the language tabs immediately, as Gallery's PrepareSelectorBarItem
+        // does. XAML sets this property before filling Substitutions, so render
+        // the source only after Loaded or when the expander has already opened.
+        if (ready && (sourceSample != null || sourceReady)) RefreshSource(refreshDocuments = sourceReady)
     }
-    private fun RefreshSource() {
+    private fun RefreshSource(refreshDocuments: Boolean = true) {
         if (!ready) return
         fun inline(name: String,source: String): KotlinCodeDocument = KotlinCodeDocument(name,source,listOf(KotlinCodeSpan(source.length,KotlinCodeKind.Plain)))
         val xaml = if (Xaml.isNotEmpty()) inline("sample.xaml",Xaml) else GalleryCodeCatalog.sourceDocument(XamlSource) ?: sourceSample?.xaml
         val kotlin = if (Kotlin.isNotEmpty()) inline("sample.kt",Kotlin) else GalleryCodeCatalog.sourceDocument(KotlinSource) ?: sourceSample?.kotlin
-        XamlPresenter.Substitutions = Substitutions
-        KotlinPresenter.Substitutions = Substitutions
-        xaml?.let { XamlPresenter.SetDocument(it) }
-        kotlin?.let { KotlinPresenter.SetDocument(it) }
+        if (refreshDocuments) {
+            XamlPresenter.Substitutions = Substitutions
+            KotlinPresenter.Substitutions = Substitutions
+            xaml?.let { XamlPresenter.SetDocument(it) }
+            kotlin?.let { KotlinPresenter.SetDocument(it) }
+        }
         fun showLanguage(item: SelectorBarItem, present: Boolean) {
             if (!present) SelectorBarControl.items.remove(item)
             else if (!SelectorBarControl.items.contains(item)) {
