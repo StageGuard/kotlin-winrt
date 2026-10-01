@@ -104,6 +104,11 @@ The normal Gradle entry points resolve and compile XAML automatically:
 Use `--offline` once dependencies and the verified compiler package are cached.
 The existing snapshot workflow builds JVM and Native packages without cloning
 the XamlCompiler fork. Signing uses the existing certificate configuration.
+For the full Gallery Release, run JVM and Native packaging in separate Gradle
+invocations with `--no-daemon`. The snapshot workflow gives each invocation an
+8 GB heap with `-Dorg.gradle.jvmargs="-Xmx8g -XX:+UseSerialGC"`. Compiling the JVM
+application concurrently with Native whole-program optimization can exhaust
+that shared heap; use `--max-workers=1` for a local build of both targets.
 Gradle compilation does not provide IDE completion or a XAML designer. The
 repository does not yet ship an IDE plugin, designer or hot reload integration.
 Completion and navigation have not been verified in an IDE. Community compiler
