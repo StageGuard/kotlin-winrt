@@ -4722,6 +4722,7 @@ private fun configureKotlinWinRTCompilerPluginOptions(
         authoringTargetArtifactName
     }
     project.tasks.withType(KotlinNativeCompile::class.java).configureEach(Action<KotlinNativeCompile> { task ->
+        if (isXamlSemanticTask(task.name)) return@Action
         val freeCompilerArgs = task.compilerOptions.freeCompilerArgs
         addWinRTCompilerPluginOptions(
             project = project,

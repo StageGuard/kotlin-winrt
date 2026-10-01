@@ -88,12 +88,12 @@ internal fun extractXamlCompiler(archive: Path, target: Path, version: String) {
     }
 }
 
-internal fun validateXamlCompilerPackage(root: Path, version: String) {
+internal fun validateXamlCompilerPackage(root: Path, version: String? = null): JsonObject {
     val manifest = Json.parseToJsonElement(Files.readString(root.resolve("kotlin-xamlc.json")).removePrefix("\uFEFF")).jsonObject
     require(manifest["schemaVersion"]?.jsonPrimitive?.int == 1 && manifest["protocolVersion"]?.jsonPrimitive?.int in 1..2) {
         "Unsupported Kotlin XamlCompiler package or protocol version."
     }
-    require(manifest["version"]?.jsonPrimitive?.content == version && manifest["host"]?.jsonPrimitive?.content == "win-x64") {
+    require((version == null || manifest["version"]?.jsonPrimitive?.content == version) && manifest["host"]?.jsonPrimitive?.content == "win-x64") {
         "XamlCompiler package version or host mismatch."
     }
     require(manifest["executable"]?.jsonPrimitive?.content == "XamlCompiler.exe") { "Unexpected XamlCompiler entry point." }
@@ -104,5 +104,39 @@ internal fun validateXamlCompilerPackage(root: Path, version: String) {
         require(file.startsWith(root) && Files.isRegularFile(file) && xamlSha256(file) == expected.jsonPrimitive.content) {
             "XamlCompiler package file checksum mismatch: $name"
         }
+    }
+    if (manifest["protocolVersion"]?.jsonPrimitive?.int == 2) {
+        val execution = manifest.getValue("execution").jsonObject
+        require(execution["kind"]?.jsonPrimitive?.content == "executable" &&
+            execution["arguments"]?.jsonArray?.map { it.jsonPrimitive.content } == listOf("input.json", "output.json")) {
+            "Unsupported Kotlin XamlCompiler execution contract."
+        }
+        val runtime = manifest.getValue("runtime").jsonObject
+        require(runtime["kind"]?.jsonPrimitive?.content == "net-framework" &&
+            runtime["minimumRelease"]?.jsonPrimitive?.intOrNull != null) {
+            "Unsupported Kotlin XamlCompiler runtime contract."
+        }
+        require(manifest["compatibility"] is JsonObject && manifest["features"] is JsonArray) {
+            "XamlCompiler protocol 2 requires compatibility and feature declarations."
+        }
+    }
+    return manifest
+}
+
+internal fun validateXamlCompilerHost(manifest: JsonObject) {
+    require(System.getProperty("os.name").startsWith("Windows") &&
+        System.getProperty("os.arch").lowercase() in setOf("amd64", "x86_64")) {
+        "Kotlin XamlCompiler requires a Windows x64 build host."
+    }
+    val runtime = manifest["runtime"]?.jsonObject ?: return
+    val required = runtime.getValue("minimumRelease").jsonPrimitive.int
+    val process = ProcessBuilder("reg.exe", "query", "HKLM\\SOFTWARE\\Microsoft\\NET Framework Setup\\NDP\\v4\\Full",
+        "/v", "Release", "/reg:64").redirectErrorStream(true).start()
+    val output = process.inputStream.bufferedReader().use { it.readText() }
+    val installed = Regex("Release\\s+REG_DWORD\\s+0x([0-9a-fA-F]+)").find(output)
+        ?.groupValues?.get(1)?.toIntOrNull(16)
+    require(process.waitFor() == 0 && installed != null && installed >= required) {
+        "Kotlin XamlCompiler requires .NET Framework ${runtime["minimumVersion"]?.jsonPrimitive?.content} " +
+            "(Release >= $required); installed Release is ${installed ?: "unavailable"}."
     }
 }

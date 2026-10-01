@@ -36,7 +36,7 @@ class ResolveWinRTXamlCompilerTaskTest {
         assertTrue(Files.isRegularFile(output.resolve("XamlCompiler.exe")))
         assertTrue(runCatching { extractXamlCompiler(archive, output, "2.0.0") }.isFailure)
         assertEquals("tooling fixture", Files.readString(output.resolve("XamlCompiler.exe")))
-        assertTrue(runCatching { extractXamlCompiler(packageFile(root, protocol = 2), output, "1.0.0") }.isFailure)
+        assertTrue(runCatching { extractXamlCompiler(packageFile(root, protocol = 3), output, "1.0.0") }.isFailure)
         assertTrue(runCatching { extractXamlCompiler(packageFile(root, unsafe = true), output, "1.0.0") }.isFailure)
         assertFalse(Files.exists(root.resolve("escaped.txt")))
         Files.writeString(output.resolve("XamlCompiler.exe"), "tampered")

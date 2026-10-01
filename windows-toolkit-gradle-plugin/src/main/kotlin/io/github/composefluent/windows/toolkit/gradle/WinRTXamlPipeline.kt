@@ -11,7 +11,8 @@ import org.jetbrains.kotlin.gradle.dsl.KotlinMultiplatformExtension
 import org.jetbrains.kotlin.gradle.tasks.KotlinJvmCompile
 import java.io.File
 
-internal fun isXamlSemanticTask(name: String) = name.startsWith("compileKotlinWinRTXamlSemantic")
+internal fun isXamlSemanticTask(name: String) = name.startsWith("compileKotlinWinRTXamlSemantic") ||
+    name.startsWith("compileWinRTXamlSemantic")
 
 // Kotlin 2.4.0 exposes no public factory for cloning KMP fragments into a standalone
 // compilation. Keep this version-coupled adaptation here, never in runtime contracts.
@@ -49,6 +50,11 @@ internal fun configureWinRTXamlPipeline(
         task.genXbfDirectory.set(extension.xaml.genXbfDirectory)
         task.minimumWindowsVersion.set(extension.xaml.minimumWindowsVersion)
         task.projectName.set(project.name)
+        task.windowsAppSdkVersion.set(project.provider {
+            extension.packageReferences.nugetPackages.firstOrNull {
+                it.packageId.equals("Microsoft.WindowsAppSDK", true)
+            }?.version?.orNull
+        })
         task.onlyIf { hasXaml.get() }
     }
     val applicationHeader = project.tasks.register("generateWinRTXamlApplicationHeader",
@@ -160,25 +166,9 @@ internal fun configureWinRTXamlPipeline(
                     .flatMap { listOf("-P", "plugin:io.github.composefluent.winrt.compiler:$it") }
             })
             business.dependsOn(implementation)
-            val applicationVariants = discoverWinAppVariants(project).filter {
-                it.kind == WinAppVariantKind.Jvm && business.name in it.compilationTaskNames(project)
-            }.map { it.id }.toSet()
-            project.tasks.withType(StageWinAppPackageTask::class.java).configureEach { task ->
-                if (task.applicationVariant.get() in applicationVariants) {
-                    task.projectPriLayoutFiles.from(implementation.flatMap { it.outputDirectory.dir("compiled") })
-                    task.projectPriTargetPaths.putAll(implementation.flatMap { it.outputDirectory.dir("compiled") }
-                        .map { mapOf(it.asFile.absolutePath to "") })
-                    // Source-set XAML is compiled at its source-root-relative resource URI.
-                    // Do not also package the original under src/<sourceSet>/kotlin/...
-                    task.projectPriExcludedFromBuildPaths.addAll(sourceRoots.map { roots ->
-                        roots.filter(File::isDirectory).flatMap { root ->
-                            root.walkTopDown().filter { it.isFile && it.extension.equals("xaml", true) }
-                                .map { it.absolutePath }.toList()
-                        }
-                    })
-                    task.dependsOn(implementation)
-                }
-            }
+            configureWinRTXamlPackageResources(project, sourceRoots, implementation, business.name, WinAppVariantKind.Jvm)
         }
+        configureWinRTXamlNativePipeline(project, sourceRoots, declarations, applicationHeader,
+            metadataManifest, metadataIndex, compilerPluginClasspath, ::configure)
     }
 }

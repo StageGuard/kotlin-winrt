@@ -22,8 +22,19 @@ abstract class CompileWinRTXamlTask @Inject constructor(
     private val fileSystem: FileSystemOperations,
     private val objects: ObjectFactory,
 ) : DefaultTask() {
-    @get:InputFiles @get:PathSensitive(PathSensitivity.RELATIVE)
+    @get:Internal
     abstract val sourceRoots: ConfigurableFileCollection
+    // A final pass consumes markup only. Snapshot actual files, not the entire
+    // Kotlin roots (which include other targets' generated KSP directories).
+    @get:InputFiles @get:PathSensitive(PathSensitivity.RELATIVE)
+    val inputXamlFiles get() = objects.fileCollection().from(sourceRoots.elements.map { roots ->
+        roots.flatMap { root -> root.asFile.takeIf(File::isDirectory)?.walkTopDown()
+            ?.filter { it.isFile && it.extension.equals("xaml", true) }?.toList().orEmpty() }
+    })
+    @get:Input
+    val inputXamlRootPaths get() = sourceRoots.files.filter { root -> root.isDirectory &&
+        root.walkTopDown().any { it.isFile && it.extension.equals("xaml", true) } }
+        .map { it.absolutePath }.sorted()
     @get:InputFile @get:PathSensitive(PathSensitivity.NONE)
     abstract val preparedMetadataManifest: RegularFileProperty
     @get:Internal
@@ -55,6 +66,7 @@ abstract class CompileWinRTXamlTask @Inject constructor(
     })
     @get:Input abstract val projectName: Property<String>
     @get:Input abstract val minimumWindowsVersion: Property<String>
+    @get:Input @get:Optional abstract val windowsAppSdkVersion: Property<String>
     @get:InputFile @get:Optional @get:PathSensitive(PathSensitivity.NONE)
     abstract val semanticSymbols: RegularFileProperty
     @get:InputFile @get:Optional @get:PathSensitive(PathSensitivity.NONE)
@@ -78,6 +90,10 @@ abstract class CompileWinRTXamlTask @Inject constructor(
         implementationFile.get().asFile.delete()
         fileSystem.delete { it.delete(File(output, "compiled")) }
         File(output, "state.xml").delete()
+        val compilerManifest = validateXamlCompilerPackage(compilerDirectory.get().asFile.toPath())
+        validateXamlCompilerHost(compilerManifest)
+        validateXamlCompilerWinui(compilerManifest, preparedMetadataManifest.get().asFile,
+            inputGenXbfDirectory.get(), windowsAppSdkVersion.orNull)
         val roots = sourceRoots.files.filter { it.isDirectory }.sortedBy { it.absolutePath }
         val sources = linkedMapOf<String, File>()
         roots.forEach { root -> root.walkTopDown().filter { it.isFile && it.extension.equals("xaml", true) }.forEach { file ->
@@ -131,6 +147,13 @@ abstract class CompileWinRTXamlTask @Inject constructor(
         val plan = runCatching { WinRTXamlDeclarations.readCompilerOutput(implementationFile.get().asFile.toPath()) }
             .getOrElse { error("XamlCompiler failed (exit ${result.exitValue}): ${it.message}") }
         check(result.exitValue == 0) { "XamlCompiler failed with exit ${result.exitValue}." }
+        require(plan.schemaVersion <= compilerManifest.getValue("protocolVersion").jsonPrimitive.int) {
+            "The XamlCompiler output exceeds its declared protocol version."
+        }
+        val advertisedFeatures = compilerManifest["features"]?.jsonArray?.map { it.jsonPrimitive.content }.orEmpty()
+        require(plan.pages.flatMap { it.features }.all { it in advertisedFeatures }) {
+            "The XamlCompiler output uses features missing from its package manifest."
+        }
         plan.pages.forEach { page ->
             val xaml = requireNotNull(sources[page.resourcePath]) { "Unknown XAML resource ${page.resourcePath}." }
             require(File(xaml.parentFile, "${xaml.nameWithoutExtension}.kt").isFile) {
