@@ -44,18 +44,21 @@ internal class MainWindow : winui3package.WindowEx() {
         ElementSoundPlayer.state = if (GalleryPreferences.flag("Sound")) ElementSoundPlayerState.On else ElementSoundPlayerState.Off
         ElementSoundPlayer.spatialAudioMode = if (GalleryPreferences.flag("SpatialAudio")) ElementSpatialAudioMode.On else ElementSpatialAudioMode.Off
         titleBar.isPaneToggleButtonVisible = !GalleryPreferences.flag("TopNavigation")
-        fun register(entries: List<Any?>) {
-            entries.forEach { entry ->
-                val item = runCatching { entry?.asWinRT<NavigationViewItem>() }.getOrNull() ?: return@forEach
-                val id = if (item.name == "AllControls") "All" else canonicalRoute(item.name)
-                if (id.isNotEmpty()) { item.tag = id; menuItems[id] = item }
-                register(item.menuItems)
-            }
+        GalleryCatalog.home.let { home ->
+            navigation.menuItems.add(menu(home.id, home.title, home.glyph.ifBlank { null }))
         }
-        register(navigation.menuItems)
+        var controlsHeaderAdded = false
         GalleryCatalog.groups.forEach { group ->
-            val parent = menuItems[group.id] ?: menu(group.id,group.title,group.glyph,expandable=true).also { navigation.menuItems.add(it) }
-            group.pages.filter { it.id !in menuItems }.forEach { parent.menuItems.add(menu(it.id,it.title,it.glyph.ifBlank { null })) }
+            if (!group.isSpecialSection && !controlsHeaderAdded) {
+                navigation.menuItems.add(NavigationViewItemHeader().apply { content = "Controls" })
+                navigation.menuItems.add(menu("All", "All", "\uE8A9"))
+                controlsHeaderAdded = true
+            }
+            val parent = menu(group.id, group.title, group.glyph, expandable = true)
+            navigation.menuItems.add(parent)
+            group.pages.forEach { page ->
+                parent.menuItems.add(menu(page.id, page.title, page.glyph.ifBlank { null }))
+            }
         }
         search.maxWidth = 580.0
         search.horizontalAlignment = HorizontalAlignment.Stretch

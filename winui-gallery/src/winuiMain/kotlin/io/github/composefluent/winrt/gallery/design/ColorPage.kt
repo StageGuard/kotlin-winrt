@@ -9,7 +9,7 @@ import microsoft.ui.xaml.controls.primitives.*
 import microsoft.ui.xaml.media.*
 import microsoft.ui.xaml.media.animation.*
 
-@GalleryPage(route = "Color", title = "Color", group = "DesignItem", order = 0)
+@GalleryPage(route = "Color", title = "Color", group = "DesignItem", order = 0, glyph = "\uE790")
 internal class ColorPage : Page() {
     private var previousSelectedIndex = 0
     private var ready = false

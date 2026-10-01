@@ -8,7 +8,7 @@ import kotlinx.coroutines.*
 import microsoft.ui.xaml.*
 import microsoft.ui.xaml.controls.*
 
-@GalleryPage(route = "Iconography", title = "Iconography", group = "DesignItem", order = 2)
+@GalleryPage(route = "Iconography", title = "Iconography", group = "DesignItem", order = 2, glyph = "\uED58")
 internal class IconographyPage : Page() {
     val FontSizes: List<Double> = listOf(16.0, 24.0, 32.0, 48.0)
     private val tasks = GalleryPageTasks(this)

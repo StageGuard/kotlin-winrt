@@ -7,7 +7,7 @@ import microsoft.ui.xaml.controls.*
 import microsoft.ui.xaml.controls.primitives.*
 import microsoft.ui.xaml.media.*
 
-@GalleryPage(route = "Geometry", title = "Geometry", group = "DesignItem", order = 1)
+@GalleryPage(route = "Geometry", title = "Geometry", group = "DesignItem", order = 1, glyph = "\uE743")
 internal class GeometryPage : Page() {
     private fun ShowGeometryButtonClick1(sender: Any?, args: RoutedEventArgs) { ShowGeometryInfoTooltip1.isOpen = !ShowGeometryInfoTooltip1.isOpen }
     private fun ShowGeometryButtonClick2(sender: Any?, args: RoutedEventArgs) { ShowGeometryInfoTooltip2.isOpen = !ShowGeometryInfoTooltip2.isOpen }

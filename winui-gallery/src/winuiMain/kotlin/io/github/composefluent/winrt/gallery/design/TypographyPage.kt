@@ -7,7 +7,7 @@ import microsoft.ui.xaml.controls.*
 import microsoft.ui.xaml.controls.primitives.*
 import microsoft.ui.xaml.media.*
 
-@GalleryPage(route = "Typography", title = "Typography", group = "DesignItem", order = 4)
+@GalleryPage(route = "Typography", title = "Typography", group = "DesignItem", order = 4, glyph = "\uE8D2")
 internal class TypographyPage : Page() {
     private fun ShowTypographyButtonClick1(sender: Any?, args: RoutedEventArgs) { ShowTypographyInfoTooltip1.isOpen = !ShowTypographyInfoTooltip1.isOpen }
     private fun ShowTypographyButtonClick2(sender: Any?, args: RoutedEventArgs) { ShowTypographyInfoTooltip2.isOpen = !ShowTypographyInfoTooltip2.isOpen }
