@@ -64,7 +64,10 @@ internal class ControlExample : UserControl() {
     private fun RefreshSampleDefinition() {
         sourceSample = GalleryCodeCatalog.sampleDefinition(SampleDefinition)
         sourceSample?.header?.takeIf(String::isNotBlank)?.let { HeaderText = it }
-        if (sourceReady) RefreshSource()
+        // SelectorBarItem.Loaded can still be pending when an expander opens.
+        // Refresh synchronously with a changed definition so markup-only samples
+        // never retain the initial Kotlin tab until their next Loaded callback.
+        if (ready && (sourceSample != null || sourceReady)) RefreshSource()
     }
     private fun RefreshSource() {
         if (!ready) return
