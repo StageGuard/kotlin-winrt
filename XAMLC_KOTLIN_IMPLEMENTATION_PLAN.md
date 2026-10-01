@@ -254,7 +254,7 @@ class MainPage : Page() {
 - [x] 在调用前验证 manifest、入口文件及兼容依赖；缺工具、网络失败、校验不符或协议不兼容明确失败。不得静默回退到 Windows SDK/NuGet 自带的不支持 Kotlin 的 stock XamlCompiler。
 - [x] 提供明确的本地开发 override，让 fork checkout 的编译输出可用于迭代；它使用同样的协议校验和任务输入指纹，不能作为发布插件的默认值，也不能把 `I:\\...` 路径写入产物。
 - [x] 将实际工具内容/版本、GenXbf 版本、协议和相关 feature 纳入 XAML 编译任务输入；工具变更必须使对应缓存失效。已发布编译器不得被打包进 Gallery 的应用运行时。
-- [ ] doing: 至少一次跨仓库验收：从实际 CI Release 获取工具，在无 fork checkout 的 Windows 环境构建迁移后的 Gallery。使用本地 override 成功只能作为开发验证，不能代替发布链路验收。
+- [x] 至少一次跨仓库验收：从实际 CI Release 获取工具，在无 fork checkout 的 Windows 环境构建迁移后的 Gallery。使用本地 override 成功只能作为开发验证，不能代替发布链路验收。
 
 ### projection、authoring 与 Gradle/资源接入
 
