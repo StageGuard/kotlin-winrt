@@ -4,6 +4,7 @@ import microsoft.windows.applifecycle.AppInstance
 import microsoft.windows.applifecycle.ExtendedActivationKind
 import microsoft.windows.appnotifications.AppNotificationActivatedEventArgs
 import windows.applicationmodel.activation.ProtocolActivatedEventArgs
+import windows.applicationmodel.activation.ILaunchActivatedEventArgs
 import microsoft.ui.xaml.Application
 import microsoft.ui.xaml.LaunchActivatedEventArgs
 import microsoft.ui.xaml.ResourceDictionary
@@ -45,8 +46,20 @@ class GalleryApplication : Application() {
     }
 
     private fun launchWindow(arguments: String) {
+        val activation = AppInstance.getCurrent().getActivatedEventArgs()
+        // WinUI's LaunchActivatedEventArgs.Arguments is unsupported on desktop.
+        // AppLifecycle's Launch payload implements the Windows launch interface;
+        // use that interface because its implementation is an App SDK class.
+        val desktopArguments = if (activation.kind == ExtendedActivationKind.Launch)
+            activation.data?.asWinRT<ILaunchActivatedEventArgs>()?.arguments.orEmpty() else ""
+        val commandLine = desktopArguments.trim()
+        val quotedExecutable = commandLine.startsWith('"')
+        val executable = if (quotedExecutable) commandLine.drop(1).substringBefore('"')
+            else commandLine.substringBefore(' ')
+        val routeArguments = if (executable.endsWith(".exe", ignoreCase = true))
+            commandLine.drop(executable.length + if (quotedExecutable) 2 else 0).trim() else commandLine
         val launchRouteArgument = GalleryXamlValidation.routeArgument(
-            arguments.trim().trim('"').ifBlank { processArguments.firstOrNull().orEmpty().trim().trim('"') },
+            processArguments.firstOrNull().orEmpty().ifBlank { arguments.ifBlank { routeArguments } }.trim().trim('"'),
         )
         println("Kotlin WinUI Gallery: loading controls resources")
         val galleryWindow = MainWindow()
@@ -68,7 +81,6 @@ class GalleryApplication : Application() {
         appWindow.resize(GalleryPreferences.windowSize(1280, 900))
         // Register before reading rich activation, following the Windows App SDK
         // notification quickstart. COM launch can deliver its payload later via NotificationInvoked.
-        val activation = AppInstance.getCurrent().getActivatedEventArgs()
         println("Kotlin WinUI Gallery: activation kind ${activation.kind}")
         when (activation.kind) {
             ExtendedActivationKind.AppNotification -> notifications?.handle(checkNotNull(activation.data).asWinRT<AppNotificationActivatedEventArgs>())

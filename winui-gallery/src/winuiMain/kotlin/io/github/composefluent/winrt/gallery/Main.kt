@@ -7,8 +7,8 @@ internal var processArguments: Array<String> = emptyArray()
 
 fun main(args: Array<String> = emptyArray()) {
     // The JVM launcher passes command-line arguments to this entry point, while
-    // WinAppSDK delivers them through LaunchActivatedEventArgs on the first
-    // activation.  Preserve both paths so packaged smoke runs can select a
+    // Native receives the desktop command line through AppInstance's Launch
+    // activation payload. Preserve both paths so packaged runs can select a
     // sample deterministically and normal protocol/notification activation is
     // unchanged.
     processArguments = args
