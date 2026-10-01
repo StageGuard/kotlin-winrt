@@ -9,7 +9,7 @@ import microsoft.ui.xaml.controls.primitives.*
 import microsoft.ui.xaml.media.*
 import microsoft.ui.xaml.media.animation.*
 
-@GalleryPage(route = "ListBox", title = "ListBox", group = "Collections", order = 4, glyph = "\uE8A9")
+@GalleryPage(route = "ListBox", title = "ListBox", group = "Collections", order = 4)
 internal class ListBoxPage : Page() {
     private var ready = false
     override fun initializeComponent() {

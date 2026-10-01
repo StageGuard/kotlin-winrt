@@ -9,7 +9,7 @@ import microsoft.ui.xaml.controls.primitives.*
 import microsoft.ui.xaml.media.*
 import microsoft.ui.xaml.media.animation.*
 
-@GalleryPage(route = "CreateMultipleWindows", title = "Multiple windows", group = "MultipleWindows", order = 2, glyph = "\uE8A7")
+@GalleryPage(route = "CreateMultipleWindows", title = "Multiple windows", group = "MultipleWindows", order = 2)
 internal class CreateMultipleWindowsPage : Page() {
     private fun CreateWindow_Click(sender: Any?, args: RoutedEventArgs) {
         val window = MultipleWindowsSampleWindow()
