@@ -3,7 +3,6 @@
 The reference is official WinUI Gallery `v2.9.3`, commit
 `14a4a1a2b8ddc527dc4a7d5f7e743d7c2bc97db7`. Windows App SDK remains **2.5.1**.
 All 122 existing routes, including Home, have adjacent XAML and Kotlin files.
-`XamlSupport` is an additional compiler/runtime sample, outside this inventory.
 The baseline example counts below remain unchanged.
 
 Static layouts, styles, templates and markup move to XAML. Kotlin retains event
@@ -29,9 +28,9 @@ using that caption rather than the shell's default `Kotlin WinUI Gallery`.
 Compilation and route activation are separate acceptance states. Route load
 results below do not imply that all interactions or visual parity were checked.
 The existing Button/CheckBox/RepeatButton/ToggleButton/ToggleSwitch interaction
-checks and XamlSupport identity/lifetime checks passed on both targets. They cover
+checks passed on both targets. They cover
 private event handlers, generated control properties, styles and independent
-source tabs, connector identity, multiple instances and repeated initialization.
+source tabs.
 A complete visual
 pass, platform dialogs, camera/notification/deep-link activation, light/dark/high
 contrast, keyboard navigation and every sample interaction require actual UI

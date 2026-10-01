@@ -4,7 +4,7 @@ The Gallery uses adjacent XAML and Kotlin code-behind files. It preserves the
 122 existing routes, including Home, and ports the static layouts, resources,
 styles and templates from official WinUI Gallery `v2.9.3`, commit
 `14a4a1a2b8ddc527dc4a7d5f7e743d7c2bc97db7`.
-Windows App SDK remains **2.5.1**. `XamlSupport` is an additional tooling sample.
+Windows App SDK remains **2.5.1**.
 
 Application code is shared by `winuiJvm` and `mingwX64` under
 `src/winuiMain/kotlin`. Runtime, metadata, projection and authoring behavior
