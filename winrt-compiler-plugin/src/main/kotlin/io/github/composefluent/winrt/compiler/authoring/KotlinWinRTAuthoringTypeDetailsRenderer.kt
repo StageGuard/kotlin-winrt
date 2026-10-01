@@ -170,18 +170,20 @@ object KotlinWinRTAuthoringTypeDetailsRenderer {
         val semanticHelpers = WinRTMetadataSemanticHelpers(metadataModel)
         val authoredRuntimeClassNames = candidates.mapTo(mutableSetOf(), KotlinWinRTAuthoredTypeCandidate::sourceTypeName)
         val expectedFiles = linkedSetOf<Path>()
-        val renderedCandidates = candidates.map { candidate ->
+        candidates.forEach { candidate ->
             val interfaces = resolveAuthoringInterfaces(candidate, typesByName, semanticHelpers)
-            val packageDirectory = outputDirectory.resolve(candidate.packageName.replace('.', '/'))
+            val ownerRoot = candidate.sourceSetName?.let { outputDirectory.resolve("sourceSets/$it") } ?: outputDirectory
+            val packageDirectory = ownerRoot.resolve(candidate.packageName.replace('.', '/'))
             packageDirectory.createDirectories()
             val file = render(candidate, interfaces, typesByName, semanticHelpers, authoredRuntimeClassNames)
-            writeIfChanged(file, outputDirectory).also(expectedFiles::add)
-            candidate
+            writeIfChanged(file, ownerRoot).also(expectedFiles::add)
         }
-        writeIfChanged(
-            renderRegistrar(renderedCandidates, authoringTypeDetailsRegistrarName(assemblyName)),
-            outputDirectory,
-        ).also(expectedFiles::add)
+        val groups = candidates.groupBy { it.sourceSetName }.ifEmpty { mapOf(null to emptyList()) }
+        groups.forEach { (owner, ownedCandidates) ->
+            val ownerRoot = owner?.let { outputDirectory.resolve("sourceSets/$it") } ?: outputDirectory
+            writeIfChanged(renderRegistrar(ownedCandidates, authoringTypeDetailsRegistrarName(assemblyName, owner)),
+                ownerRoot).also(expectedFiles::add)
+        }
         deleteStaleFiles(outputDirectory, expectedFiles)
     }
 
@@ -2781,7 +2783,8 @@ object KotlinWinRTAuthoringTypeDetailsRenderer {
     }
 }
 
-fun authoringTypeDetailsRegistrarName(assemblyName: String?): String {
+fun authoringTypeDetailsRegistrarName(assemblyName: String?, sourceSetName: String? = null): String {
+    if (sourceSetName != null) return authoringTypeDetailsRegistrarName("${assemblyName.orEmpty()}_$sourceSetName")
     val suffix = assemblyName
         ?.map { character -> if (character.isLetterOrDigit()) character else '_' }
         ?.joinToString("")

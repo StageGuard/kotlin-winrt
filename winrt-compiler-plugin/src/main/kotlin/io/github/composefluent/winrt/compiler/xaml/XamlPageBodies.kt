@@ -4,9 +4,11 @@ import io.github.composefluent.winrt.metadata.WinRTXamlDeclarationIndex
 import org.jetbrains.kotlin.backend.common.extensions.IrGenerationExtension
 import org.jetbrains.kotlin.backend.common.extensions.IrPluginContext
 import org.jetbrains.kotlin.backend.common.lower.DeclarationIrBuilder
+import org.jetbrains.kotlin.backend.common.IrElementTransformerVoidWithContext
 import org.jetbrains.kotlin.ir.builders.*
 import org.jetbrains.kotlin.ir.declarations.*
 import org.jetbrains.kotlin.ir.expressions.IrExpression
+import org.jetbrains.kotlin.ir.expressions.IrGetField
 import org.jetbrains.kotlin.ir.expressions.impl.IrFunctionReferenceImpl
 import org.jetbrains.kotlin.ir.symbols.UnsafeDuringIrConstructionAPI
 import org.jetbrains.kotlin.ir.types.*
@@ -17,7 +19,8 @@ import org.jetbrains.kotlin.name.*
 
 /** Bodies execute on the original page; no generated superclass or second COM identity. */
 @OptIn(UnsafeDuringIrConstructionAPI::class)
-internal class XamlPageBodies(private val index: WinRTXamlDeclarationIndex, private val semanticOnly: Boolean) : IrGenerationExtension {
+internal class XamlPageBodies(private val index: WinRTXamlDeclarationIndex, private val semanticOnly: Boolean,
+    private val dependencyRegistrars: List<String> = emptyList()) : IrGenerationExtension {
     override fun generate(moduleFragment: IrModuleFragment, pluginContext: IrPluginContext) {
         val classes = moduleFragment.files.flatMap { it.declarations }.filterIsInstance<IrClass>()
             .associateBy { it.fqNameWhenAvailable?.asString() }
@@ -29,6 +32,9 @@ internal class XamlPageBodies(private val index: WinRTXamlDeclarationIndex, priv
             val properties = klass.declarations.filterIsInstance<IrProperty>().filter {
                 (it.origin as? IrDeclarationOrigin.GeneratedByPlugin)?.pluginKey == XamlDeclarationKey
             }.associateBy { it.name.asString() }
+            val userDeclarations = klass.declarations.filterNot {
+                (it.origin as? IrDeclarationOrigin.GeneratedByPlugin)?.pluginKey == XamlDeclarationKey
+            }.toList()
             // FIR appends generated declarations. Keep instance state ahead of user initializers;
             // loading itself occurs only at the completed construction call boundary.
             klass.declarations.removeAll(properties.values.toSet())
@@ -114,11 +120,12 @@ internal class XamlPageBodies(private val index: WinRTXamlDeclarationIndex, priv
                 +irReturn(irGetField(irGet(requireNotNull(constructionGetter.dispatchReceiverParameter)), constructionState))
             }
             val load = function(xamlLoadName)
-            val applicationDefinitions = requireNotNull(pluginContext.referenceClass(ClassId.topLevel(
-                FqName("io.github.composefluent.winrt.generated.xaml.KotlinXamlApplicationDefinitions")))) {
-                "XAML application definitions were not generated before Kotlin compilation"
-            }.owner
-            val registerApplicationTypes = applicationDefinitions.functions.single { it.name.asString() == "registerAll" }
+            val localRegistrars = classes.values.filter { it.fqNameWhenAvailable?.parent()?.asString() ==
+                "io.github.composefluent.winrt.generated.xaml" && it.name.asString().startsWith("KotlinXamlApplicationDefinitions") }
+            val applicationDefinitions = (localRegistrars + dependencyRegistrars.mapNotNull {
+                pluginContext.referenceClass(ClassId.topLevel(FqName(it)))?.owner
+            }).distinctBy { it.fqNameWhenAvailable }.sortedBy { it.fqNameWhenAvailable?.asString() }
+            check(applicationDefinitions.isNotEmpty()) { "XAML application definitions were not generated before Kotlin compilation" }
             val applicationMetadata = requireNotNull(projection("Microsoft.UI.Xaml.Application").companionObject())
             val loadComponent = applicationMetadata.functions.single { it.name.asString() == "loadComponent" &&
                 it.parameters.count { p -> p.kind == IrParameterKind.Regular } == 2 }
@@ -128,8 +135,10 @@ internal class XamlPageBodies(private val index: WinRTXamlDeclarationIndex, priv
                 }
             }
             load.body = DeclarationIrBuilder(pluginContext, load.symbol).irBlockBody {
-                +irCall(registerApplicationTypes.symbol).apply {
-                    dispatchReceiver = irGetObject(applicationDefinitions.symbol)
+                applicationDefinitions.forEach { registrar ->
+                    +irCall(registrar.functions.single { it.name.asString() == "registerAll" }.symbol).apply {
+                        dispatchReceiver = irGetObject(registrar.symbol)
+                    }
                 }
                 +irCall(loadComponent.symbol).apply {
                     dispatchReceiver = irGetObject(applicationMetadata.symbol)
@@ -170,8 +179,8 @@ internal class XamlPageBodies(private val index: WinRTXamlDeclarationIndex, priv
                             irImplicitCast(irGet(requireNotNull(binding.dispatchReceiverParameter)), binding.returnType))
                     }
                     if (page.hasTemplateScopes()) {
-                        val connector = requireNotNull(pluginContext.referenceClass(ClassId.topLevel(
-                            FqName("io.github.composefluent.winrt.generated.xaml.KotlinXamlBindingScopeConnector")))).owner
+                        val connector = classes.values.single { it.fqNameWhenAvailable?.parent()?.asString() ==
+                            "io.github.composefluent.winrt.generated.xaml" && it.name.asString().startsWith("KotlinXamlBindingScopeConnector") }
                         val target = binding.parameters.last { it.kind == IrParameterKind.Regular }
                         page.connections.filter { it.isScopeRoot && it.isTemplateChild }.forEach { root ->
                             branches += irBranch(irEquals(irGet(connectionId), irInt(root.id)),
@@ -266,6 +275,26 @@ internal class XamlPageBodies(private val index: WinRTXamlDeclarationIndex, priv
                     branches += irBranch(irTrue(), irUnit())
                 }
             }
+            // FIR2IR can optimize same-class default-property reads to IrGetField
+            // before this extension replaces the getter. Preserve the named-element
+            // load guard for user bodies, without changing generated nullable scope
+            // probes used by deferred bindings.
+            val guardedFields = page.connections.mapNotNull { connection ->
+                connection.storageName()?.let(properties::get)?.let { property ->
+                    requireNotNull(property.backingField).symbol to requireNotNull(property.getter)
+                }
+            }.toMap()
+            val guardReads = object : IrElementTransformerVoidWithContext() {
+                override fun visitGetField(expression: IrGetField): IrExpression {
+                    val value = super.visitGetField(expression) as IrGetField
+                    val getter = guardedFields[value.symbol] ?: return value
+                    val scope = currentScope?.scope?.scopeOwnerSymbol ?: return value
+                    return DeclarationIrBuilder(pluginContext, scope, value.startOffset, value.endOffset).irCall(getter.symbol).apply {
+                        dispatchReceiver = value.receiver
+                    }
+                }
+            }
+            userDeclarations.forEach { it.transform(guardReads, null) }
         }
     }
 

@@ -5,8 +5,9 @@ import java.nio.file.Path
 import kotlin.io.path.writeText
 
 /** The three projected interfaces match CSharpPagePass2's generated template binding class. */
-internal fun writeXamlBindingSupportSource(root: Path) {
-    val file = root.resolve("io/github/composefluent/winrt/generated/xaml/KotlinXamlBindingScopeConnector.kt")
+internal fun writeXamlBindingSupportSource(root: Path, assemblyName: String? = null) {
+    val className = "KotlinXamlBindingScopeConnector" + assemblyName?.replace(Regex("[^A-Za-z0-9_]"), "_")?.let { "_$it" }.orEmpty()
+    val file = root.resolve("io/github/composefluent/winrt/generated/xaml/$className.kt")
     Files.createDirectories(file.parent)
     file.writeText("""
         package io.github.composefluent.winrt.generated.xaml
@@ -16,7 +17,7 @@ internal fun writeXamlBindingSupportSource(root: Path) {
         import microsoft.ui.xaml.controls.ContainerContentChangingEventArgs
         import microsoft.ui.xaml.markup.*
 
-        internal class KotlinXamlBindingScopeConnector(
+        internal class $className(
             owner: WinRTXamlBindingScopeOwner,
             scopeId: Int,
             target: Any?,

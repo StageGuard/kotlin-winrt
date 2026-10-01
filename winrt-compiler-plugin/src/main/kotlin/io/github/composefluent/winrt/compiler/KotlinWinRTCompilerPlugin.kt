@@ -265,7 +265,10 @@ class KotlinWinRTCompilerPluginRegistrar : CompilerPluginRegistrar() {
     override fun ExtensionStorage.registerExtensions(configuration: CompilerConfiguration) {
         XamlSemanticOptions.compilation(configuration)?.let { xaml ->
             FirExtensionRegistrarAdapter.registerExtension(XamlFirRegistrar(xaml.declarations))
-            IrGenerationExtension.registerExtension(XamlPageBodies(xaml.declarations, xaml.semanticExport != null))
+            val xamlRegistrars = if (xaml.semanticExport == null) readCompilerSupportManifestIfConfigured(
+                configuration.get(KotlinWinRTCommandLineProcessor.COMPILER_SUPPORT_MANIFEST_KEY))
+                .filter { it.kind == "xaml-type-registrar" }.map { it.className } else emptyList()
+            IrGenerationExtension.registerExtension(XamlPageBodies(xaml.declarations, xaml.semanticExport != null, xamlRegistrars))
             xaml.semanticExport?.let {
                 // Isolated semantic pass: these binaries are never runtime or packaging inputs.
                 IrGenerationExtension.registerExtension(it)
@@ -416,7 +419,7 @@ class KotlinWinRTIrGenerationExtension(
                 )?.sourceTypeName
             }
             .toSet()
-        lowerAuthoredTypeConstructors(moduleFragment, pluginContext, authoredTypeNames)
+        lowerAuthoredTypeConstructors(moduleFragment, pluginContext, authoredTypeNames, authoringRegistrarEntries)
         writeProjectionTypeIndex(classContexts, winRTTypes)
         val authoredCandidates = authoredCandidates(classContexts, winRTTypes, sourceSubtypedNames)
         writeAuthoredCandidates(authoredCandidates)
@@ -1443,14 +1446,16 @@ class KotlinWinRTIrGenerationExtension(
         moduleFragment: IrModuleFragment,
         pluginContext: IrPluginContext,
         authoredTypeNames: Set<String>,
+        manifestEntries: List<KotlinWinRTAuthoringTypeDetailsRegistrarEntry>,
     ) {
         if (authoredTypeNames.isEmpty()) {
             return
         }
-        val registrar = requireCompilerSupportPrerequisite(
+        val registrars = requireCompilerSupportPrerequisite(
             description = "authoring type-details registrar",
             prerequisite = "WinRTAuthoringTypeDetailsRegistrar.register with no regular parameters",
-            value = authoringTypeDetailsRegistrarRegister(pluginContext, moduleFragment.files.firstOrNull()),
+            value = authoringTypeDetailsRegistrarRegisters(pluginContext, moduleFragment.files.firstOrNull(), manifestEntries)
+                .takeIf(List<*>::isNotEmpty),
         )
         moduleFragment.transformChildrenVoid(
             object : IrElementTransformerVoidWithContext() {
@@ -1468,39 +1473,18 @@ class KotlinWinRTIrGenerationExtension(
                     // marker before their value-dependent base-factory call.
                     val body = constructor.body as? IrBlockBody ?: return constructor
                     val builder = DeclarationIrBuilder(pluginContext, constructor.symbol, constructor.startOffset, constructor.endOffset)
-                    body.statements.add(
+                    body.statements.addAll(
                         0,
-                        builder.irCall(registrar.register).apply {
-                            dispatchReceiver = builder.irGetObject(registrar.registrarClass)
+                        registrars.map { registrar ->
+                            builder.irCall(registrar.register).apply {
+                                dispatchReceiver = builder.irGetObject(registrar.registrarClass)
+                            }
                         },
                     )
                     return constructor
                 }
             },
         )
-    }
-
-    @OptIn(UnsafeDuringIrConstructionAPI::class)
-    private fun authoringTypeDetailsRegistrarRegister(
-        pluginContext: IrPluginContext,
-        fromFile: IrFile?,
-    ): AuthoringTypeDetailsRegistrar? {
-        val registrarName = authoringTypeDetailsRegistrarName(authoringAssemblyName)
-        val registrarClass = pluginContext.findClassSymbol(
-            ClassId.topLevel(FqName("io.github.composefluent.winrt.projections.support.$registrarName")),
-            fromFile,
-        ) ?: return null
-        val register = registrarClass
-            .owner
-            .declarations
-            .filterIsInstance<IrSimpleFunction>()
-            .singleOrNull { function ->
-                function.name.asString() == "register" &&
-                    function.parameters.none { parameter -> parameter.kind == IrParameterKind.Regular }
-            }
-            ?.symbol
-            ?: return null
-        return AuthoringTypeDetailsRegistrar(registrarClass, register)
     }
 
     private fun authoringTypeDetailsRegistrarRegisters(
@@ -1943,6 +1927,7 @@ private val COMPILER_SUPPORT_MANIFEST_KINDS: Set<String> =
         "projection-registrar",
         "xaml-component-resource",
         "authoring-type-details-registrar",
+        "xaml-type-registrar",
     )
 
 private const val COMPILER_SUPPORT_MANIFEST_HEADER: String =
@@ -1964,6 +1949,10 @@ private val COMPILER_SUPPORT_MANIFEST_ENTRY_BY_KIND: Map<String, CompilerSupport
         "authoring-type-details-registrar" to CompilerSupportManifestExpectedEntry(
             className = null,
             sourceFile = "authoring-type-details-registrars.tsv",
+        ),
+        "xaml-type-registrar" to CompilerSupportManifestExpectedEntry(
+            className = null,
+            sourceFile = "xaml-type-registrars.tsv",
         ),
     )
 

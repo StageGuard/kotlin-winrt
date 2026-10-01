@@ -64,8 +64,9 @@ object KotlinWinRTAuthoringScannerCli {
             writeXamlHeader(options, index)
             return
         }
-        val scanned = scan(options.sourceRoots, index)
-        val pages = options.xamlDeclarations?.let { WinRTXamlDeclarations.parse(it.readText()).pages }.orEmpty()
+        val sourceTypeNames = mutableSetOf<String>()
+        val scanned = scan(options.sourceRoots, index, options.sourceRootOwners, sourceTypeNames)
+        val pages = options.xamlDeclarations.flatMap { WinRTXamlDeclarations.parse(it.readText()).pages }.distinctBy { it.className }
         val byName = scanned.associateBy { it.sourceTypeName }
         val connector = "Microsoft.UI.Xaml.Markup.IComponentConnector"
         if (pages.isNotEmpty()) {
@@ -77,7 +78,7 @@ object KotlinWinRTAuthoringScannerCli {
             }
             // Application bases are checked against Kotlin's direct superclass by
             // semantic compilation; the authored ABI candidate owns the SDK base.
-            require(page.baseTypeName !in index || candidate.winRTBaseClassName == page.baseTypeName) {
+            require(page.baseTypeName in sourceTypeNames || candidate.winRTBaseClassName == page.baseTypeName) {
                 "XAML class ${page.className} requires base ${page.baseTypeName}, found ${candidate.winRTBaseClassName}."
             }
         }
@@ -93,14 +94,14 @@ object KotlinWinRTAuthoringScannerCli {
     /** Source declarations precede XamlCompiler pass 1; Kotlin IR checks them in the semantic pass. */
     private fun writeXamlHeader(options: CliOptions, index: Map<String, IndexedWinRTType>) {
         val sources = options.sourceRoots.flatMap(::kotlinSourceFiles).distinct().sorted()
-        val candidates = scan(options.sourceRoots, index).associateBy { it.sourceTypeName }
+        val candidates = scan(options.sourceRoots, index, options.sourceRootOwners).associateBy { it.sourceTypeName }
         val declarations = sources.flatMap { path ->
             val source = parseSource(path)
             source.classes().filter { !source.isNestedClass(it) && source.isEffectivelyAuthorableClass(it) &&
                 (source.isRuntimeClassDeclaration(it) || source.isObjectDeclaration(it)) && !source.hasTypeParameters(it) }.map { klass ->
                 val simpleName = requireNotNull(source.className(klass))
                 val name = listOf(source.packageName(), simpleName).filter(String::isNotBlank).joinToString(".")
-                XamlHeaderClass(source, klass, name, candidates[name])
+                XamlHeaderClass(source, klass, name, candidates[name], sourceSetName = sourceSetForPath(path, options.sourceRootOwners))
             }
         }.associateBy { it.name }
         val classes = declarations.mapValues { (_, type) ->
@@ -185,12 +186,13 @@ object KotlinWinRTAuthoringScannerCli {
             index.values.filter { it.kind == WinRTTypeKind.Enum.name || it.kind == WinRTTypeKind.Struct.name }
                 .mapTo(mutableSetOf()) { it.qualifiedName },
         )
-        options.xamlHeaderSources?.let { writeXamlRegistrationSources(it, applicationClasses, schemas) }
+        options.xamlHeaderSources?.let { writeXamlRegistrationSources(it, applicationClasses, schemas, options.xamlAssemblyName) }
     }
 
     private data class XamlHeaderClass(val source: KotlinLightSource, val klass: LighterASTNode,
         val name: String, val candidate: KotlinWinRTAuthoredTypeCandidate?,
-        val schemaBaseName: String? = candidate?.winRTBaseClassName) {
+        val schemaBaseName: String? = candidate?.winRTBaseClassName,
+        val sourceSetName: String? = candidate?.sourceSetName) {
         val className get() = name.substringAfterLast('.')
         val packageName get() = name.substringBeforeLast('.', "")
     }
@@ -260,6 +262,7 @@ object KotlinWinRTAuthoringScannerCli {
         root: Path,
         pages: List<XamlHeaderClass>,
         schemas: Map<String, XamlSourceMembers>,
+        assemblyName: String? = null,
     ) {
         Files.createDirectories(root)
         val registrations = pages.map { type ->
@@ -268,7 +271,8 @@ object KotlinWinRTAuthoringScannerCli {
             val candidate = type
             val schema = schemas.getValue(candidate.name)
             val registerName = "registerKotlinWinRTXaml${candidate.className}"
-            val file = root.resolve(candidate.packageName.replace('.', '/'))
+            val ownerRoot = candidate.sourceSetName?.let { root.resolve("sourceSets/$it") } ?: root
+            val file = ownerRoot.resolve(candidate.packageName.replace('.', '/'))
                 .resolve("KotlinWinRTXaml${candidate.className}.kt")
             Files.createDirectories(file.parent)
             val code = buildString {
@@ -336,11 +340,12 @@ object KotlinWinRTAuthoringScannerCli {
                 appendLine("}")
             }
             file.writeText(code)
-            "${candidate.packageName}.$registerName".removePrefix(".")
+            candidate.sourceSetName to "${candidate.packageName}.$registerName".removePrefix(".")
         }
-        val registry = root.resolve("io/github/composefluent/winrt/generated/xaml/KotlinXamlApplicationDefinitions.kt")
-        Files.createDirectories(registry.parent)
-        registry.writeText(buildString {
+        val supportRoot = if (pages.any { it.sourceSetName != null }) root.resolve("shared") else root
+        val converter = supportRoot.resolve("io/github/composefluent/winrt/generated/xaml/KotlinXamlMemberValue.kt")
+        Files.createDirectories(converter.parent)
+        converter.writeText(buildString {
             appendLine("package io.github.composefluent.winrt.generated.xaml")
             // XamlTypeExtensions.GetStringToTypeConversion uses the same SDK
             // converter when a XAML literal has not already been boxed as its
@@ -351,19 +356,34 @@ object KotlinWinRTAuthoringScannerCli {
             appendLine("    microsoft.ui.xaml.markup.XamlBindingHelper.convertValue(type, text)")
             appendLine("  } as T")
             appendLine("}")
-            appendLine("object KotlinXamlApplicationDefinitions {")
-            appendLine("  private val registration: Unit = run {")
-            registrations.forEach { appendLine("    $it()") }
-            appendLine("  }")
-            appendLine("  fun registerAll() { registration }")
-            appendLine("}")
         })
-        writeXamlBindingSupportSource(root)
+        val registrarNames = registrations.groupBy { it.first }.toSortedMap(compareBy { it.orEmpty() })
+            .map { (owner, entries) ->
+                val ownerRoot = owner?.let { root.resolve("sourceSets/$it") } ?: root
+                val moduleSuffix = assemblyName?.replace(Regex("[^A-Za-z0-9_]"), "_")?.let { "_$it" }.orEmpty()
+                val registryName = "KotlinXamlApplicationDefinitions$moduleSuffix" + (owner?.let { "_$it" } ?: "")
+                val registry = ownerRoot.resolve("io/github/composefluent/winrt/generated/xaml/$registryName.kt")
+                Files.createDirectories(registry.parent)
+                registry.writeText(buildString {
+                    appendLine("package io.github.composefluent.winrt.generated.xaml")
+                    appendLine("object $registryName {")
+                    appendLine("  private val registration: Unit = run {")
+                    entries.forEach { appendLine("    ${it.second}()") }
+                    appendLine("  }")
+                    appendLine("  fun registerAll() { registration }")
+                    appendLine("}")
+                })
+                "io.github.composefluent.winrt.generated.xaml.$registryName"
+            }
+        root.resolve("registrars.tsv").writeText((listOf("className") + registrarNames).joinToString("\n", postfix = "\n"))
+        writeXamlBindingSupportSource(supportRoot, assemblyName)
     }
 
     private fun scan(
         sourceRoots: Iterable<Path>,
         winRTTypes: Map<String, IndexedWinRTType>,
+        sourceRootOwners: Map<Path, String> = emptyMap(),
+        sourceTypeNames: MutableSet<String>? = null,
     ): List<KotlinWinRTAuthoredTypeCandidate> {
         val sourceFiles = sourceRoots
             .onEach { root ->
@@ -374,17 +394,19 @@ object KotlinWinRTAuthoringScannerCli {
             .flatMap(::kotlinSourceFiles)
             .distinct()
             .sorted()
-        val sources = sourceFiles.map(::parseSource)
+        val sources = sourceFiles.map { parseSource(it) to sourceSetForPath(it, sourceRootOwners) }
         val sourceClasses = sources.flatMap { source ->
-            val packageName = source.packageName()
-            val imports = parseImports(source)
-            source.classes().mapNotNull { klass ->
-                val className = source.className(klass) ?: return@mapNotNull null
+            val (declarationSource, owner) = source
+            val packageName = declarationSource.packageName()
+            val imports = parseImports(declarationSource)
+            declarationSource.classes().mapNotNull { klass ->
+                val className = declarationSource.className(klass) ?: return@mapNotNull null
                 val sourceTypeName = if (packageName.isBlank()) className else "$packageName.$className"
-                SourceClass(source, klass, packageName, imports, className, sourceTypeName)
+                SourceClass(declarationSource, klass, packageName, imports, className, sourceTypeName, owner)
             }
         }
         val sourceClassIndex = sourceClasses.associateBy(SourceClass::sourceTypeName)
+        sourceTypeNames?.addAll(sourceClassIndex.keys)
         val sourceSubtypedNames = sourceClasses
             .flatMap { sourceClass ->
                 sourceClass.source.superTypeNames(sourceClass.klass)
@@ -509,6 +531,7 @@ object KotlinWinRTAuthoringScannerCli {
             packageName = packageName,
             className = className,
             sourceTypeName = sourceTypeName,
+            sourceSetName = sourceClass.sourceSetName,
             winRTBaseClassName = winRTBase?.qualifiedName,
             winRTInterfaceNames = (directInterfaces + overridableInterfaces).distinct().sorted(),
             overridableInterfaceNames = overridableInterfaces,
@@ -571,6 +594,7 @@ object KotlinWinRTAuthoringScannerCli {
         val imports: KotlinImports,
         val className: String,
         val sourceTypeName: String,
+        val sourceSetName: String? = null,
     )
 
     private fun parseSource(source: Path): KotlinLightSource {
@@ -655,16 +679,20 @@ object KotlinWinRTAuthoringScannerCli {
         val metadataIndex: Path,
         val output: Path,
         val sourceRoots: List<Path>,
-        val xamlDeclarations: Path?,
+        val xamlDeclarations: List<Path>,
         val xamlHeader: Boolean,
         val references: List<Path>,
         val xamlHeaderSources: Path?,
+        val sourceRootOwners: Map<Path, String>,
+        val xamlAssemblyName: String?,
     ) {
         companion object {
             fun parse(args: Array<String>): CliOptions {
                 var metadataIndex: Path? = null
                 var output: Path? = null
-                var xamlDeclarations: Path? = null
+                val xamlDeclarations = mutableListOf<Path>()
+                val sourceRootOwners = linkedMapOf<Path, String>()
+                var xamlAssemblyName: String? = null
                 var xamlHeader = false
                 val references = mutableListOf<Path>()
                 var xamlHeaderSources: Path? = null
@@ -685,10 +713,18 @@ object KotlinWinRTAuthoringScannerCli {
                             index += 2
                         }
                         "--xaml-declarations" -> {
-                            xamlDeclarations = Path.of(argumentValue(args, index))
+                            xamlDeclarations.add(Path.of(argumentValue(args, index)))
                             index += 2
                         }
+                        "--source-root-owner" -> {
+                            val path = Path.of(argumentValue(args, index)).toAbsolutePath().normalize()
+                            val owner = requireNotNull(args.getOrNull(index + 2)) { "--source-root-owner requires a source set" }
+                            require(owner.matches(Regex("[A-Za-z_][A-Za-z0-9_]*"))) { "Invalid Kotlin source set: $owner" }
+                            require(sourceRootOwners.put(path, owner).let { it == null || it == owner }) { "Ambiguous source set owner for $path" }
+                            index += 3
+                        }
                         "--xaml-header" -> { xamlHeader = true; index += 1 }
+                        "--xaml-assembly-name" -> { xamlAssemblyName = argumentValue(args, index); index += 2 }
                         "--reference" -> { references.add(Path.of(argumentValue(args, index))); index += 2 }
                         "--xaml-header-sources" -> { xamlHeaderSources = Path.of(argumentValue(args, index)); index += 2 }
                         else -> error("Unknown kotlin-winrt authoring scanner argument: ${args[index]}")
@@ -702,6 +738,8 @@ object KotlinWinRTAuthoringScannerCli {
                     xamlHeader = xamlHeader,
                     references = references,
                     xamlHeaderSources = xamlHeaderSources,
+                    sourceRootOwners = sourceRootOwners,
+                    xamlAssemblyName = xamlAssemblyName,
                 )
             }
 
@@ -712,6 +750,9 @@ object KotlinWinRTAuthoringScannerCli {
                     )
         }
     }
+
+    private fun sourceSetForPath(path: Path, owners: Map<Path, String>): String? = owners.entries
+        .filter { path.toAbsolutePath().normalize().startsWith(it.key) }.maxByOrNull { it.key.nameCount }?.value
 
     private data class KotlinLightSource(
         val text: String,
@@ -952,7 +993,9 @@ object KotlinWinRTAuthoringScannerCli {
 
         fun className(classNode: LighterASTNode): String? {
             var seenDeclarationKeyword = false
-            return classNode.descendants().firstNotNullOfOrNull { node ->
+            // An unnamed companion has no class-name token. Descending into its
+            // body would mistake its first function name for an authored class.
+            return classNode.children().firstNotNullOfOrNull { node ->
                 when (node.tokenType) {
                     KtTokens.CLASS_KEYWORD,
                     KtTokens.INTERFACE_KEYWORD,

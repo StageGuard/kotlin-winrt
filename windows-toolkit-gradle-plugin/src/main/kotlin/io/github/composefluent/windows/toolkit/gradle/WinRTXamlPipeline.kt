@@ -5,10 +5,12 @@ import org.gradle.api.file.FileCollection
 import org.gradle.api.file.RegularFile
 import org.gradle.api.provider.Provider
 import org.gradle.api.tasks.TaskProvider
+import org.gradle.api.tasks.SourceSetContainer
 import org.jetbrains.kotlin.gradle.plugin.KotlinApiPlugin
 import org.jetbrains.kotlin.gradle.plugin.KotlinJvmFactory
 import org.jetbrains.kotlin.gradle.dsl.KotlinMultiplatformExtension
 import org.jetbrains.kotlin.gradle.tasks.KotlinJvmCompile
+import org.jetbrains.kotlin.gradle.targets.jvm.KotlinJvmTarget
 import java.io.File
 
 internal fun isXamlSemanticTask(name: String) = name.startsWith("compileKotlinWinRTXamlSemantic") ||
@@ -26,10 +28,18 @@ internal fun configureWinRTXamlPipeline(
     candidates: TaskProvider<GenerateWinRTAuthoringCandidatesTask>,
     compilerPluginClasspath: FileCollection,
 ) {
+    val xamlSourceRoots = project.provider {
+        (sourceRoots.get() + winRTMainSourceSets(project).flatMap { sourceSet ->
+            sourceSet.resources.srcDirs + project.file("src/${sourceSet.name}/appxResources")
+        } + if (project.extensions.findByType(KotlinMultiplatformExtension::class.java) == null)
+            project.extensions.findByType(SourceSetContainer::class.java)?.findByName("main")?.resources?.srcDirs.orEmpty() +
+                project.file("src/main/appxResources") else emptyList()).distinctBy { it.toPath().toAbsolutePath().normalize() }
+    }
     val hasXaml = project.provider {
-        sourceRoots.get().any { root -> root.isDirectory && root.walkTopDown().any { it.isFile && it.extension.equals("xaml", true) } }
+        xamlSourceRoots.get().any { root -> root.isDirectory && root.walkTopDown().any { it.isFile && it.extension.equals("xaml", true) } }
     }
     val localCompilerDirectory = extension.xaml.compilerDirectory
+    val sourceRootOwners = project.provider { winRTSourceRootOwners(project) }
     val resolveCompiler = project.tasks.register("resolveWinRTXamlCompiler", ResolveWinRTXamlCompilerTask::class.java) { task ->
         task.compilerVersion.set(extension.xaml.compilerVersion)
         task.archiveUrl.set(extension.xaml.archiveUrl)
@@ -41,7 +51,7 @@ internal fun configureWinRTXamlPipeline(
     }
     fun configure(task: CompileWinRTXamlTask) {
         task.group = "kotlin-winrt"
-        task.sourceRoots.from(sourceRoots)
+        task.sourceRoots.from(xamlSourceRoots)
         task.preparedMetadataManifest.set(metadataManifest)
         task.compilerDirectory.set(extension.xaml.compilerDirectory.orElse(resolveCompiler.flatMap { it.outputDirectory }))
         // DirectoryProperty.orElse can lose producer inference through an absent override.
@@ -61,7 +71,8 @@ internal fun configureWinRTXamlPipeline(
         GenerateWinRTXamlApplicationHeaderTask::class.java) { task ->
         task.group = "kotlin-winrt"
         task.description = "Exports adjacent Kotlin XAML type declarations for XamlCompiler pass 1."
-        task.sourceRoots.from(sourceRoots)
+        task.sourceRoots.from(xamlSourceRoots)
+        task.sourceRootOwners.set(sourceRootOwners.map { owners -> owners.mapValues { (_, owner) -> if (owner == "commonMain") "winuiMain" else owner } })
         task.metadataIndex.set(metadataIndex)
         task.preparedMetadataManifest.set(metadataManifest)
         task.scannerClasspath.from(compilerPluginClasspath)
@@ -71,36 +82,65 @@ internal fun configureWinRTXamlPipeline(
         task.sourceOutputDirectory.set(project.layout.buildDirectory.dir("generated/kotlin-winrt/xaml/application/src"))
         task.onlyIf { hasXaml.get() }
     }
-    val declarations = project.tasks.register("analyzeWinRTXaml", CompileWinRTXamlTask::class.java) { task ->
-        configure(task)
-        task.applicationHeaderWinmd.set(applicationHeader.flatMap { it.outputFile })
-        task.description = "Analyzes XAML declarations before Kotlin authoring and semantic compilation."
-        task.outputDirectory.set(project.layout.buildDirectory.dir("generated/kotlin-winrt/xaml/declarations"))
+    val analyzeAll = project.tasks.register("analyzeWinRTXaml") { it.group = "kotlin-winrt" }
+    project.tasks.withType(GenerateWinRTProjectionsTask::class.java).matching { it.name == "generateWinRTProjections" }.configureEach { task ->
+        task.xamlRegistrars.set(hasXaml.flatMap { enabled ->
+            if (enabled) applicationHeader.flatMap { it.sourceOutputDirectory.file("registrars.tsv") } else project.providers.provider { null }
+        })
     }
-    // TypeDetails are emitted in winuiMain. Their template implementation must live
-    // in that same fragment, so common WinUI code can see it on JVM and Native.
-    project.extensions.findByType(KotlinMultiplatformExtension::class.java)?.sourceSets
-        ?.matching { it.name == "winuiMain" }?.configureEach {
-            it.kotlin.srcDir(applicationHeader.flatMap { task -> task.sourceOutputDirectory })
+    fun compilationInputs(suffix: String, roots: Provider<List<File>>): WinRTXamlCompilationInputs {
+        val header = project.tasks.register("generateWinRTXamlApplicationHeader$suffix", GenerateWinRTXamlApplicationHeaderTask::class.java) { task ->
+            task.sourceRoots.from(roots)
+            task.sourceRootOwners.set(sourceRootOwners)
+            task.metadataIndex.set(metadataIndex)
+            task.preparedMetadataManifest.set(metadataManifest)
+            task.scannerClasspath.from(compilerPluginClasspath, kotlinWinRTAuthoringScannerRuntimeClasspath(project))
+            task.scannerJvmArgs.set(listOf("-Xmx512m", "-XX:+UseSerialGC"))
+            task.outputFile.set(project.layout.buildDirectory.file("generated/kotlin-winrt/xaml/$suffix/application/KotlinXaml.winmd"))
+            task.sourceOutputDirectory.set(project.layout.buildDirectory.dir("generated/kotlin-winrt/xaml/$suffix/application/src"))
+            task.emitSources.set(false)
         }
+        val declarations = project.tasks.register("analyzeWinRTXaml$suffix", CompileWinRTXamlTask::class.java) { task ->
+            configure(task)
+            task.sourceRoots.setFrom(roots)
+            task.applicationHeaderWinmd.set(header.flatMap { it.outputFile })
+            task.outputDirectory.set(project.layout.buildDirectory.dir("generated/kotlin-winrt/xaml/$suffix/declarations"))
+        }
+        analyzeAll.configure { it.dependsOn(declarations) }
+        candidates.configure { it.compilationXamlDeclarations.from(declarations.flatMap { it.declarationsFile }) }
+        return WinRTXamlCompilationInputs(header, declarations)
+    }
     candidates.configure { task ->
         task.xamlSupportSources.from(hasXaml.flatMap { enabled ->
             if (enabled) applicationHeader.flatMap { it.sourceOutputDirectory } else project.providers.provider { null }
         })
-        task.xamlDeclarations.set(hasXaml.flatMap { enabled ->
-            if (enabled) declarations.flatMap { it.declarationsFile } else project.providers.provider { null }
-        })
+        task.sourceRootOwners.putAll(sourceRootOwners.flatMap { owners -> applicationHeader.flatMap { it.sourceOutputDirectory }.map { output ->
+            owners.values.distinct().associate { owner -> output.dir("sourceSets/$owner").asFile.absolutePath to owner } +
+                (output.dir("shared").asFile.absolutePath to "winuiMain")
+        } })
     }
     // This callback is registered after standalone projection compilation. Its libraries are
     // already attached to each business compilation, so no final application output is needed.
     project.afterEvaluate {
         if (!hasXaml.get()) return@afterEvaluate
+        val kmp = project.extensions.findByType(KotlinMultiplatformExtension::class.java)
+        if (kmp != null) {
+            winRTMainSourceSets(project).forEach { sourceSet ->
+                sourceSet.kotlin.srcDir(applicationHeader.flatMap { it.sourceOutputDirectory.dir("sourceSets/${sourceSet.name}") })
+            }
+            kmp.sourceSets.getByName("winuiMain").kotlin.srcDir(applicationHeader.flatMap { it.sourceOutputDirectory.dir("shared") })
+        }
         val kotlinApi = project.plugins.getPlugin(KotlinApiPlugin::class.java) as KotlinJvmFactory
         val businessTasks = project.tasks.withType(KotlinJvmCompile::class.java).toList().filter {
             !it.name.contains("Test", true) && !it.name.startsWith("compileKotlinWinRT")
         }
         businessTasks.forEach { business ->
             val suffix = business.name.removePrefix("compileKotlin")
+            val compilation = kmp?.targets?.withType(KotlinJvmTarget::class.java)?.flatMap { it.compilations }
+                ?.singleOrNull { it.compileTaskProvider.name == business.name }
+            val roots = if (compilation != null) project.provider { winRTXamlCompilationSourceRoots(project, compilation) } else xamlSourceRoots
+            if (roots.get().none { root -> root.isDirectory && root.walkTopDown().any { it.isFile && it.extension.equals("xaml", true) } }) return@forEach
+            val (header, declarations) = compilationInputs(suffix, roots)
             val semanticRoot = project.layout.buildDirectory.dir("intermediates/kotlin-winrt/xaml/$suffix/semantic")
             val symbols = semanticRoot.map { it.file("symbols.json") }
             val semanticOptions = kotlinApi.createCompilerJvmOptions().apply {
@@ -115,7 +155,7 @@ internal fun configureWinRTXamlPipeline(
                     listOf("xamlDeclarations=${declarations.get().declarationsFile.get().asFile.absolutePath}",
                         "metadataIndex=${metadataIndex.get().asFile.absolutePath}",
                         "xamlSemanticOutput=${symbols.get().asFile.absolutePath}",
-                        "xamlApplicationHeader=${applicationHeader.get().outputFile.get().asFile.absolutePath}",
+                        "xamlApplicationHeader=${header.get().outputFile.get().asFile.absolutePath}",
                         "xamlReferencesFile=${declarations.get().outputDirectory.file("references.txt").get().asFile.absolutePath}")
                         .flatMap { listOf("-P", "plugin:io.github.composefluent.winrt.compiler:$it") }
                 })
@@ -125,7 +165,7 @@ internal fun configureWinRTXamlPipeline(
                 task.description = "Compiles isolated XAML semantic symbols; output classes are never packaged."
                 task.group = "kotlin-winrt"
                 task.source(business.sources)
-                task.source(applicationHeader.flatMap { it.sourceOutputDirectory })
+                if (kmp == null) task.source(applicationHeader.flatMap { it.sourceOutputDirectory })
                 task.libraries.from(business.libraries)
                 task.friendPaths.from(business.friendPaths)
                 task.pluginClasspath.from(compilerPluginClasspath)
@@ -145,6 +185,7 @@ internal fun configureWinRTXamlPipeline(
             }
             val implementation = project.tasks.register("compileWinRTXaml$suffix", CompileWinRTXamlTask::class.java) { task ->
                 configure(task)
+                task.sourceRoots.setFrom(roots)
                 task.semanticSymbols.set(symbols)
                 task.semanticWinmd.set(semanticRoot.map { it.file("KotlinXaml.winmd") })
                 task.outputDirectory.set(project.layout.buildDirectory.dir("generated/kotlin-winrt/xaml/$suffix/final"))
@@ -158,7 +199,7 @@ internal fun configureWinRTXamlPipeline(
             }
             semantic.configure { it.dependsOn(sourceGeneration) }
             implementation.configure { it.dependsOn(sourceGeneration) }
-            business.source(applicationHeader.flatMap { it.sourceOutputDirectory })
+            if (kmp == null) business.source(applicationHeader.flatMap { it.sourceOutputDirectory })
             business.inputs.file(implementation.flatMap { it.implementationFile })
             business.compilerOptions.freeCompilerArgs.addAll(project.provider {
                 listOf("xamlDeclarations=${declarations.get().declarationsFile.get().asFile.absolutePath}",
@@ -166,9 +207,14 @@ internal fun configureWinRTXamlPipeline(
                     .flatMap { listOf("-P", "plugin:io.github.composefluent.winrt.compiler:$it") }
             })
             business.dependsOn(implementation)
-            configureWinRTXamlPackageResources(project, sourceRoots, implementation, business.name, WinAppVariantKind.Jvm)
+            configureWinRTXamlPackageResources(project, roots, implementation, business.name, WinAppVariantKind.Jvm,
+                compilation?.defaultSourceSet?.name)
         }
-        configureWinRTXamlNativePipeline(project, sourceRoots, declarations, applicationHeader,
-            metadataManifest, metadataIndex, compilerPluginClasspath, ::configure)
+        configureWinRTXamlNativePipeline(project, metadataManifest, metadataIndex, compilerPluginClasspath, ::configure, ::compilationInputs)
     }
 }
+
+internal data class WinRTXamlCompilationInputs(
+    val header: TaskProvider<GenerateWinRTXamlApplicationHeaderTask>,
+    val declarations: TaskProvider<CompileWinRTXamlTask>,
+)

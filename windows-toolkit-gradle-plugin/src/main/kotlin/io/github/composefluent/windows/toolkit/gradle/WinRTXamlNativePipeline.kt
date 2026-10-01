@@ -13,13 +13,11 @@ import java.io.File
 @OptIn(org.jetbrains.kotlin.gradle.InternalKotlinGradlePluginApi::class)
 internal fun configureWinRTXamlNativePipeline(
     project: Project,
-    sourceRoots: Provider<List<File>>,
-    declarations: TaskProvider<CompileWinRTXamlTask>,
-    applicationHeader: TaskProvider<GenerateWinRTXamlApplicationHeaderTask>,
     metadataManifest: Provider<RegularFile>,
     metadataIndex: Provider<RegularFile>,
     compilerPluginClasspath: FileCollection,
     configure: (CompileWinRTXamlTask) -> Unit,
+    compilationInputs: (String, Provider<List<File>>) -> WinRTXamlCompilationInputs,
 ) {
     val kotlin = project.extensions.findByType(KotlinMultiplatformExtension::class.java) ?: return
     kotlin.targets.withType(KotlinNativeTarget::class.java)
@@ -27,6 +25,9 @@ internal fun configureWinRTXamlNativePipeline(
             target.compilations.toList().filter { it.name == "main" }.forEach { compilation ->
                 val business = compilation.compileTaskProvider.get()
                 val suffix = business.name.removePrefix("compileKotlin")
+                val sourceRoots = project.provider { winRTXamlCompilationSourceRoots(project, compilation) }
+                if (sourceRoots.get().none { root -> root.isDirectory && root.walkTopDown().any { it.isFile && it.extension.equals("xaml", true) } }) return@forEach
+                val (applicationHeader, declarations) = compilationInputs(suffix, sourceRoots)
                 val semanticRoot = project.layout.buildDirectory.dir("intermediates/kotlin-winrt/xaml/$suffix/semantic")
                 val symbols = semanticRoot.map { it.file("symbols.json") }
                 val semanticCompilation = target.compilations.create("winRTXamlSemantic")
@@ -71,6 +72,7 @@ internal fun configureWinRTXamlNativePipeline(
                 }
                 val implementation = project.tasks.register("compileWinRTXaml$suffix", CompileWinRTXamlTask::class.java) { task ->
                     configure(task)
+                    task.sourceRoots.setFrom(sourceRoots)
                     task.semanticSymbols.set(symbols)
                     task.semanticWinmd.set(semanticRoot.map { it.file("KotlinXaml.winmd") })
                     task.outputDirectory.set(project.layout.buildDirectory.dir("generated/kotlin-winrt/xaml/$suffix/final"))
@@ -86,7 +88,8 @@ internal fun configureWinRTXamlNativePipeline(
                         .flatMap { listOf("-P", "plugin:io.github.composefluent.winrt.compiler:$it") }
                 })
                 business.dependsOn(implementation)
-                configureWinRTXamlPackageResources(project, sourceRoots, implementation, business.name, WinAppVariantKind.MingwX64)
+                configureWinRTXamlPackageResources(project, sourceRoots, implementation, business.name, WinAppVariantKind.MingwX64,
+                    compilation.defaultSourceSet.name)
             }
         }
 }
@@ -97,7 +100,19 @@ internal fun configureWinRTXamlPackageResources(
     implementation: TaskProvider<CompileWinRTXamlTask>,
     compilationTaskName: String,
     kind: WinAppVariantKind,
+    sourceSetName: String? = null,
 ) {
+    // Library variants publish the same compiled XAML payload consumed by the
+    // application's existing AppX resource dependency graph and makepri stage.
+    val artifactTaskName = sourceSetName?.let { "packageAppxResources" + it.replaceFirstChar(Char::uppercaseChar) }
+        ?: "packageAppxResources"
+    project.tasks.withType(GenerateAppxResourcesArtifactTask::class.java).matching { it.name == artifactTaskName }.configureEach { task ->
+        val compiled = implementation.flatMap { it.outputDirectory.dir("compiled") }
+        task.resourceRoots.add(compiled.map { it.asFile.absolutePath })
+        task.resourceInputs.from(compiled)
+        task.excludedSourcePaths.addAll(implementation.map { it.inputXamlFiles.files.map { source -> source.absolutePath } })
+        task.dependsOn(implementation)
+    }
     val applicationVariants = discoverWinAppVariants(project).filter {
         it.kind == kind && compilationTaskName in it.compilationTaskNames(project)
     }.map { it.id }.toSet()

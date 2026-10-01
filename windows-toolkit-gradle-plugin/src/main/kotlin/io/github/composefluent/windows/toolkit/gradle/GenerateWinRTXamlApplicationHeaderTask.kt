@@ -6,6 +6,8 @@ import org.gradle.api.file.DirectoryProperty
 import org.gradle.api.file.FileSystemOperations
 import org.gradle.api.file.RegularFileProperty
 import org.gradle.api.provider.ListProperty
+import org.gradle.api.provider.MapProperty
+import org.gradle.api.provider.Property
 import org.gradle.api.model.ObjectFactory
 import org.gradle.api.tasks.*
 import org.gradle.process.ExecOperations
@@ -36,11 +38,17 @@ abstract class GenerateWinRTXamlApplicationHeaderTask @Inject constructor(
 
     @get:Classpath abstract val scannerClasspath: ConfigurableFileCollection
     @get:Input abstract val scannerJvmArgs: ListProperty<String>
+    @get:Input abstract val sourceRootOwners: MapProperty<String, String>
+    @get:Input abstract val emitSources: Property<Boolean>
+    @get:Input abstract val assemblyName: Property<String>
     @get:OutputFile abstract val outputFile: RegularFileProperty
     @get:OutputDirectory abstract val sourceOutputDirectory: DirectoryProperty
 
     init {
         scannerJvmArgs.convention(emptyList())
+        sourceRootOwners.convention(emptyMap())
+        emitSources.convention(true)
+        assemblyName.convention(project.name)
     }
 
     @TaskAction fun generate() {
@@ -57,9 +65,13 @@ abstract class GenerateWinRTXamlApplicationHeaderTask @Inject constructor(
             spec.jvmArgs(scannerJvmArgs.get() + "-Djava.io.tmpdir=${output.parent}")
             spec.args(buildList {
                 add("--xaml-header")
+                add("--xaml-assembly-name"); add(assemblyName.get())
                 add("--metadata-index"); add(metadataIndex.get().asFile.absolutePath)
                 add("--output"); add(output.toString())
-                add("--xaml-header-sources"); add(sourceOutput.absolutePath)
+                if (emitSources.get()) { add("--xaml-header-sources"); add(sourceOutput.absolutePath) }
+                sourceRootOwners.get().toSortedMap().forEach { (root, owner) ->
+                    add("--source-root-owner"); add(root); add(owner)
+                }
                 sourceRoots.files.filter { it.exists() &&
                     !isKotlinWindowsToolkitPluginOwnedAuthoringSourceRoot(it.toPath()) }
                     .sortedBy { it.absolutePath }.forEach {

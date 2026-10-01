@@ -2020,7 +2020,7 @@ internal fun appxGeneratedPackageName(mainClass: String): String {
     return packageName.takeIf(String::isNotBlank) ?: "io.github.composefluent.winrt.appx"
 }
 
-private fun appxResourceRoots(project: Project, targetSourceSetNames: Iterable<String>): List<Path> {
+internal fun appxResourceRoots(project: Project, targetSourceSetNames: Iterable<String>): List<Path> {
     val kotlin = project.extensions.findByType(KotlinMultiplatformExtension::class.java)
     val sourceSetsByName = kotlin?.sourceSets?.associateBy { sourceSet -> sourceSet.name }.orEmpty()
     val visited = linkedSetOf<String>()
@@ -2297,6 +2297,7 @@ private fun configureWinRTGeneration(
                 },
             )
             task.sourceRoots.from(authoringSourceRoots)
+            task.sourceRootOwners.set(project.provider { winRTSourceRootOwners(project) })
             task.scannerClasspath.from(compilerPluginClasspath)
             task.scannerClasspath.from(kotlinWinRTAuthoringScannerRuntimeClasspath(project))
             task.scannerJvmArgs.set(
@@ -2446,7 +2447,13 @@ private fun configureWinRTGeneration(
             project,
             project.layout.buildDirectory.dir("generated/kotlin-winrt/compiler-support/merged"),
         )
-        addGeneratedSourcesToKotlinMultiplatformWinuiMain(project, generatedAuthoringSources)
+        // The source scanner retains the original fragment on every candidate.
+        // TypeDetails for a JVM-only class must remain in that JVM fragment.
+        project.afterEvaluate {
+            winRTMainSourceSets(project).forEach { sourceSet ->
+                sourceSet.kotlin.srcDir(generatedAuthoringSources.map { it.dir("sourceSets/${sourceSet.name}") })
+            }
+        }
         configureKotlinWinRTCompilerPluginClasspath(project)
         configureKotlinWinRTCompilerPluginOptions(
             project = project,
@@ -3063,6 +3070,9 @@ private fun registerWinRTAuthoredCandidateValidation(
         Action<GenerateWinRTCompilerAuthoredTypeDetailsTask> { task ->
             task.group = "kotlin-winrt"
             task.description = "Regenerates authored TypeDetails from compiler IR authored candidates for validation."
+            task.sourceCandidates.from(generatedSources.map { directory ->
+                directory.file("kotlin-winrt-authoring/authored-candidates.tsv")
+            })
             task.outputDirectory.set(
                 compilerAuthoringTypeDetailsOutputDirectory(project, compileTaskName),
             )

@@ -27,6 +27,8 @@ data class KotlinWinRTAuthoredTypeCandidate(
     val isPublic: Boolean = true,
     val activatableFactoryInterfaceName: String? = null,
     val staticFactoryInterfaceNames: List<String> = emptyList(),
+    /** Original KMP fragment; source generation must not move a platform class into common code. */
+    val sourceSetName: String? = null,
 )
 
 data class KotlinWinRTAuthoredRuntimeClassAnnotation(
@@ -94,7 +96,11 @@ object KotlinWinRTAuthoringCandidateFile {
                 candidate.isPublic.toString(),
                 candidate.activatableFactoryInterfaceName.orEmpty(),
                 candidate.staticFactoryInterfaceNames.joinToString(";"),
-            ).joinToString("\t")
+            ).let { columns ->
+                // Keep legacy standalone scans byte-compatible; the extra column
+                // is needed only when Gradle supplies an original source fragment.
+                if (candidate.sourceSetName == null) columns else columns + candidate.sourceSetName
+            }.joinToString("\t")
         }
         if (!Files.isRegularFile(path) || Files.readString(path) != content) {
             path.writeText(
@@ -105,7 +111,7 @@ object KotlinWinRTAuthoringCandidateFile {
 
     private fun parseLine(line: String): KotlinWinRTAuthoredTypeCandidate? {
         val parts = line.split('\t')
-        if (parts.size != 7 && parts.size != 9) {
+        if (parts.size != 7 && parts.size != 9 && parts.size != 10) {
             return null
         }
         if (parts[0].isBlank() || parts[1].isBlank() || parts[2].isBlank()) {
@@ -122,6 +128,7 @@ object KotlinWinRTAuthoringCandidateFile {
             isPublic = isPublic,
             activatableFactoryInterfaceName = parts.getOrNull(7)?.takeIf(String::isNotBlank),
             staticFactoryInterfaceNames = parts.getOrNull(8)?.semicolonListOrNull() ?: emptyList(),
+            sourceSetName = parts.getOrNull(9)?.takeIf(String::isNotBlank),
         )
     }
 }
