@@ -1556,7 +1556,6 @@ class KotlinProjectionRenderer(
                 },
             )
         }
-        addRuntimeClassIdentityMembers(builder, plan)
         val objectReferencePlansByInterface = plan.objectReferenceSurfaceDescriptor
             ?.objectReferencePlans
             .orEmpty()
@@ -1566,11 +1565,15 @@ class KotlinProjectionRenderer(
             ?.let(objectReferencePlansByInterface::get)
         val defaultInterfaceIsRuntimeOwnedMapped = plan.defaultInterfaceName
             ?.let(::isRuntimeOwnedMappedTypeName) == true
-        if (!defaultInterfaceIsRuntimeOwnedMapped &&
+        val hasDefaultInterfaceObjectReference = !defaultInterfaceIsRuntimeOwnedMapped &&
             (plan.defaultInterfaceIid != null ||
                 (defaultObjectReferencePlan != null && defaultObjectReferencePlan.skippedReason == null) ||
                 isMappedCollectionInterfaceName(plan.defaultInterfaceName.orEmpty()))
-        ) {
+        addRuntimeClassIdentityMembers(
+            builder, plan,
+            if (hasDefaultInterfaceObjectReference) "_defaultInterface" else "nativeObject",
+        )
+        if (hasDefaultInterfaceObjectReference) {
             if (defaultObjectReferencePlan?.usesInner == true) {
                 builder.addProperty(
                     PropertySpec.builder("_defaultInterface", COM_OBJECT_REFERENCE_CLASS_NAME)
@@ -2258,7 +2261,10 @@ class KotlinProjectionRenderer(
     private fun addRuntimeClassIdentityMembers(
         builder: TypeSpec.Builder,
         plan: KotlinTypeProjectionPlan,
+        identityObjectReference: String,
     ) {
+        // CsWinRT ThisPtr uses _default or _inner.As(default IID), so incoming
+        // interface views of the same runtime class compare with one ABI type.
         if (plan.type.methods.none { it.isObjectEquals }) {
             builder.addFunction(
                 FunSpec.builder("equals")
@@ -2266,8 +2272,10 @@ class KotlinProjectionRenderer(
                     .addParameter("other", ANY.copy(nullable = true))
                     .returns(Boolean::class)
                     .addCode(
-                        "if (other !is %T) {\nreturn false\n}\nreturn nativeObject.pointer == other.nativeObject.pointer\n",
+                        "if (other !is %T) {\nreturn false\n}\nreturn %L.pointer == other.%L.pointer\n",
                         projectionClassName(plan.type.qualifiedName),
+                        identityObjectReference,
+                        identityObjectReference,
                     )
                     .build(),
             )
@@ -2277,7 +2285,7 @@ class KotlinProjectionRenderer(
                 FunSpec.builder("hashCode")
                     .addModifiers(KModifier.OVERRIDE)
                     .returns(Int::class)
-                    .addCode("return nativeObject.pointer.hashCode()\n")
+                    .addCode("return %L.pointer.hashCode()\n", identityObjectReference)
                     .build(),
             )
         }
