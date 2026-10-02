@@ -252,9 +252,16 @@ object WinRTReferenceValueAdapters {
         // the adapter so the hot path does not rebuild either descriptor or projector closure.
         val projectedTypeName = typeHandle.projectedTypeName
         val defaultInterfaceId = typeHandle.interfaceId
+        // CsWinRT GuidGenerator.GetSignature keeps runtime classes distinct from IInspectable
+        // when computing closed collection IIDs. Reuse the registered native name here too.
+        val runtimeClassName = TypeNameSupport.inferRuntimeClassName(projectedType)
+            ?: error("Runtime class '$projectedTypeName' is missing its registered WinRT class name.")
         return object : WinRTReferenceValueAdapter<T>(
             projectedTypeName = projectedTypeName,
-            typeSignature = WinRTTypeSignature.object_(),
+            typeSignature = WinRTTypeSignature.runtimeClass(
+                runtimeClassName,
+                WinRTTypeSignature.guid(defaultInterfaceId),
+            ),
             projector = { reference ->
                 val inspectable = reference?.asInspectable()
                     ?: throw WinRTInvalidCastException(
