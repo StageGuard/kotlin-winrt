@@ -223,7 +223,7 @@ class MainPage : Page() {
 - [x] 在现有 IR 管线为 FIR 生成声明补字段、访问器和方法体；给生成声明使用可识别 origin/key，确保重复运行和不同插件不会互相覆盖。
 - [x] 对 private 事件处理函数生成位于用户类内部的调用桥接，或在同类生成方法体内直接调用正确 IR symbol；不扩大用户成员可见性，不使用反射绕过。
 - [x] 接入现有 authoring 信息收集顺序，使新增接口和成员可被后续 CCW 描述看到；明确 FIR 元数据、IR 与 WinMD 输出之间的时序。
-- [ ] doing: 构造后自动调用 `initializeComponent()`；核实 runtime/composition 已建立回调所需身份，禁止在基类或尚未完成的派生构造阶段加载 XAML。验证普通调用、构造函数引用、次构造函数、跨模块消费、authoring 激活、初始化异常与生成加载逻辑的幂等性；示例覆盖 `initializeComponent()` 并先调用 `super.initializeComponent()`。
+- [x] 构造后自动调用 `initializeComponent()`；核实 runtime/composition 已建立回调所需身份，禁止在基类或尚未完成的派生构造阶段加载 XAML。验证普通调用、构造函数引用、次构造函数、跨模块消费、authoring 激活、初始化异常与生成加载逻辑的幂等性；示例覆盖 `initializeComponent()` 并先调用 `super.initializeComponent()`。
 - [x] JVM 与 Native 共享生成语义；平台限制放到现有 target adaptation。生成实现不得依赖 JVM 反射或仅写 `.class` 的旁路作为永久架构。
 
 验收：用户 Kotlin 函数能引用 XAML 生成成员，private 事件桥接能编译，无注解、无生成基类、无 Kotlin fork；生成器回归证明原有 C#/C++ 相关行为未被破坏。
