@@ -51,12 +51,16 @@ class WinRTXamlBindingScope(owner: WinRTXamlBindingScopeOwner, val scopeId: Int)
     fun createConnector(connectionId: Int, target: Any?): Any? =
         owner.tryGetTarget()?._kotlinXamlCreateScopeConnector(connectionId, target)
 
-    fun initialize(data: Any?) {
+    private fun replaceDataRoot(data: Any?) {
         if (dataRoot !== data) {
             state.stopTracking()
             dataRoot = data
             completedPhases = 0
         }
+    }
+
+    fun initialize(data: Any?) {
+        replaceDataRoot(data)
         if (data != null) {
             completedPhases = completedPhases or 1
             updatingPhases = if (phases.values.any { it != 0 }) 1 else -1
@@ -67,8 +71,11 @@ class WinRTXamlBindingScope(owner: WinRTXamlBindingScopeOwner, val scopeId: Int)
     /** Mirrors CSharpPagePass2.ProcessBindings and its phase bitmask. */
     fun processBindings(data: Any?, phase: Int): Int {
         require(phase in 0..31) { "Invalid XAML binding phase $phase" }
-        if (phase == 0 || dataRoot !== data) initialize(data)
-        if (phase != 0 && dataRoot != null) {
+        replaceDataRoot(data)
+        // CSharpPagePass2 updates every requested phase, including phase 0
+        // when a container still holds the same item. Initialize's one-shot
+        // guard must not suppress that refresh of OneTime bindings.
+        if (dataRoot != null) {
             updatingPhases = 1 shl phase
             completedPhases = completedPhases or updatingPhases
             try { state.updatePhase(phase, ::update) } finally { updatingPhases = completedPhases }
@@ -85,9 +92,12 @@ class WinRTXamlBindingScope(owner: WinRTXamlBindingScopeOwner, val scopeId: Int)
         { owner.tryGetTarget()?._kotlinXamlWriteBackScope(this, bindingId) }, ::update)
 
     fun recycle() {
-        state.stopTracking()
-        dataRoot = null
-        completedPhases = 0
-        updatingPhases = -1
+        try {
+            state.stopTracking()
+        } finally {
+            dataRoot = null
+            completedPhases = 0
+            updatingPhases = -1
+        }
     }
 }
