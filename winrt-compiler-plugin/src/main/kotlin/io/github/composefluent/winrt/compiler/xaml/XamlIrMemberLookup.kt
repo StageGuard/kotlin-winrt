@@ -3,7 +3,7 @@ package io.github.composefluent.winrt.compiler.xaml
 import io.github.composefluent.winrt.metadata.winRTCollectionAbiNameForKotlinType
 import org.jetbrains.kotlin.ir.declarations.*
 import org.jetbrains.kotlin.ir.symbols.UnsafeDuringIrConstructionAPI
-import org.jetbrains.kotlin.ir.types.classOrNull
+import org.jetbrains.kotlin.ir.types.*
 import org.jetbrains.kotlin.ir.util.*
 
 /** CsWinRT WinRTTypeWriter.GetMember walks application bases before the SDK boundary.
@@ -31,3 +31,10 @@ internal fun xamlIrFunctions(klass: IrClass, name: String, visited: MutableSet<I
         }.orEmpty()
     }
 }
+
+/** XamlCompiler closes generic path steps against their actual declaring type. */
+@OptIn(UnsafeDuringIrConstructionAPI::class)
+internal fun xamlIrMemberType(receiverType: IrType, owner: IrClass, memberType: IrType): IrType =
+    (receiverType as? IrSimpleType)?.let {
+        AbstractIrTypeSubstitutor.forSuperClass(owner.symbol, it)?.substitute(memberType)
+    } ?: memberType

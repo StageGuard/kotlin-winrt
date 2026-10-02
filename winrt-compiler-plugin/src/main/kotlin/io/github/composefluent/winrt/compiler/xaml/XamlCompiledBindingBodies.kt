@@ -134,16 +134,31 @@ internal class XamlCompiledBindingBodies(
                 +irIfThen(pluginContext.irBuiltIns.unitType, irNotEquals(irGet(source), irNull(source.type)), assignment)
             else +assignment
             if (binding.mode != "OneTime") {
-                for (expression in members(binding.expression)) {
+                for (expression in trackedPaths(binding.expression).distinct()) {
                     val watched = evaluate(requireNotNull(expression.receiver), this, klass, root, namedTargets = namedTargets)
                     val sourceClass = watched.type.classOrNull?.owner ?: continue
                     val sourceObject = irTemporary(watched)
-                    val dp = dependencyProperty(sourceClass, requireNotNull(expression.name))
+                    val dp = if (expression.kind == "member") dependencyProperty(sourceClass, requireNotNull(expression.name)) else null
                     val notifier = projection("Microsoft.UI.Xaml.Data.INotifyPropertyChanged")
-                    val subscribe = if (dp != null) subscribeProperty(this, observerClass, observer(),
-                        state(), irGet(sourceObject), dp, changed)
-                    else if (sourceClass.defaultType.isSubtypeOfClass(notifier.symbol)) subscribeEvent(this, observerClass,
-                        observer(), state(), irGet(sourceObject), notifier, "PropertyChanged", changed) else continue
+                    val subscribe = irBlock {
+                        if (dp != null) +subscribeProperty(this, observerClass, observer(), state(), irGet(sourceObject), dp, changed)
+                        else if (sourceClass.defaultType.isSubtypeOfClass(notifier.symbol)) +subscribeEvent(this, observerClass,
+                            observer(), state(), irGet(sourceObject), notifier, "PropertyChanged", changed)
+                        // CSharpPagePass2.UpdateChildListeners also tracks collection
+                        // steps, preferring observable vectors/maps over mapped INCC.
+                        val vector = pluginContext.referenceClass(xamlProjectionClassId("Windows.Foundation.Collections.IObservableVector"))?.owner
+                        val map = pluginContext.referenceClass(xamlProjectionClassId("Windows.Foundation.Collections.IObservableMap"))?.owner
+                        val collection = projection("Microsoft.UI.Xaml.Interop.INotifyCollectionChanged")
+                        val event = when {
+                            vector != null && watched.type.isSubtypeOfClass(vector.symbol) -> vector to "VectorChanged"
+                            map != null && watched.type.isSubtypeOfClass(map.symbol) -> map to "MapChanged"
+                            watched.type.isSubtypeOfClass(collection.symbol) -> collection to "CollectionChanged"
+                            else -> null
+                        }
+                        event?.let { (owner, name) -> +subscribeEvent(this, observerClass,
+                            observer(), state(), irGet(sourceObject), owner, name, changed) }
+                        +irUnit()
+                    }
                     if (sourceObject.type.isNullable()) +irIfThen(pluginContext.irBuiltIns.unitType,
                         irNotEquals(irGet(sourceObject), irNull(sourceObject.type)), subscribe)
                     else +subscribe
@@ -472,16 +487,33 @@ internal class XamlCompiledBindingBodies(
         changed: IrSimpleFunction, callback: ((IrBuilderWithScope, IrType) -> IrExpression)? = null): IrExpression = with(builder) {
         val add = owner.functions.single { it.name.asString() == "add$event" }
         val remove = owner.functions.single { it.name.asString() == "remove$event" }
-        val delegateType = add.parameters.single { it.kind == IrParameterKind.Regular }.type
+        val ownerType = xamlIrMemberType(source.type, owner, owner.defaultType).makeNotNull()
+        val delegateType = xamlIrMemberType(source.type, owner, add.parameters.single { it.kind == IrParameterKind.Regular }.type)
+        val removeType = xamlIrMemberType(source.type, owner, remove.parameters.single { it.kind == IrParameterKind.Regular }.type)
+        val addType = xamlIrMemberType(source.type, owner, add.returnType)
         irBlock {
+            val eventSource = irTemporary(irImplicitCast(source, ownerType))
             val handler = irTemporary(callback?.invoke(this, delegateType) ?: weakCallback(this, klass, changed, page, delegateType))
-            +irCall(add.symbol).apply { dispatchReceiver = source; arguments[1] = irGet(handler) }
+            val addCall = irCall(add.symbol).apply { type = addType; dispatchReceiver = irGet(eventSource); arguments[1] = irGet(handler) }
+            // CsWinRT EventSource owns the token returned by ABI add calls.
+            // Mapped INPC/INCC surfaces instead remove the original handler.
+            val registration = if (removeType == delegateType) {
+                +addCall
+                irGet(handler)
+            } else {
+                require(removeType == addType) { "XAML event ${owner.name}.$event has incompatible add/remove signatures" }
+                irGet(irTemporary(addCall))
+            }
             +irCall(requireNotNull(pluginContext.referenceClass(xamlBindingStateId)).owner.functions.single {
                 it.name.asString() == "trackEvent" }).apply {
                 dispatchReceiver = state
-                typeArguments[0] = owner.defaultType; typeArguments[1] = delegateType
-                arguments[1] = irImplicitCast(source, owner.defaultType); arguments[2] = irGet(handler)
-                arguments[3] = xamlFunctionReference(pluginContext, remove)
+                typeArguments[0] = ownerType; typeArguments[1] = removeType
+                arguments[1] = irGet(eventSource); arguments[2] = registration
+                arguments[3] = lambda(this@irBlock, listOf(ownerType, removeType)) { nested, parameters ->
+                    nested.irCall(remove.symbol).apply {
+                        dispatchReceiver = nested.irGet(parameters[0]); arguments[1] = nested.irGet(parameters[1])
+                    }
+                }
             }
         }
     }
@@ -511,8 +543,7 @@ internal class XamlCompiledBindingBodies(
         val delegateClass = requireNotNull(delegateType.classOrNull).owner
         val invoke = delegateClass.functions.single { it.name.asString() == "invoke" }
         val types = invoke.parameters.filter { it.kind == IrParameterKind.Regular }.map { parameter ->
-            val typeParameter = delegateClass.typeParameters.indexOfFirst { it.symbol == (parameter.type as? IrSimpleType)?.classifier }
-            (delegateType as? IrSimpleType)?.arguments?.getOrNull(typeParameter)?.typeOrNull ?: parameter.type
+            xamlIrMemberType(delegateType, delegateClass, parameter.type)
         }
         require(types.size == 2) { "Compiled event binding ${binding.name} requires a two-parameter WinRT delegate" }
         val callbackClass = if (scope == null) klass else requireNotNull(pluginContext.referenceClass(xamlBindingScopeId)).owner
@@ -590,16 +621,17 @@ internal class XamlCompiledBindingBodies(
         val setter = if (binding.bindBack != null) owner.functions.single {
             it.name.asString() == path.name && it.parameters.count { p -> p.kind == IrParameterKind.Regular } == 1
         } else requireNotNull(property(owner, requireNotNull(path.name))?.setter) { "TwoWay ${binding.name}: ${path.name} is read-only" }
-        val expected = setter.parameters.single { it.kind == IrParameterKind.Regular }.type
+        val expected = xamlIrMemberType(receiver.type, requireNotNull(setter.parentClassOrNull),
+            setter.parameters.single { it.kind == IrParameterKind.Regular }.type)
         val value = if (binding.converter == null) target else converter(builder, klass, converterRoot(), binding, target, expected, back = true)
         nullableCall(receiver, pluginContext.irBuiltIns.unitType, builder) { objectValue -> irCall(setter.symbol).apply {
             dispatchReceiver = objectValue; arguments[1] = convert(value, expected, builder, binding.name)
         } }
     }
 
-    private fun members(expression: WinRTXamlBindingExpression): List<WinRTXamlBindingExpression> =
-        (if (expression.kind == "member") listOf(expression) else emptyList()) +
-            expression.receiver?.let(::members).orEmpty() + expression.arguments.flatMap(::members)
+    private fun trackedPaths(expression: WinRTXamlBindingExpression): List<WinRTXamlBindingExpression> =
+        (if (expression.kind == "member" || expression.kind == "index") listOf(expression) else emptyList()) +
+            expression.receiver?.let(::trackedPaths).orEmpty() + expression.arguments.flatMap(::trackedPaths)
 
     private fun evaluate(expression: WinRTXamlBindingExpression, builder: IrBuilderWithScope, klass: IrClass,
         root: () -> IrExpression, expected: IrType? = null,
@@ -625,16 +657,18 @@ internal class XamlCompiledBindingBodies(
                         (it?.origin as? IrDeclarationOrigin.GeneratedByPlugin)?.pluginKey == XamlDeclarationKey
                     }?.backingField?.takeIf { it.type.isNullable() }
                     if (field != null) nullableCall(receiver, field.type, builder) { target -> irGetField(target, field) }
-                    else nullableCall(receiver, getter.returnType, builder) { target -> irCall(getter.symbol).apply { dispatchReceiver = target } }
+                    else {
+                        val valueType = xamlIrMemberType(receiver.type, requireNotNull(getter.parentClassOrNull), getter.returnType)
+                        nullableCall(receiver, valueType, builder) { target -> irCall(getter.symbol).apply { type = valueType; dispatchReceiver = target } }
+                    }
                 }
             }
             "call", "index" -> {
                 val receiver = evaluate(requireNotNull(expression.receiver), builder, klass, root, namedTargets = namedTargets)
-                val name = if (expression.kind == "index") "get" else requireNotNull(expression.name).replaceFirstChar(Char::lowercase)
-                val candidates = requireNotNull(receiver.type.classOrNull).owner.functions.filter {
-                    (it.name.asString() == name || it.name.asString() == expression.name) &&
+                val name = if (expression.kind == "index") "get" else requireNotNull(expression.name)
+                val candidates = functions(requireNotNull(receiver.type.classOrNull).owner, name).filter {
                         it.parameters.count { p -> p.kind == IrParameterKind.Regular } == expression.arguments.size
-                }.toList()
+                }
                 // Native scalar classes also expose typed equals overloads. Resolve
                 // the exact argument signature before reporting ambiguity, rather
                 // than assuming JVM's smaller built-in method set on both targets.
@@ -644,14 +678,19 @@ internal class XamlCompiledBindingBodies(
                     }
                     candidates.singleOrNull { candidate ->
                         candidate.parameters.filter { it.kind == IrParameterKind.Regular }
-                            .map { it.type.makeNotNull() } == argumentTypes
+                            .map { xamlIrMemberType(receiver.type, requireNotNull(candidate.parentClassOrNull), it.type).makeNotNull() } == argumentTypes
                     }
                 } ?: error("Missing or ambiguous compiled XAML method ${receiver.type.classFqName}.$name")
-                val parameters = function.parameters.filter { it.kind == IrParameterKind.Regular }
-                nullableCall(receiver, function.returnType, builder) { target -> irCall(function.symbol).apply {
+                val owner = requireNotNull(function.parentClassOrNull)
+                val parameters = function.parameters.filter { it.kind == IrParameterKind.Regular }.map {
+                    xamlIrMemberType(receiver.type, owner, it.type)
+                }
+                val returnType = xamlIrMemberType(receiver.type, owner, function.returnType)
+                nullableCall(receiver, returnType, builder) { target -> irCall(function.symbol).apply {
+                    type = returnType
                     dispatchReceiver = target
                     expression.arguments.forEachIndexed { index, argument -> arguments[index + 1] =
-                        convert(evaluate(argument, builder, klass, root, parameters[index].type, namedTargets), parameters[index].type, builder, name) }
+                        convert(evaluate(argument, builder, klass, root, parameters[index], namedTargets), parameters[index], builder, name) }
                 } }
             }
             "cast" -> {
