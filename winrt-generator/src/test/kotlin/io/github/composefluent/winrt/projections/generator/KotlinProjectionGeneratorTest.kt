@@ -4592,7 +4592,9 @@ class KotlinProjectionGeneratorTest {
         assertFalse(jsonObject, jsonObject.contains("override val nativeObject"))
         assertTrue(jsonObject, jsonObject.contains("fun getNamedString(name: String): String"))
         assertTrue(jsonObject, jsonObject.contains("fun setNamedValue(name: String, `value`: JsonValue)"))
-        assertTrue(jsonObject, jsonObject.contains("nativeObject.pointer"))
+        // CsWinRT code_writers.h compares runtime classes through ThisPtr on the default interface.
+        assertTrue(jsonObject, jsonObject.contains("_defaultInterface.pointer == other._defaultInterface.pointer"))
+        assertTrue(jsonObject, jsonObject.contains("_defaultInterface.pointer.hashCode()"))
         assertTrue(jsonObject, jsonObject.contains("fun parse(json: String): JsonObject"))
         assertFalse(jsonObject, jsonObject.contains("fun parse(json: String): JsonObject = error(\"WinRT ABI binding is unavailable\")"))
         assertTrue(jsonObject, jsonObject.projectionCallSiteCount() > 0)
