@@ -18,9 +18,9 @@ internal class HomePage : ItemsPageBase() {
     override fun initializeComponent() {
         super.initializeComponent()
         Items = ControlInfoDataSource.Items.sortedBy { it.Title }
-        loaded.add { _,_ ->
-            VisualStateManager.goToState(this,if (RecentlyVisitedSamplesList.isEmpty()) "NoRecent" else "Recent",false)
-            VisualStateManager.goToState(this,if (FavoriteSamplesList.isEmpty()) "NoFavorites" else "Favorites",false)
-        }
+        // Upstream HomePage.OnNavigatedTo applies these states before the first layout.
+        // Waiting for Loaded leaves an empty nested GridView visible during measurement.
+        VisualStateManager.goToState(this,if (RecentlyVisitedSamplesList.isEmpty()) "NoRecent" else "Recent",false)
+        VisualStateManager.goToState(this,if (FavoriteSamplesList.isEmpty()) "NoFavorites" else "Favorites",false)
     }
 }
