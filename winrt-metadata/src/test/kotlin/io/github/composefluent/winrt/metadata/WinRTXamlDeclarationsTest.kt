@@ -39,7 +39,7 @@ class WinRTXamlDeclarationsTest {
     @Test
     fun rejects_incompatible_or_ambiguous_declarations() {
         for (invalid in listOf(
-            fixture().replace("\"SchemaVersion\": 1", "\"SchemaVersion\": 2"),
+            fixture().replace("\"SchemaVersion\": 1", "\"SchemaVersion\": ${WinRTXamlDeclarations.SCHEMA_VERSION + 1}"),
             fixture().replace("MainPage.xaml", "../MainPage.xaml"),
             fixture().replace("named-elements", "unsupported-feature"),
             fixture().replace("\"Id\": 2", "\"Id\": 1"),
