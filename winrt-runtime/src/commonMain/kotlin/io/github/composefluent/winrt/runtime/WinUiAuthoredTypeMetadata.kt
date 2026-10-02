@@ -84,12 +84,14 @@ internal object WinUiAuthoredTypeMetadata {
         if (FeatureSwitches.traceCcw) {
             println("winrt-xaml-metadata: authored type=$name definition=${definition != null}")
         }
-        fun resolveBase(): RawAddress {
+        fun resolveBase(includeSystemStub: Boolean = true): RawAddress {
             val authored = tryCreate(baseName, resolveType)
             if (!PlatformAbi.isNull(authored)) return authored
             val sdkType = resolveType(baseName)
             if (!PlatformAbi.isNull(sdkType)) return sdkType
-            return definition?.baseType?.let { createSystemType(baseName, it) } ?: PlatformAbi.nullPointer
+            return if (includeSystemStub) {
+                definition?.baseType?.let { createSystemType(baseName, it) } ?: PlatformAbi.nullPointer
+            } else PlatformAbi.nullPointer
         }
         // Generated XamlTypeInfo includes system-type entries when the SDK provider omits them.
         val base = resolveBase()
@@ -168,6 +170,7 @@ internal object WinUiAuthoredTypeMetadata {
                         }
                     }, // CreateFromString
                     WinRTInspectableMethodDefinition(ComMethodSignatures.HResult_Ptr_Ptr) { args ->
+                        PlatformAbi.writePointer(args[1] as RawAddress, PlatformAbi.nullPointer)
                         val memberName = HString.fromHandle(args[0] as RawAddress, owner = false).use { it.toKString() }
                         val member = definition?.members?.get(memberName)
                         if (FeatureSwitches.traceCcw) {
@@ -177,10 +180,12 @@ internal object WinUiAuthoredTypeMetadata {
                             PlatformAbi.writePointer(args[1] as RawAddress, createMember(definition, member, resolveType))
                             KnownHResults.S_OK.value
                         } else {
-                            val pointer = resolveBase()
+                            // CSharpTypeInfoPass2's XamlUserType returns null for a
+                            // missing member. Its system base describes type identity
+                            // only; asking that stub for members would return E_NOTIMPL.
+                            val pointer = resolveBase(includeSystemStub = false)
                             if (PlatformAbi.isNull(pointer)) {
-                                PlatformAbi.writePointer(args[1] as RawAddress, PlatformAbi.nullPointer)
-                                KnownHResults.E_NOINTERFACE.value
+                                KnownHResults.S_OK.value
                             } else IUnknownReference(pointer.asRawComPtr(), WinUiXamlInterfaceIds.IXamlType).use {
                                 ComVtableInvoker.invokeArgs(it.pointer, 21, args[0] as RawAddress, args[1] as RawAddress)
                             }
