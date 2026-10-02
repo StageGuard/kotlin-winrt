@@ -117,9 +117,9 @@ internal class XamlCompiledBindingBodies(
                 converter(this, klass, converterRoot(), binding, irGet(source), targetType)
             val value = if (alternate != null && source.type.isNullable()) irIfThenElse(targetType,
                 irEquals(irGet(source), irNull(source.type)),
-                convert(evaluate(alternate, this, klass, root, targetType, namedTargets), targetType, this, location),
-                convert(converted, targetType, this, location)) else convert(converted, targetType, this, location)
-            val skipNull = source.type.isNullable() && !targetType.isNullable() && alternate == null && binding.converter == null
+                bindingValue(evaluate(alternate, this, klass, root, targetType, namedTargets), targetType, this, location),
+                bindingValue(converted, targetType, this, location)) else bindingValue(converted, targetType, this, location)
+            val skipNull = source.type.isNullable() && !targetType.isNullable() && !targetType.isString() && alternate == null && binding.converter == null
             val assignedValue = irTemporary(if (skipNull) irGet(source) else value)
             fun IrBuilderWithScope.assignment(): IrExpression = if (binding.isLoad)
                 requireNotNull(loadAssignment)(this, irGet(assignedValue)) else targetAssignment(this, binding,
@@ -732,6 +732,18 @@ internal class XamlCompiledBindingBodies(
                 irImplicitCast(call(irImplicitCast(irGet(source), source.type.makeNotNull())), resultType.makeNullable()),
                 irNull(resultType.makeNullable()))
         }
+    }
+
+    private fun bindingValue(value: IrExpression, expected: IrType, builder: IrBuilderWithScope, location: String): IrExpression = with(builder) {
+        // CSharp XamlBindingSetters can pass null strings to the SDK. CsWinRT
+        // MarshalString maps those to the empty HSTRING; Kotlin SDK strings are
+        // non-null, so perform that adaptation before calling their setters.
+        if (expected.isString() && !expected.isNullable() && value.type.isNullable()) return irBlock(resultType = expected) {
+            val present = irTemporary(value)
+            +irIfThenElse(expected, irEquals(irGet(present), irNull(present.type)), irString(""),
+                convert(irImplicitCast(irGet(present), present.type.makeNotNull()), expected, this, location))
+        }
+        convert(value, expected, builder, location)
     }
 
     private fun convert(value: IrExpression, expected: IrType, builder: IrBuilderWithScope, location: String): IrExpression = with(builder) {
