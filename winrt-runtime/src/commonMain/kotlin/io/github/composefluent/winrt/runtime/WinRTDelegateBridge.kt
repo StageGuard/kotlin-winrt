@@ -186,6 +186,7 @@ object WinRTDelegateBridge {
         return WinRTDelegateHandle(
             descriptor = descriptor,
             callback = callback,
+            managedTarget = managedTarget,
             comObject = comObject,
             releaseAction = comObject::releaseManagedReference,
         )

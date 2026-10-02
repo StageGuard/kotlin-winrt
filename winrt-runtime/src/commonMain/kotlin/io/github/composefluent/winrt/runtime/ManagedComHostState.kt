@@ -339,7 +339,15 @@ internal class ManagedComHostState(
             if (current == managedComRootTransitionCount ||
                 !referenceCount.compareAndSet(current, managedComRootTransitionCount)
             ) continue
+            var publishedState = current
             try {
+                // A native AddRef may escape a borrowed call while a tracker pin still keeps
+                // the target alive. Publish its independent COM root before removing that pin.
+                if (current.isBorrowReadyReferenceCount() && current.managedComReferenceCount() > 1 &&
+                    rootReference.tryPin(null)
+                ) {
+                    publishedState = current.managedComReferenceCount().toLong()
+                }
                 if (pegged != null) trackerPegged = pegged
                 if (trackerReferenceCount.load() > 0 &&
                     (trackerPegged || ReferenceTrackerManager.isGlobalPeggingEnabled)
@@ -349,7 +357,7 @@ internal class ManagedComHostState(
                     rootReference.unpinTracker()
                 }
             } finally {
-                referenceCount.store(current)
+                referenceCount.store(publishedState)
             }
             return
         }

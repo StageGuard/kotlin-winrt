@@ -85,6 +85,10 @@ internal object ReferenceTrackerManager {
         val releases = lock.withLock {
             disconnectedReleases.toList().also { disconnectedReleases.clear() }
         }
+        releaseAll(releases)
+    }
+
+    private fun releaseAll(releases: List<() -> Unit>) {
         var failure: Throwable? = null
         releases.forEach { release ->
             runCatching(release).onFailure { error ->
@@ -207,7 +211,8 @@ internal object ReferenceTrackerManager {
                 collecting = false
                 finalizerReleases.toList().also { finalizerReleases.clear() }
             }
-            releases.forEach { it() }
+            // A failed release must not strand the other references queued by this collection.
+            releaseAll(releases)
         }
     }
 
