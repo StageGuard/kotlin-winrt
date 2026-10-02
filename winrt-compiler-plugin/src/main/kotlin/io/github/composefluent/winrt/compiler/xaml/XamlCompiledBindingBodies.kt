@@ -36,12 +36,13 @@ internal class XamlCompiledBindingBodies(
     private fun method(klass: IrClass, name: Name) = klass.functions.single { it.name == name }
     private fun property(klass: IrClass, name: String): IrProperty? = xamlIrProperty(klass, name)
     private fun functions(klass: IrClass, name: String): List<IrSimpleFunction> = xamlIrFunctions(klass, name)
+    private fun staticOwner(klass: IrClass): IrClass =
+        if (klass.kind == ClassKind.OBJECT) klass else requireNotNull(klass.companionObject())
 
     private fun targetAccessor(binding: WinRTXamlBindingDeclaration, write: Boolean): IrSimpleFunction {
         val owner = projection(binding.declaringTypeName)
         return if (binding.isAttachable) {
-            val staticOwner = if (owner.kind == ClassKind.OBJECT) owner else requireNotNull(owner.companionObject())
-            functions(staticOwner, "${if (write) "Set" else "Get"}${binding.name}").single()
+            functions(staticOwner(owner), "${if (write) "Set" else "Get"}${binding.name}").single()
         } else requireNotNull(property(owner, binding.name)?.let { if (write) it.setter else it.getter }) {
             "No ${if (write) "setter" else "getter"} for ${binding.declaringTypeName}.${binding.name}"
         }
@@ -57,6 +58,18 @@ internal class XamlCompiledBindingBodies(
         }
     }
 
+    private fun targetValue(builder: IrBuilderWithScope, binding: WinRTXamlBindingDeclaration,
+        target: IrExpression): IrExpression = with(builder) {
+        val getter = targetAccessor(binding, false)
+        irCall(getter.symbol).apply {
+            if (binding.isAttachable) {
+                dispatchReceiver = irGetObject(requireNotNull(getter.parentClassOrNull).symbol)
+                val parameter = getter.parameters.single { it.kind == IrParameterKind.Regular }
+                arguments[1] = convert(target, parameter.type, this@with, binding.name)
+            } else dispatchReceiver = convert(target, projection(binding.declaringTypeName).defaultType, this@with, binding.name)
+        }
+    }
+
     /** CSharpPagePass2.DisconnectUnloadedObject preserves the current typed target values.
      * In particular, OneTime values must survive unload/reload without reevaluating the source.
      */
@@ -69,16 +82,8 @@ internal class XamlCompiledBindingBodies(
             val element = irTemporary(current())
             +irIfThen(pluginContext.irBuiltIns.unitType, irNotEquals(irGet(element), irNull(element.type)), irBlock {
                 for (binding in bindings) {
-                    val getter = targetAccessor(binding, false)
                     val setter = targetAccessor(binding, true)
-                    val value = irTemporary(irCall(getter.symbol).apply {
-                        if (binding.isAttachable) {
-                            dispatchReceiver = irGetObject(requireNotNull(getter.parentClassOrNull).symbol)
-                            arguments[1] = convert(irGet(element), getter.parameters.single { it.kind == IrParameterKind.Regular }.type,
-                                this@irBlock, binding.name)
-                        } else dispatchReceiver = convert(irGet(element), projection(binding.declaringTypeName).defaultType,
-                            this@irBlock, binding.name)
-                    })
+                    val value = irTemporary(targetValue(this, binding, irGet(element)))
                     +irCall(requireNotNull(pluginContext.referenceClass(xamlBindingStateId)).owner.functions.single {
                         it.name.asString() == "defer"
                     }).apply {
@@ -111,34 +116,56 @@ internal class XamlCompiledBindingBodies(
             +irCall(stateClass.functions.single { it.name.asString() == "trackPhase" }).apply {
                 dispatchReceiver = state(); arguments[1] = irInt(binding.phase)
             }
-            val source = irTemporary(evaluate(binding.expression, this, klass, root, targetType, namedTargets))
-            val alternate = binding.targetNullValue ?: binding.fallbackValue
-            val converted = if (binding.converter == null) irGet(source) else
-                converter(this, klass, converterRoot(), binding, irGet(source), targetType)
-            val value = if (alternate != null && source.type.isNullable()) irIfThenElse(targetType,
-                irEquals(irGet(source), irNull(source.type)),
-                bindingValue(evaluate(alternate, this, klass, root, targetType, namedTargets), targetType, this, location),
-                bindingValue(converted, targetType, this, location)) else bindingValue(converted, targetType, this, location)
-            val skipNull = source.type.isNullable() && !targetType.isNullable() && !targetType.isString() && alternate == null && binding.converter == null
-            val assignedValue = irTemporary(if (skipNull) irGet(source) else value)
-            fun IrBuilderWithScope.assignment(): IrExpression = if (binding.isLoad)
-                requireNotNull(loadAssignment)(this, irGet(assignedValue)) else targetAssignment(this, binding,
-                    requireNotNull(setter), target(), convert(irGet(assignedValue), targetType, this, location))
-            val assignment = if (targetPresent == null || binding.isLoad) assignment() else irIfThenElse(
-                pluginContext.irBuiltIns.unitType, targetPresent(this), assignment(),
-                irCall(stateClass.functions.single { it.name.asString() == "defer" }).apply {
-                    dispatchReceiver = state(); arguments[1] = irInt(connection.id); arguments[2] = irString(binding.name)
-                    arguments[3] = lambda(this@irBlock, emptyList()) { nested, _ -> nested.assignment() }
-                })
-            if (skipNull)
-                +irIfThen(pluginContext.irBuiltIns.unitType, irNotEquals(irGet(source), irNull(source.type)), assignment)
-            else +assignment
+            // CSharpPagePass2.UpdateFallback handles absent parents separately from
+            // XamlBindingSetters' TargetNullValue, which applies after conversion.
+            val pathAvailable = irTemporary(irBoolean(true), "pathAvailable", isMutable = true)
+            val source = irTemporary(evaluate(binding.expression, this, klass, root, targetType, namedTargets, pathAvailable))
+            fun IrBuilderWithScope.assignment(value: IrValueDeclaration): IrExpression {
+                fun IrBuilderWithScope.setValue(): IrExpression = if (binding.isLoad)
+                    requireNotNull(loadAssignment)(this, irGet(value)) else targetAssignment(this, binding,
+                        requireNotNull(setter), target(), convert(irGet(value), targetType, this, location))
+                return if (targetPresent == null || binding.isLoad) setValue() else irIfThenElse(
+                    pluginContext.irBuiltIns.unitType, targetPresent(this), setValue(),
+                    irCall(stateClass.functions.single { it.name.asString() == "defer" }).apply {
+                        dispatchReceiver = state(); arguments[1] = irInt(connection.id); arguments[2] = irString(binding.name)
+                        arguments[3] = lambda(this@irBlock, emptyList()) { nested, _ -> nested.setValue() }
+                    })
+            }
+            val resolved = irBlock {
+                val converted = irTemporary(if (binding.converter == null) irGet(source) else
+                    converter(this, klass, converterRoot(), binding, irGet(source), targetType))
+                val alternate = binding.targetNullValue
+                val value = if (alternate != null && converted.type.isNullable()) irIfThenElse(targetType,
+                    irEquals(irGet(converted), irNull(converted.type)),
+                    bindingValue(evaluate(alternate, this, klass, root, targetType, namedTargets), targetType, this, location),
+                    bindingValue(irGet(converted), targetType, this, location)) else
+                    bindingValue(irGet(converted), targetType, this, location)
+                val skipNull = converted.type.isNullable() && !targetType.isNullable() && !targetType.isString() &&
+                    alternate == null && binding.converter == null
+                val assignedValue = irTemporary(if (skipNull) irGet(converted) else value)
+                if (skipNull) +irIfThen(pluginContext.irBuiltIns.unitType,
+                    irNotEquals(irGet(converted), irNull(converted.type)), assignment(assignedValue))
+                else +assignment(assignedValue)
+                +irUnit()
+            }
+            val fallback = binding.fallbackValue?.let { alternate -> irBlock {
+                val assignedValue = irTemporary(bindingValue(
+                    evaluate(alternate, this, klass, root, targetType, namedTargets), targetType, this, location))
+                +assignment(assignedValue)
+                +irUnit()
+            } }
+            if (fallback == null) +irIfThen(pluginContext.irBuiltIns.unitType, irGet(pathAvailable), resolved)
+            else +irIfThenElse(pluginContext.irBuiltIns.unitType, irGet(pathAvailable), resolved, fallback)
             if (binding.mode != "OneTime") {
                 for (expression in trackedPaths(binding.expression).distinct()) {
                     val watched = evaluate(requireNotNull(expression.receiver), this, klass, root, namedTargets = namedTargets)
                     val sourceClass = watched.type.classOrNull?.owner ?: continue
                     val sourceObject = irTemporary(watched)
-                    val dp = if (expression.kind == "member") dependencyProperty(sourceClass, requireNotNull(expression.name)) else null
+                    val dp = when (expression.kind) {
+                        "member" -> dependencyProperty(sourceClass, requireNotNull(expression.name))
+                        "attached" -> dependencyProperty(projection(requireNotNull(expression.typeName)), requireNotNull(expression.name))
+                        else -> null
+                    }
                     val notifier = projection("Microsoft.UI.Xaml.Data.INotifyPropertyChanged")
                     val subscribe = irBlock {
                         if (dp != null) +subscribeProperty(this, observerClass, observer(), state(), irGet(sourceObject), dp, changed)
@@ -268,8 +295,7 @@ internal class XamlCompiledBindingBodies(
                 for ((_, connections) in groups) for (connection in connections)
                     for (binding in connection.bindings.filter { it.mode == "TwoWay" && !it.isEvent }) {
                         branches += irBranch(irEquals(irGet(parameters[1]), irInt(writeBackIds.getValue(connection.id to binding.name))), irBlock {
-                            val getter = requireNotNull(property(projection(binding.declaringTypeName), binding.name)?.getter)
-                            val value = irCall(getter.symbol).apply { dispatchReceiver = target(scope, connection) }
+                            val value = targetValue(this, binding, target(scope, connection))
                             +writeBack(binding, value, this, klass, { source(scope, connections) },
                                 converterRoot = { irGet(requireNotNull(writeBack.dispatchReceiverParameter)) },
                                 namedTargets = { name, builder -> connections.firstOrNull { it.elementName == name }?.let { builder.target(scope, it) } })
@@ -374,10 +400,7 @@ internal class XamlCompiledBindingBodies(
             callback.body = DeclarationIrBuilder(pluginContext, callback.symbol).irBlockBody {
                 val receiver = requireNotNull(callback.dispatchReceiverParameter)
                 val target = properties.getValue(requireNotNull(connection.storageName()))
-                val getter = requireNotNull(property(projection(binding.declaringTypeName), binding.name)?.getter)
-                val value = irCall(getter.symbol).apply {
-                    dispatchReceiver = irCall(requireNotNull(target.getter).symbol).apply { dispatchReceiver = irGet(receiver) }
-                }
+                val value = targetValue(this, binding, irCall(requireNotNull(target.getter).symbol).apply { dispatchReceiver = irGet(receiver) })
                 val change = lambda(this, emptyList()) { builder, _ ->
                     writeBack(binding, value, builder, klass, { builder.irGet(receiver) })
                 }
@@ -618,32 +641,53 @@ internal class XamlCompiledBindingBodies(
         val expression = requireNotNull(path.receiver) { "TwoWay ${binding.name} requires a writable path" }
         val receiver = evaluate(expression, builder, klass, root, namedTargets = namedTargets)
         val owner = requireNotNull(receiver.type.classOrNull).owner
-        val setter = if (binding.bindBack != null) owner.functions.single {
-            it.name.asString() == path.name && it.parameters.count { p -> p.kind == IrParameterKind.Regular } == 1
-        } else requireNotNull(property(owner, requireNotNull(path.name))?.setter) { "TwoWay ${binding.name}: ${path.name} is read-only" }
-        val expected = xamlIrMemberType(receiver.type, requireNotNull(setter.parentClassOrNull),
-            setter.parameters.single { it.kind == IrParameterKind.Regular }.type)
+        val attached = binding.bindBack == null && path.kind == "attached"
+        val setter = when {
+            binding.bindBack != null -> functions(owner, requireNotNull(path.name)).single {
+                it.parameters.count { p -> p.kind == IrParameterKind.Regular } == 1
+            }
+            path.kind == "index" -> functions(owner, "set").ifEmpty { functions(owner, "put") }.single {
+                it.parameters.count { p -> p.kind == IrParameterKind.Regular } == path.arguments.size + 1
+            }
+            attached -> functions(staticOwner(projection(requireNotNull(path.typeName))), "Set${path.name}").single()
+            else -> requireNotNull(property(owner, requireNotNull(path.name))?.setter) { "TwoWay ${binding.name}: ${path.name} is read-only" }
+        }
+        val valueType = setter.parameters.last { it.kind == IrParameterKind.Regular }.type
+        val expected = if (attached) valueType else
+            xamlIrMemberType(receiver.type, requireNotNull(setter.parentClassOrNull), valueType)
         val value = if (binding.converter == null) target else converter(builder, klass, converterRoot(), binding, target, expected, back = true)
-        nullableCall(receiver, pluginContext.irBuiltIns.unitType, builder) { objectValue -> irCall(setter.symbol).apply {
-            dispatchReceiver = objectValue; arguments[1] = convert(value, expected, builder, binding.name)
+        nullableCall(receiver, pluginContext.irBuiltIns.unitType, builder) { objectValue -> irBlock {
+            +irCall(setter.symbol).apply {
+                dispatchReceiver = if (attached) irGetObject(requireNotNull(setter.parentClassOrNull).symbol) else objectValue
+                val parameters = setter.parameters.filter { it.kind == IrParameterKind.Regular }
+                if (attached) arguments[1] = convert(objectValue, parameters.first().type, this@irBlock, binding.name)
+                (if (path.kind == "index" && binding.bindBack == null) path.arguments else emptyList()).forEachIndexed { index, argument ->
+                    val parameter = xamlIrMemberType(receiver.type, requireNotNull(setter.parentClassOrNull), parameters[index].type)
+                    arguments[index + 1] = convert(evaluate(argument, this@irBlock, klass, root, parameter, namedTargets),
+                        parameter, this@irBlock, binding.name)
+                }
+                arguments[parameters.size] = convert(value, expected, this@irBlock, binding.name)
+            }
+            +irUnit()
         } }
     }
 
     private fun trackedPaths(expression: WinRTXamlBindingExpression): List<WinRTXamlBindingExpression> =
-        (if (expression.kind == "member" || expression.kind == "index") listOf(expression) else emptyList()) +
+        (if (expression.kind in setOf("member", "index", "attached")) listOf(expression) else emptyList()) +
             expression.receiver?.let(::trackedPaths).orEmpty() + expression.arguments.flatMap(::trackedPaths)
 
     private fun evaluate(expression: WinRTXamlBindingExpression, builder: IrBuilderWithScope, klass: IrClass,
         root: () -> IrExpression, expected: IrType? = null,
-        namedTargets: ((String, IrBuilderWithScope) -> IrExpression?)? = null): IrExpression = with(builder) {
+        namedTargets: ((String, IrBuilderWithScope) -> IrExpression?)? = null,
+        pathAvailable: IrVariable? = null): IrExpression = with(builder) {
         when (expression.kind) {
             "root" -> root()
             "static" -> {
                 val owner = projection(requireNotNull(expression.typeName))
-                irGetObject((if (owner.kind == ClassKind.OBJECT) owner else requireNotNull(owner.companionObject())).symbol)
+                irGetObject(staticOwner(owner).symbol)
             }
             "member" -> {
-                val receiver = evaluate(requireNotNull(expression.receiver), builder, klass, root, namedTargets = namedTargets)
+                val receiver = evaluate(requireNotNull(expression.receiver), builder, klass, root, namedTargets = namedTargets, pathAvailable = pathAvailable)
                 val sourceProperty = receiver.type.classOrNull?.owner?.let { property(it, requireNotNull(expression.name)) }
                 val getter = sourceProperty?.getter
                 val named = if (getter == null && expression.receiver?.kind == "root") namedTargets?.invoke(requireNotNull(expression.name), builder) else null
@@ -656,15 +700,15 @@ internal class XamlCompiledBindingBodies(
                     val field = sourceProperty.takeIf {
                         (it?.origin as? IrDeclarationOrigin.GeneratedByPlugin)?.pluginKey == XamlDeclarationKey
                     }?.backingField?.takeIf { it.type.isNullable() }
-                    if (field != null) nullableCall(receiver, field.type, builder) { target -> irGetField(target, field) }
+                    if (field != null) nullableCall(receiver, field.type, builder, pathAvailable) { target -> irGetField(target, field) }
                     else {
                         val valueType = xamlIrMemberType(receiver.type, requireNotNull(getter.parentClassOrNull), getter.returnType)
-                        nullableCall(receiver, valueType, builder) { target -> irCall(getter.symbol).apply { type = valueType; dispatchReceiver = target } }
+                        nullableCall(receiver, valueType, builder, pathAvailable) { target -> irCall(getter.symbol).apply { type = valueType; dispatchReceiver = target } }
                     }
                 }
             }
             "call", "index" -> {
-                val receiver = evaluate(requireNotNull(expression.receiver), builder, klass, root, namedTargets = namedTargets)
+                val receiver = evaluate(requireNotNull(expression.receiver), builder, klass, root, namedTargets = namedTargets, pathAvailable = pathAvailable)
                 val name = if (expression.kind == "index") "get" else requireNotNull(expression.name)
                 val candidates = functions(requireNotNull(receiver.type.classOrNull).owner, name).filter {
                         it.parameters.count { p -> p.kind == IrParameterKind.Regular } == expression.arguments.size
@@ -686,16 +730,25 @@ internal class XamlCompiledBindingBodies(
                     xamlIrMemberType(receiver.type, owner, it.type)
                 }
                 val returnType = xamlIrMemberType(receiver.type, owner, function.returnType)
-                nullableCall(receiver, returnType, builder) { target -> irCall(function.symbol).apply {
-                    type = returnType
-                    dispatchReceiver = target
-                    expression.arguments.forEachIndexed { index, argument -> arguments[index + 1] =
-                        convert(evaluate(argument, builder, klass, root, parameters[index], namedTargets), parameters[index], builder, name) }
-                } }
+                nullableCall(receiver, if (pathAvailable == null) returnType else returnType.makeNullable(), builder, pathAvailable) { target ->
+                    irBlock(resultType = if (pathAvailable == null) returnType else returnType.makeNullable()) {
+                        val targetObject = irTemporary(target)
+                        val argumentValues = expression.arguments.mapIndexed { index, argument -> irTemporary(
+                            evaluate(argument, this, klass, root, parameters[index], namedTargets, pathAvailable)) }
+                        val call = irCall(function.symbol).apply {
+                            type = returnType
+                            dispatchReceiver = irGet(targetObject)
+                            argumentValues.forEachIndexed { index, value -> this.arguments[index + 1] =
+                                convert(irGet(value), parameters[index], this@irBlock, name) }
+                        }
+                        +if (pathAvailable == null) call else irIfThenElse(returnType.makeNullable(), irGet(pathAvailable),
+                            irImplicitCast(call, returnType.makeNullable()), irNull(returnType.makeNullable()))
+                    }
+                }
             }
             "cast" -> {
                 val target = projection(requireNotNull(expression.typeName)).defaultType
-                val value = evaluate(requireNotNull(expression.receiver), builder, klass, root, namedTargets = namedTargets)
+                val value = evaluate(requireNotNull(expression.receiver), builder, klass, root, namedTargets = namedTargets, pathAvailable = pathAvailable)
                 // CSharpPagePass2 propagates nullable path steps before updating
                 // their children. A cast must preserve an absent selection too.
                 nullableCall(value, target, builder) { present ->
@@ -705,10 +758,11 @@ internal class XamlCompiledBindingBodies(
                 }
             }
             "attached" -> {
-                val owner = requireNotNull(projection(requireNotNull(expression.typeName)).companionObject())
-                val getter = owner.functions.single { it.name.asString() == "get${expression.name}" }
-                val receiver = evaluate(requireNotNull(expression.receiver), builder, klass, root, namedTargets = namedTargets)
-                nullableCall(receiver, getter.returnType, builder) { target -> irCall(getter.symbol).apply {
+                val declaringType = projection(requireNotNull(expression.typeName))
+                val owner = staticOwner(declaringType)
+                val getter = functions(owner, "Get${expression.name}").single()
+                val receiver = evaluate(requireNotNull(expression.receiver), builder, klass, root, namedTargets = namedTargets, pathAvailable = pathAvailable)
+                nullableCall(receiver, getter.returnType, builder, pathAvailable) { target -> irCall(getter.symbol).apply {
                     dispatchReceiver = irGetObject(owner.symbol); arguments[1] = target
                 } }
             }
@@ -725,12 +779,16 @@ internal class XamlCompiledBindingBodies(
     }
 
     private fun nullableCall(receiver: IrExpression, resultType: IrType, builder: IrBuilderWithScope,
+        pathAvailable: IrVariable? = null,
         call: (IrExpression) -> IrExpression): IrExpression = with(builder) {
         if (!receiver.type.isNullable()) call(receiver) else irBlock(resultType = resultType.makeNullable()) {
             val source = irTemporary(receiver)
             +irIfThenElse(resultType.makeNullable(), irNotEquals(irGet(source), irNull(source.type)),
                 irImplicitCast(call(irImplicitCast(irGet(source), source.type.makeNotNull())), resultType.makeNullable()),
-                irNull(resultType.makeNullable()))
+                irBlock(resultType = resultType.makeNullable()) {
+                    pathAvailable?.let { +irSet(it, irBoolean(false)) }
+                    +irNull(resultType.makeNullable())
+                })
         }
     }
 
