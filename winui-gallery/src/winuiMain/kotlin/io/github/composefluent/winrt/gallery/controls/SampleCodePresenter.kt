@@ -18,6 +18,7 @@ import windows.ui.viewmanagement.AccessibilitySettings
 
 internal class SampleCodePresenter : UserControl() {
     private var ready = false
+    private var hasLoaded = false
     private var actualCode: String = ""
     private var sourceDocument: KotlinCodeDocument? = null
     fun SetDocument(value: KotlinCodeDocument) { sourceDocument = value; Refresh() }
@@ -39,11 +40,13 @@ internal class SampleCodePresenter : UserControl() {
     override fun initializeComponent() {
         super.initializeComponent(); ready = true
         listOf(CodeProperty, CodeSourceFileProperty, SampleTypeProperty, IsCopyButtonVisibleProperty).forEach { property -> registerPropertyChangedCallback(property) { _, _ -> Refresh() } }
-        unloaded.add { _, _ -> subscriptions.forEach { (value, listener) -> value.removeValueChanged(listener) }; subscriptions.clear() }
+        unloaded.add { _, _ -> hasLoaded = false; subscriptions.forEach { (value, listener) -> value.removeValueChanged(listener) }; subscriptions.clear() }
         GalleryTheme.observe(this) { Refresh() }; Refresh()
     }
     private fun Refresh() {
-        if (!ready) return
+        // Upstream awaits the sample file before substitution. Our cached source
+        // is synchronous, so wait for Loaded and the initial x:Bind assignments.
+        if (!ready || !hasLoaded) return
         val original = sourceDocument ?: if (Code.isNotEmpty()) KotlinCodeDocument("inline.xaml", Code, listOf(KotlinCodeSpan(Code.length, KotlinCodeKind.Plain))) else GalleryCodeCatalog.sourceDocument(CodeSourceFile)
         visibility = if (original == null || original.source.isBlank()) Visibility.Collapsed else Visibility.Visible
         if (original == null) return
@@ -61,7 +64,7 @@ internal class SampleCodePresenter : UserControl() {
         text.selectionChanged.add { _, _ -> CopyButtonBorder.visibility = if (IsCopyButtonVisible && text.selectedText.isEmpty()) Visibility.Visible else Visibility.Collapsed }
         Substitutions.filterNot(subscriptions::containsKey).forEach { value -> val listener: () -> Unit = { Refresh() }; subscriptions[value] = listener; value.addValueChanged(listener) }
     }
-    private fun SampleCodePresenter_Loaded(sender: Any?, args: RoutedEventArgs) { Refresh() }
+    private fun SampleCodePresenter_Loaded(sender: Any?, args: RoutedEventArgs) { hasLoaded = true; Refresh() }
     private fun CodePresenter_Loaded(sender: Any?, args: RoutedEventArgs) { Refresh() }
     private fun SampleCodePresenter_ActualThemeChanged(sender: FrameworkElement, args: Any?) { Refresh() }
     private fun CopyCodeButton_Click(sender: Any?, args: RoutedEventArgs) { Clipboard.setContent(DataPackage().apply { setText(actualCode) }) }
