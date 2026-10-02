@@ -2,13 +2,19 @@ package io.github.composefluent.winrt.gallery.models
 
 import io.github.composefluent.winrt.gallery.*
 import io.github.composefluent.winrt.runtime.WinRTObservableList
+import microsoft.ui.xaml.media.ImageSource
+import microsoft.ui.xaml.media.imaging.BitmapImage
+import windows.foundation.Uri
 
 internal class ControlInfoDataItem(private val page: GalleryPageInfo) {
     val UniqueId: String get() = page.id
     val Title: String get() = page.title
     val Subtitle: String get() = page.subtitle
     val Description: String get() = page.description
-    val ImagePath: String get() = page.image
+    // An absent catalog image is a null source, not an empty URI to convert.
+    val ImagePath: ImageSource? by lazy {
+        page.image.takeIf { it.isNotEmpty() }?.let { BitmapImage(Uri(it)) }
+    }
     val BadgeString: String get() = if (page.isNew) "New" else if (page.isUpdated) "Updated" else ""
     val Tags: List<String> get() = page.tags
     val ApiNamespace: String get() = page.apiNamespace
