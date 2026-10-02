@@ -19,13 +19,14 @@ implemented by the compiler pipeline. The 355 independent sample documents live 
 `SampleDefinitions/<Route>/*.txt`; pure markup examples display one XAML tab.
 Complete page code is not repeated in each source expander.
 
-Both targets passed activation checks for all 122 routes: the requested route
-was received, a live window opened, and no navigation or initialization error
-was reported. The TitleBar sample synchronizes the native window caption with
-its XAML `TitleBox` value, `WinUI Gallery`; its JVM activation was rechecked
-using that caption rather than the shell's default `Kotlin WinUI Gallery`.
+The table records preliminary direct-executable load checks for all 122 routes
+on both targets. These short checks reported a live window and no immediate
+navigation or initialization error. Direct execution does not give the process
+MSIX package identity, and short observation missed later layout and binding
+failures. The table does not establish Start-menu launch, sustained stability,
+or complete interaction acceptance.
 
-Compilation and route activation are separate acceptance states. Route load
+Compilation, direct route loading and packaged activation are separate states. Route load
 results below do not imply that all interactions or visual parity were checked.
 The existing Button/CheckBox/RepeatButton/ToggleButton/ToggleSwitch interaction
 checks passed on both targets. They cover
@@ -38,7 +39,7 @@ inspection. Native and IDE status are recorded independently.
 
 ## Existing route inventory
 
-| Route | Group | Kotlin / XAML | Baseline examples | JVM activation | Native activation |
+| Route | Group | Kotlin / XAML | Baseline examples | JVM preliminary load | Native preliminary load |
 | --- | --- | --- | ---: | --- | --- |
 | Home |  | [HomePage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/pages/HomePage.kt) / [XAML](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/pages/HomePage.xaml) | 0 | Passed | Passed |
 | SystemBackdrops | Styles | [SystemBackdropsPage.kt](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/styles/SystemBackdropsPage.kt) / [XAML](src/winuiMain/kotlin/io/github/composefluent/winrt/gallery/styles/SystemBackdropsPage.xaml) | 3 | Passed | Passed |
