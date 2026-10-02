@@ -503,8 +503,11 @@ internal object ValueBoxingInterop {
     fun readReferenceValue(interfaceId: Guid, pointer: RawAddress): Any? {
         val adapter = adapterForReferenceInterface(interfaceId)
             ?: throw WinRTInvalidCastException("Unsupported IReference interface id: $interfaceId", HResult(TYPE_E_TYPEMISMATCH))
-        return PlatformAbi.confinedScope().use { scope ->
-            val resultOut = PlatformAbi.allocateBytes(scope, adapter.abiLayout.byteSize, adapter.abiLayout.byteAlignment)
+        return acquireNativeStructScratchFrame(
+            sizeBytes = adapter.abiLayout.byteSize,
+            alignmentBytes = adapter.abiLayout.byteAlignment,
+        ).use { frame ->
+            val resultOut = frame.pointer
             val hr = ComVtableInvoker.invokeArgs(pointer.asRawComPtr(), 6, resultOut)
             WinRTPlatformApi.checkSucceededRaw(hr)
             try {
@@ -518,9 +521,16 @@ internal object ValueBoxingInterop {
     fun readReferenceArrayValue(interfaceId: Guid, pointer: RawAddress): Array<Any?>? {
         val adapter = adapterForReferenceArrayInterface(interfaceId)
             ?: throw WinRTInvalidCastException("Unsupported IReferenceArray interface id: $interfaceId", HResult(TYPE_E_TYPEMISMATCH))
-        return PlatformAbi.confinedScope().use { scope ->
-            val countOut = PlatformAbi.allocateInt32Slot(scope)
-            val dataOut = PlatformAbi.allocatePointerSlot(scope)
+        return acquireNativeStructScratchFrame(
+            sizeBytes = 2L * NativeAbiLayout.ADDRESS.byteSize,
+            alignmentBytes = NativeAbiLayout.ADDRESS.byteAlignment,
+        ).use { frame ->
+            val countOut = frame.pointer
+            val dataOut = PlatformAbi.slice(
+                frame.pointer,
+                NativeAbiLayout.ADDRESS.byteSize,
+                NativeAbiLayout.ADDRESS.byteSize,
+            )
             val hr = ComVtableInvoker.invokeArgs(pointer.asRawComPtr(), 6, countOut, dataOut)
             WinRTPlatformApi.checkSucceededRaw(hr)
             val length = PlatformAbi.readInt32(countOut)
