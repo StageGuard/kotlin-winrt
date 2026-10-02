@@ -28,6 +28,9 @@ internal class ManagedComInboundBinding(
     internal var strongValue = value.takeUnless { weak }
         private set
 
+    @kotlin.concurrent.Volatile
+    private var trackerValue: Any? = null
+
     private val platformHandle =
         platformCreateManagedComInboundBindingHandle(this, canonicalObjectMemory)
 
@@ -76,6 +79,16 @@ internal class ManagedComInboundBinding(
 
     override fun tryPin(knownManagedValue: Any?): Boolean =
         if (knownManagedValue == null) pin() else pinKnownValue(knownManagedValue)
+
+    override fun tryPinTracker(): Boolean {
+        if (!weak || trackerValue != null) return true
+        trackerValue = get() ?: return false
+        return true
+    }
+
+    override fun unpinTracker() {
+        trackerValue = null
+    }
 
     internal fun attach(
         objectMemory: RawAddress,

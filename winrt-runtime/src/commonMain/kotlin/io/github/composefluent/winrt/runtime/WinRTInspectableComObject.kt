@@ -604,6 +604,14 @@ internal class WinRTInspectableComObject(
                 // event sources alive while a tracker reference is held.
                 0 -> return@runCatching addTrackerReference()
                 1 -> return@runCatching releaseTrackerReference()
+                2 -> {
+                    state.setTrackerPeg(true)
+                    return@runCatching KnownHResults.S_OK.value
+                }
+                3 -> {
+                    state.setTrackerPeg(false)
+                    return@runCatching KnownHResults.S_OK.value
+                }
             }
         }
         method.hostHandler?.invoke(this, managedValue, rawArguments)
@@ -833,6 +841,9 @@ internal class WinRTInspectableComObject(
 
         internal fun tryProbeReferenceCount(pointer: RawAddress): UInt? =
             findRegisteredInboundBinding(pointer)?.host?.tryProbeReferenceCount()
+
+        internal fun trackerReferenceCount(pointer: RawAddress): Int =
+            findRegisteredInboundBinding(pointer)?.host?.state?.currentTrackerReferenceCount() ?: 0
 
         internal fun inspectableBox(
             value: Any?,

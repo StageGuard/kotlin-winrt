@@ -19,6 +19,7 @@ internal class RawComObjectReferenceSupport(
     private var referenceTrackerPointer: RawComPtr = PlatformAbi.nullComPtr
     private var referenceTrackerRegistrationKey: Long = 0L
     private var releaseTrackerSourceOnDispose: Boolean = false
+    private var trackerSource: PlatformManagedWeakReference<ReferenceTrackerSource>? = null
     private var objectContext =
         if (trackContext) {
             ObjectReferenceContext.capture(
@@ -46,6 +47,10 @@ internal class RawComObjectReferenceSupport(
     fun pointerForCurrentContext(): RawComPtr =
         objectContext?.pointerForCurrentContext() ?: pointer
 
+    internal fun setTrackerSource(source: ReferenceTrackerSource) {
+        trackerSource = PlatformManagedWeakReference(source)
+    }
+
     fun attachReferenceTracker(
         trackerPointer: RawComPtr,
         addRefForObjectReference: Boolean,
@@ -64,7 +69,10 @@ internal class RawComObjectReferenceSupport(
                 knownInterfaceId = knownInterfaceId,
             )
         }
-        referenceTrackerRegistrationKey = ReferenceTrackerManager.attach(trackerPointer)
+        referenceTrackerRegistrationKey = ReferenceTrackerManager.attach(
+            trackerPointer,
+            requireNotNull(trackerSource) { "A tracker source must belong to a managed COM reference." },
+        )
         referenceTrackerPointer = trackerPointer
         retainTrackerPointer(trackerPointer)
         addRefFromTrackerSourceCallback(trackerPointer)
@@ -209,10 +217,15 @@ internal class RawComObjectReferenceSupport(
                     releaseReferencesAndContext()
                 }
             }
-            if (deferContextRelease && context != null) {
-                context.deferToOriginalContext(disconnectAndRelease)
-            } else {
-                context?.callInOriginalContext(disconnectAndRelease, disconnectAndRelease) ?: disconnectAndRelease()
+            val releaseInContext = {
+                if (deferContextRelease && context != null) {
+                    context.deferToOriginalContext(disconnectAndRelease)
+                } else {
+                    context?.callInOriginalContext(disconnectAndRelease, disconnectAndRelease) ?: disconnectAndRelease()
+                }
+            }
+            if (!ReferenceTrackerManager.deferFinalizerRelease(releaseInContext)) {
+                releaseInContext()
             }
         }
     }

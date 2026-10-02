@@ -10,6 +10,10 @@ internal class ComPtr private constructor(
     referenceTrackerPointer: RawComPtr,
     @PublishedApi internal val support: RawComObjectReferenceSupport,
 ) : AutoCloseable {
+    // Own the native-to-managed edges on the RCW itself. Putting these on `support`
+    // would root them through its cleaner and make a cross-heap cycle permanent.
+    internal val trackerSource = ReferenceTrackerSource()
+
     @PublishedApi
     internal val raw: RawComPtr
         get() = support.pointerForCurrentContext()
@@ -21,6 +25,7 @@ internal class ComPtr private constructor(
     )
 
     init {
+        support.setTrackerSource(trackerSource)
         if (!PlatformAbi.isNull(referenceTrackerPointer)) {
             support.attachReferenceTracker(
                 trackerPointer = referenceTrackerPointer,
@@ -287,6 +292,9 @@ internal fun closeComPtrSupport(support: RawComObjectReferenceSupport) {
 }
 
 internal fun closeComPtrSupportFromFinalizer(support: RawComObjectReferenceSupport) {
+    if (ReferenceTrackerManager.deferFinalizerRelease { closeComPtrSupportFromFinalizer(support) }) {
+        return
+    }
     support.close(
         releaseFromTrackerSourceCallback = ::invokeReferenceTrackerReleaseOnPointer,
         releaseTrackerPointer = ::invokeIUnknownReleaseOnPointer,
