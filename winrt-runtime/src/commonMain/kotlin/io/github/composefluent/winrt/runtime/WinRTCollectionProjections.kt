@@ -59,8 +59,6 @@ open class WinRTReferenceValueAdapter<T>(
             action.invoke(inputAbi, resultOut)
         }
 
-    internal open fun asDirectHStringInputOrNull(value: T): String? = null
-
     open fun createOutputMarshaler(value: T): WinRTObjectMarshaler =
         marshaller(value).let { reference ->
             WinRTObjectMarshaler(reference.getRefPointer().asRawAddress(), reference::close)
@@ -114,8 +112,6 @@ object WinRTReferenceValueAdapters {
             marshaller = { value -> ComWrappersSupport.createCCWForObject(value, IID.NullableString) },
         ) {
             override val abiValueIsComReference: Boolean = false
-
-            override fun asDirectHStringInputOrNull(value: String): String = value
 
             override fun createInputMarshaler(value: String): WinRTObjectMarshaler {
                 val marshaler = NativeStringMarshaller.createMarshaler(value)
@@ -1068,7 +1064,13 @@ object WinRTReadOnlyDictionaryProjection {
         override val primaryTypeHandle: WinRTTypeHandle,
     ) : AbstractMap<K, V>(), IWinRTObject, AutoCloseable {
         private val lookupAction = RawAddressPairAction<V?> { keyAbi, resultOut ->
-            mapView.lookupProjectedOrNull(keyAbi, resultOut, valueAdapter)
+            // CsWinRT IReadOnlyDictionaryMethods.TryGetValue checks HasKey before Lookup.
+            // Keep the input marshaler alive across both calls instead of marshaling the key twice.
+            if (mapView.hasKey(keyAbi)) {
+                mapView.lookupProjectedOrNull(keyAbi, resultOut, valueAdapter)
+            } else {
+                null
+            }
         }
 
         override val nativeObject: ComObjectReference
@@ -1098,16 +1100,8 @@ object WinRTReadOnlyDictionaryProjection {
                 mapView.hasKey(keyAbi)
             }
 
-        override fun get(key: K): V? {
-            // CsWinRT IReadOnlyDictionaryMethods.TryGetValue checks HasKey before Lookup.
-            if (!containsKey(key)) return null
-            val directHString = keyAdapter.asDirectHStringInputOrNull(key)
-            return if (directHString == null) {
-                keyAdapter.withInputAbiAndPointerOutRaw(key, lookupAction)
-            } else {
-                mapView.lookupProjectedOrNull(directHString, valueAdapter)
-            }
-        }
+        override fun get(key: K): V? =
+            keyAdapter.withInputAbiAndPointerOutRaw(key, lookupAction)
 
         override fun close() {
             mapView.close()
@@ -1244,7 +1238,14 @@ object WinRTDictionaryProjection {
         override val primaryTypeHandle: WinRTTypeHandle,
     ) : AbstractMutableMap<K, V>(), IWinRTObject, AutoCloseable {
         private val lookupAction = RawAddressPairAction<V?> { keyAbi, resultOut ->
-            map.lookupProjectedOrNull(keyAbi, resultOut, valueAdapter)
+            // CsWinRT IDictionaryMethods.TryGetValue checks HasKey first. In particular,
+            // XAML ResourceDictionary.Lookup reports E_FAIL for an absent resource key.
+            // Keep the input marshaler alive across both calls instead of marshaling the key twice.
+            if (map.hasKey(keyAbi)) {
+                map.lookupProjectedOrNull(keyAbi, resultOut, valueAdapter)
+            } else {
+                null
+            }
         }
 
         override val nativeObject: ComObjectReference
@@ -1284,17 +1285,8 @@ object WinRTDictionaryProjection {
             return previous
         }
 
-        override fun get(key: K): V? {
-            // CsWinRT IDictionaryMethods.TryGetValue checks HasKey first. In particular,
-            // XAML ResourceDictionary.Lookup reports E_FAIL for an absent resource key.
-            if (!containsKey(key)) return null
-            val directHString = keyAdapter.asDirectHStringInputOrNull(key)
-            return if (directHString == null) {
-                keyAdapter.withInputAbiAndPointerOutRaw(key, lookupAction)
-            } else {
-                map.lookupProjectedOrNull(directHString, valueAdapter)
-            }
-        }
+        override fun get(key: K): V? =
+            keyAdapter.withInputAbiAndPointerOutRaw(key, lookupAction)
 
         override fun remove(key: K): V? {
             val previous = get(key)
