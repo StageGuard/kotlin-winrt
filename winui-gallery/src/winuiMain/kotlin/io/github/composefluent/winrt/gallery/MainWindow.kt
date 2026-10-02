@@ -171,22 +171,6 @@ internal class MainWindow : winui3package.WindowEx() {
         query.isNotBlank() && (page.title.contains(query.trim(), true) || page.tags.any { it.contains(query.trim(), true) })
     }.sortedWith(compareBy({ !it.title.startsWith(query.trim(), true) }, { it.title }))
 
-    private fun canonicalRoute(route: String): String {
-        val raw = route.trim().trim('/').ifEmpty { "Home" }
-        return when (raw.lowercase()) {
-            // The reference catalog displays these titles while the generated
-            // factory keeps their stable route ids.  Accept both forms from
-            // cards, deep links, and projected NavigationView event payloads.
-            "style", "xamlstyle", "xamlstyles" -> "XamlStyles"
-            "tooltip", "tool-tip", "tool tip" -> "ToolTip"
-            else -> GalleryCatalog.pages.firstOrNull {
-                it.id.equals(raw, ignoreCase = true) || it.title.equals(raw, ignoreCase = true)
-            }?.id ?: GalleryCatalog.groups.firstOrNull {
-                it.id.equals(raw, ignoreCase = true) || it.title.equals(raw, ignoreCase = true)
-            }?.id ?: raw
-        }
-    }
-
     private fun updateNavigationSelection(route: String) {
         if (route.startsWith("Search:")) return
         val page = GalleryCatalog.pages.firstOrNull { it.id == route }
@@ -216,7 +200,7 @@ internal class MainWindow : winui3package.WindowEx() {
     }
 
     private fun navigate(route: String) {
-        val canonical = canonicalRoute(route)
+        val canonical = GalleryNavigationHost.resolveRoute(route) ?: route.trim().trim('/')
         if (canonical == current) {
             updateNavigationSelection(canonical)
             return

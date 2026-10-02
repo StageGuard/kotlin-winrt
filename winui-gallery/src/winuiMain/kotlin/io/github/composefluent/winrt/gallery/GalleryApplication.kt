@@ -20,15 +20,6 @@ class GalleryApplication : Application() {
 
     private var notifications: GalleryNotifications? = null
 
-    private fun resolveRoute(value: String): String? {
-        val route = value.trim('/')
-        return GalleryCatalog.pages.firstOrNull {
-            it.id.equals(route, ignoreCase = true) || it.title.equals(route, ignoreCase = true)
-        }?.id ?: GalleryCatalog.groups.firstOrNull {
-            it.id.equals(route, ignoreCase = true) || it.title.equals(route, ignoreCase = true)
-        }?.id
-    }
-
     override fun initializeComponent() {
         super.initializeComponent()
         unhandledException.add { _, args ->
@@ -91,7 +82,7 @@ class GalleryApplication : Application() {
                 // it in the path.  Accept both forms so protocol activation
                 // reaches the same page factory as in-app navigation.
                 val route = uri.path.trim('/').ifBlank { uri.host.trim('/') }
-                resolveRoute(route)?.let { resolved ->
+                GalleryNavigationHost.resolveRoute(route)?.let { resolved ->
                     if (uri.schemeName.equals("kotlin-winui-gallery", ignoreCase = true)) GalleryNavigationHost.navigate(resolved)
                 }
             }
@@ -103,7 +94,7 @@ class GalleryApplication : Application() {
                 } else {
                     raw
                 }
-                resolveRoute(route)?.let { resolved ->
+                GalleryNavigationHost.resolveRoute(route)?.let { resolved ->
                     println("Kotlin WinUI Gallery: launch route '$resolved'")
                     GalleryNavigationHost.navigate(resolved)
                 }

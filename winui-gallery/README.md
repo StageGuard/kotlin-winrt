@@ -76,6 +76,10 @@ favorites, recents, window retention, deep links and notifications stay in
 Kotlin. See [XAML_MIGRATION.md](XAML_MIGRATION.md) for the route inventory and
 actual acceptance state.
 
+Launch arguments and protocol activation use the same route resolver as
+in-app navigation. It accepts generated page and group IDs or titles, plus
+the shell routes `Home`, `All`, `Settings` and `Search:<query>`.
+
 ## Independent example sources
 
 The 355 independent example documents live in `SampleDefinitions/<Route>/*.txt`.
