@@ -66,6 +66,7 @@ class WinRTXamlBindingState {
             update(initial)
         } catch (error: Throwable) {
             active = false
+            deferredAssignments.clear()
             try { disconnect() } catch (cleanupError: Throwable) { error.addSuppressed(cleanupError) }
             throw error
         } finally {
