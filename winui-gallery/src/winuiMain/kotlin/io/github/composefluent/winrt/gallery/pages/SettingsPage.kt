@@ -12,6 +12,7 @@ internal class SettingsPage(private val root: FrameworkElement,private val theme
     private val clearRecents: () -> Unit,private val clearFavorites: () -> Unit) : Page() {
     private val tasks = GalleryPageTasks(this)
     private var ready = false
+    val AboutTitle: String get() = "Kotlin WinUI Gallery ($galleryTargetName)"
     val Version: String get() = if (GalleryPreferences.packaged) checkNotNull(checkNotNull(Package.current).id).version.let { "${it.major}.${it.minor}.${it.build}.${it.revision}" } else ""
     val WinAppSdkRuntimeDetails: String = "Windows App SDK 2.5.1"
     override fun initializeComponent() {

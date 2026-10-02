@@ -108,8 +108,8 @@
                     <TextBlock Style="{StaticResource SettingsSectionHeaderTextBlockStyle}" Text="About" />
                     <toolkit:SettingsExpander
                         Margin="0,0,0,36"
-                        Description="© 2026 Microsoft. All rights reserved."
-                        Header="{StaticResource AppTitleName}">
+                        Description="© 2026 Kotlin/WinRT contributors."
+                        Header="{x:Bind AboutTitle}">
                         <toolkit:SettingsExpander.HeaderIcon>
                             <BitmapIcon ShowAsMonochrome="False" UriSource="/Assets/Tiles/BadgeLogo.png" />
                         </toolkit:SettingsExpander.HeaderIcon>
@@ -158,10 +158,11 @@
                             <toolkit:SettingsCard
                                 HorizontalContentAlignment="Left"
                                 ContentAlignment="Vertical"
-                                Header="THIS CODE AND INFORMATION IS PROVIDED ‘AS IS’ WITHOUT WARRANTY OF ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE IMPLIED WARRANTIES OF MERCHANTABILITY AND/OR FITNESS FOR A PARTICULAR PURPOSE.">
+                                Header="WinUI Gallery assets &amp; samples"
+                                Description="This independent Kotlin/WinRT project uses assets and samples adapted from Microsoft WinUI Gallery.">
                                 <StackPanel Margin="-12,0,0,0" Orientation="Vertical">
-                                    <HyperlinkButton Content="Microsoft Services Agreement" NavigateUri="https://go.microsoft.com/fwlink/?LinkId=822631" />
-                                    <HyperlinkButton Content="Microsoft Privacy Statement" NavigateUri="https://go.microsoft.com/fwlink/?LinkId=521839" />
+                                    <HyperlinkButton Content="WinUI Gallery" NavigateUri="https://github.com/microsoft/WinUI-Gallery" />
+                                    <HyperlinkButton Content="Third-party notices" NavigateUri="https://github.com/compose-fluent/kotlin-winrt/blob/xaml-support/winui-gallery/THIRD-PARTY-NOTICES.md" />
                                 </StackPanel>
                             </toolkit:SettingsCard>
                         </toolkit:SettingsExpander.Items>
