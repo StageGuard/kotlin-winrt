@@ -53,6 +53,7 @@ import org.jetbrains.kotlin.name.CallableId
 import org.jetbrains.kotlin.name.ClassId
 import org.jetbrains.kotlin.name.FqName
 import org.jetbrains.kotlin.platform.jvm.isJvm
+import org.jetbrains.kotlin.platform.konan.isNative
 import org.jetbrains.kotlin.resolve.DescriptorUtils
 import org.jetbrains.kotlin.resolve.scopes.DescriptorKindFilter
 
@@ -283,9 +284,9 @@ internal class WinRTProjectionCallSitePlanner(
     }
 
     /**
-     * A generated factory names its declared runtime-class result while retaining a raw owning
-     * reference return. CsWinRT GetObjectReferenceForInterface(ptr, defaultIid, false) likewise
-     * records that interface identity without querying or constructing a runtime-class wrapper.
+     * Factory returns and plain runtime-class outputs retain their declared default interface.
+     * CsWinRT GetObjectReferenceForInterface(ptr, defaultIid, false) likewise records that
+     * interface identity without querying or constructing a runtime-class wrapper.
      */
     private fun knownInspectableOutputRecipe(
         type: IrType,
@@ -450,10 +451,22 @@ internal class WinRTProjectionCallSitePlanner(
         }
         val owner = metadata.fqNameWhenAvailable?.asString() ?: return null
         val signature = AbiTypeKind.PROJECTION.typeSignature(projectedName)
+        val defaultInterfaceTypeHandle = if (
+            pluginContext.platform?.isNative() == true &&
+                referenceAccess == WinRTProjectionCallSiteReferenceAccess.INSPECTABLE_REFERENCE &&
+                metadata.metadataPropertyGetter("DEFAULT_INTERFACE_IID") != null
+        ) {
+            // Reuse the factory-output proof; specialized codecs were selected earlier. JVM keeps
+            // its existing output path because tagging regressed custom-object marshaling benchmarks.
+            knownInspectableOutputRecipe(type, projectedBaseName).projectedTypeHandleSymbol
+        } else {
+            null
+        }
         val storage = referenceRecipe(
             access = referenceAccess,
             signature = signature,
             nullable = type.isNullable(),
+            projectedTypeHandleSymbol = defaultInterfaceTypeHandle,
         )
         return WinRTProjectionCallSiteRecipe(
             kind = WinRTProjectionCallSiteRecipeKind.PROJECTION,

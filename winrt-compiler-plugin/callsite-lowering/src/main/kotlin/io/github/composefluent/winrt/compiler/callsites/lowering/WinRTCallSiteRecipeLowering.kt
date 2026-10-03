@@ -3477,6 +3477,9 @@ internal class WinRTCallSiteRecipeLowering private constructor(
     ): IrExpression? {
         val child = recipe.children.singleOrNull() ?: return null
         val parameterType = fromAbi.owner.regularParameters().singleOrNull()?.type ?: return null
+        val interfaceId = child.projectedTypeHandleSymbol?.let { typeHandleGetter ->
+            knownComReferenceInterfaceId(builder, typeHandleGetter) ?: return null
+        }
         val rawAddressType = resolver.classSymbol(WINRT_RAW_ADDRESS_FQ_NAME)?.owner?.defaultType ?: return null
         val rawAddress = decodeDirectResult(
             builder,
@@ -3542,6 +3545,7 @@ internal class WinRTCallSiteRecipeLowering private constructor(
                     returnType = parameterType,
                     referenceAccess = child.referenceAccess,
                     address = builder.irGet(address),
+                    interfaceId = interfaceId,
                 ) ?: abortCallSiteLowering("plain projection output cannot construct ${parameterType.classFqName}")
                 val wrapped = resolver.call(builder, fromAbi, listOf(reference)).let { expression ->
                     if (expression.type == returnType) expression else builder.irAs(expression, returnType)
@@ -3577,15 +3581,22 @@ internal class WinRTCallSiteRecipeLowering private constructor(
     ): IrExpression? {
         val address = scalarRead(builder, recipe, storage) ?: return null
         val interfaceId = recipe.projectedTypeHandleSymbol?.let { typeHandleGetter ->
-            val owner = typeHandleGetter.owner.parent as? IrClass ?: return null
-            val typeHandle = builder.irCall(typeHandleGetter).apply {
-                arguments[0] = builder.irGetObject(owner.symbol)
-            }
-            val interfaceIdGetter = typeHandleGetter.owner.returnType.classOrNull
-                ?.propertyGetter("interfaceId") ?: return null
-            resolver.memberCall(builder, interfaceIdGetter, typeHandle, emptyList())
+            knownComReferenceInterfaceId(builder, typeHandleGetter) ?: return null
         }
         return decodeComReferenceAddress(builder, returnType, recipe.referenceAccess, address, interfaceId)
+    }
+
+    private fun knownComReferenceInterfaceId(
+        builder: DeclarationIrBuilder,
+        typeHandleGetter: IrSimpleFunctionSymbol,
+    ): IrExpression? {
+        val owner = typeHandleGetter.owner.parent as? IrClass ?: return null
+        val typeHandle = builder.irCall(typeHandleGetter).apply {
+            arguments[0] = builder.irGetObject(owner.symbol)
+        }
+        val interfaceIdGetter = typeHandleGetter.owner.returnType.classOrNull
+            ?.propertyGetter("interfaceId") ?: return null
+        return resolver.memberCall(builder, interfaceIdGetter, typeHandle, emptyList())
     }
 
     private fun decodeComReferenceAddress(
