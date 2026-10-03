@@ -11,6 +11,14 @@ class ValueBoxingNativeTest {
 
         assertNull(arrayElementType(emptyArray<String>()::class))
         assertNull(WinRTValueBoxing.boxedRuntimeClassNameForType(emptyArray<String>()::class))
+
+        // CsWinRT TypeNameSupport.cs:578–605 requires usable element metadata for an array name.
+        val nestedArrayType = emptyArray<Array<Int>>()::class
+        assertEquals("", TypeNameSupport.getNameForType(nestedArrayType))
+        assertEquals(
+            "",
+            TypeNameSupport.getNameForType(nestedArrayType, setOf(TypeNameGenerationFlag.GenerateBoxedName)),
+        )
     }
 
     @Test
@@ -37,6 +45,11 @@ class ValueBoxingNativeTest {
             TypeNameSupport.registerReferenceArrayType(String::class, registeredArrayType)
 
             assertNull(TypeNameSupport.registeredReferenceArrayElementType(typeOnlyArrayType))
+            assertEquals("", TypeNameSupport.getNameForType(typeOnlyArrayType))
+            assertEquals(
+                "",
+                TypeNameSupport.getNameForType(typeOnlyArrayType, setOf(TypeNameGenerationFlag.GenerateBoxedName)),
+            )
         } finally {
             ComWrappersSupport.clearRegistriesForTests()
         }

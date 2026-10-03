@@ -387,6 +387,36 @@ class ProjectionRegistryTest {
     }
 
     @Test
+    fun erased_reference_array_guard_preserves_foreign_kclass_contract() {
+        // CsWinRT TypeNameSupport.cs:578–605 owns reference-array name and boxing eligibility.
+        val erasedArrayType = emptyArray<Any?>()::class
+        val nameFailure = IllegalStateException("Foreign KClass name failed")
+        var nameReads = 0
+        var failNameRead = false
+        val foreignType = object : KClass<Any> by Any::class {
+            override val qualifiedName: String?
+                get() {
+                    nameReads += 1
+                    if (failNameRead) throw nameFailure
+                    return "kotlin.Array"
+                }
+
+            override fun equals(other: Any?): Boolean =
+                error("The array guard must not call foreign KClass.equals")
+        }
+
+        assertTrue(isErasedReferenceArrayType(foreignType, erasedArrayType))
+        assertEquals(1, nameReads)
+
+        failNameRead = true
+        val failure = assertFailsWith<IllegalStateException> {
+            isErasedReferenceArrayType(foreignType, erasedArrayType)
+        }
+        assertSame(nameFailure, failure)
+        assertEquals(2, nameReads)
+    }
+
+    @Test
     fun scoped_type_name_inputs_preserve_nested_values_and_recover_after_call_failure() {
         // CsWinRT Type.Pinnable / MarshalString.Pinnable keep each name live through its call scope.
         ComWrappersSupport.clearRegistriesForTests()

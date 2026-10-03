@@ -40,6 +40,12 @@ internal fun arrayElementType(type: KClass<*>): KClass<*>? =
 /** Builder capacity for the existing intrinsic class-key descriptor indexes. */
 internal expect fun intrinsicClassKeyMapInitialCapacity(keyCount: Int): Int
 
+/** Array identity only; callers retain explicit array-element metadata precedence. */
+internal expect fun isErasedReferenceArrayType(
+    type: KClass<*>,
+    erasedArrayType: KClass<*>,
+): Boolean
+
 /** Cross-platform assignability: target is a supertype of candidate if candidate is registered
  *  as an exception and target is the generic Exception marker, or falls back to identity. */
 internal fun isAssignableFrom(targetType: KClass<*>, candidateType: KClass<*>): Boolean =

@@ -227,5 +227,5 @@ object TypeNameSupport {
     // Kotlin common KClass does not preserve Array<T>'s element type. Match CsWinRT's
     // fail-closed array path by returning an empty type name instead of a Kotlin name.
     private fun KClass<*>.isUnsupportedErasedArrayType(): Boolean =
-        qualifiedName == "kotlin.Array"
+        isErasedReferenceArrayType(this, erasedReferenceArrayType)
 }
