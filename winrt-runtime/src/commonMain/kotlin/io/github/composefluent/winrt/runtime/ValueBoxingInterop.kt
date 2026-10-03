@@ -8,6 +8,15 @@ import kotlin.reflect.KClass
 // WinRTValueAdapter — per-type ABI read/write/array marshalling adapter.
 // ---------------------------------------------------------------------------
 
+/**
+ * CsWinRT's nullable value readers use typed ABI parameters. Like [RawAddressPairAction],
+ * retain that address carrier here instead of erasing it through Function1.invoke.
+ * The caller still owns the ABI storage and its existing value cleanup.
+ */
+internal fun interface WinRTValueReader<T : Any> {
+    fun read(source: RawAddress): T
+}
+
 internal class WinRTValueAdapter<T : Any>(
     val projectedClass: KClass<*>,
     val nullableInterfaceId: Guid?,
@@ -19,7 +28,7 @@ internal class WinRTValueAdapter<T : Any>(
     private val exactUnbox: (Any) -> T,
     private val propertyValueCoerce: (Any) -> T = exactUnbox,
     private val writeTransferredValue: (T, RawAddress) -> Unit,
-    private val readOwnedValue: (RawAddress) -> T,
+    private val readOwnedValue: WinRTValueReader<T>,
     private val disposeTransferredValue: (RawAddress) -> Unit = {},
 ) {
     fun unboxExact(value: Any): T = exactUnbox(value)
@@ -34,7 +43,7 @@ internal class WinRTValueAdapter<T : Any>(
         writeTransferredValue(coercePropertyValue(value), PlatformAbi.slice(destination, 0, abiLayout.byteSize))
     }
 
-    fun readValue(source: RawAddress): T = readOwnedValue(source)
+    fun readValue(source: RawAddress): T = readOwnedValue.read(source)
 
     fun disposeValue(source: RawAddress) {
         disposeTransferredValue(source)
@@ -77,7 +86,7 @@ internal class WinRTValueAdapter<T : Any>(
         if (PlatformAbi.isNull(data)) return null
         return Array(length) { index ->
             val slice = PlatformAbi.slice(data, index.toLong() * abiLayout.byteSize, abiLayout.byteSize)
-            readOwnedValue(slice)
+            readOwnedValue.read(slice)
         }
     }
 
@@ -112,7 +121,7 @@ internal fun <T : Any> directValueAdapter(
     isNumericScalar: Boolean = false,
     exactUnbox: (Any) -> T,
     propertyValueCoerce: (Any) -> T = exactUnbox,
-    readOwnedValue: (RawAddress) -> T,
+    readOwnedValue: WinRTValueReader<T>,
     writeTransferredValue: (T, RawAddress) -> Unit,
     disposeTransferredValue: (RawAddress) -> Unit = {},
 ): WinRTValueAdapter<T> =
