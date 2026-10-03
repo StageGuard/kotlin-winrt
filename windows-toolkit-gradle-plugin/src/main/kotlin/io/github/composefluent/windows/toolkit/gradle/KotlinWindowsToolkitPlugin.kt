@@ -2642,6 +2642,10 @@ private fun configureStandaloneWinRTJvmProjectionCompilation(
         val projectionClasspath = configureWinRTJvmProjectionClasspath(
             project = project,
             taskName = projectionTaskName,
+            businessCompilation = project.extensions.findByType(KotlinMultiplatformExtension::class.java)
+                ?.targets?.withType(KotlinJvmTarget::class.java)
+                ?.flatMap { target -> target.compilations }
+                ?.firstOrNull { compilation -> compilation.compileKotlinTaskName == businessTask.name },
         )
         projectionTask.configure(Action<KotlinJvmCompile> { task ->
             task.group = "kotlin-winrt"
@@ -2777,12 +2781,14 @@ private fun configureStandaloneWinRTJvmProjectionCompilation(
  *
  * The Kotlin compilation classpath is intentionally not used here: it contains arbitrary
  * business dependencies and often carries their producer tasks into the fixed projection
- * compiler. Project dependencies which publish the WinRT identity contract remain available so
- * imported projection types can be referenced without coupling this task to ordinary libraries.
+ * compiler. Project dependencies and external modules which publish the WinRT identity contract
+ * remain available so imported projection types can be referenced without coupling this task to
+ * ordinary libraries.
  */
 private fun configureWinRTJvmProjectionClasspath(
     project: Project,
     taskName: String,
+    businessCompilation: KotlinCompilation<*>?,
 ): org.gradle.api.artifacts.Configuration {
     val suffix = taskName.removePrefix("compileKotlinWinRTProjection")
     val configuration = project.configurations.maybeCreate(
@@ -2838,10 +2844,43 @@ private fun configureWinRTJvmProjectionClasspath(
                     }
                 }
             }
+        winRTProjectionExternalLibraryDependencies(project, businessCompilation).forEach { dependency ->
+            configuration.dependencies.add(dependency.copy())
+        }
     }
     // KGP finalizes source-set dependency declarations after afterEvaluate callbacks.
     configuration.withDependencies { collectDependencies() }
     return configuration
+}
+
+/**
+ * Declared external modules of [compilation] which publish the WinRT identity contract.
+ *
+ * The generator leaves the types owned by such a module to that module, so generated sources
+ * reference its projection instead of declaring the types again. The standalone projection
+ * compilation therefore needs the module, exactly like a project dependency which applies this
+ * plugin. Only the configurations of [compilation] are inspected: a library declared for another
+ * target may publish no variant for this one.
+ */
+private fun winRTProjectionExternalLibraryDependencies(
+    project: Project,
+    compilation: KotlinCompilation<*>?,
+): List<ExternalModuleDependency> {
+    val declared = resourceDependencyConfigurationGraph(project, compilation)
+        .filter { configuration -> configuration.name.isWinRTIdentityDependencySourceConfiguration() }
+        .flatMap { configuration -> configuration.dependencies.toList() }
+        .filterIsInstance<ExternalModuleDependency>()
+        .filterNot { dependency -> dependency.isKotlinWinRTRuntimeOrAuthoringModule() }
+    if (declared.isEmpty()) return emptyList()
+    val identityDependencies = project.configurations
+        .findByName(KOTLIN_WINRT_LIBRARY_DEPENDENCY_IDENTITY_CONFIGURATION) ?: return emptyList()
+    val identityModules = kotlinWinRTIdentityModuleCoordinates(project, identityDependencies)
+    val seen = linkedSetOf<String>()
+    return declared.filter { dependency ->
+        kotlinWinRTIdentityExternalModuleNames(dependency.name)
+            .any { moduleName -> "${dependency.group}:$moduleName" in identityModules } &&
+            seen.add(listOf(dependency.group, dependency.name, dependency.version).joinToString(":"))
+    }
 }
 
 /** Native registration and declarations belong to one KLIB, as projection assemblies do in CsWinRT. */
@@ -2890,6 +2929,8 @@ private fun configureStandaloneWinRTNativeProjectionCompilation(
                             project.findProject(dependency.path)?.plugins?.hasPlugin(KotlinWindowsToolkitPlugin::class.java) == true &&
                                 seen.add(dependency.path)
                         }.forEach { dependency -> dependencies.add(dependency.copy()) }
+                    winRTProjectionExternalLibraryDependencies(project, target.compilations.getByName("main"))
+                        .forEach { dependency -> dependencies.add(dependency.copy()) }
                 }
             val artifact = projection.compileTaskProvider.flatMap { it.outputFile }
             val compiledLibrary = project.files(artifact).builtBy(projection.compileTaskProvider)
@@ -4572,6 +4613,32 @@ private fun kotlinWinRTIdentityFiles(
             project.objects.named(Usage::class.java, KOTLIN_WINRT_IDENTITY_USAGE),
         )
     }.files
+
+/**
+ * Requested coordinates of the direct module dependencies whose selected component publishes the
+ * WinRT identity contract. Requested coordinates identify the declaration even when substitution,
+ * for example an included build, selects a component with another identifier.
+ */
+private fun kotlinWinRTIdentityModuleCoordinates(
+    project: Project,
+    identityDependencies: org.gradle.api.artifacts.Configuration,
+): Set<String> {
+    val identityComponents = identityDependencies.incoming.artifactView { view ->
+        view.isLenient = true
+        view.attributes.attribute(
+            Usage.USAGE_ATTRIBUTE,
+            project.objects.named(Usage::class.java, KOTLIN_WINRT_IDENTITY_USAGE),
+        )
+    }.artifacts.artifacts.mapTo(linkedSetOf()) { artifact -> artifact.id.componentIdentifier }
+    if (identityComponents.isEmpty()) return emptySet()
+    return identityDependencies.incoming.resolutionResult.root.dependencies
+        .filterIsInstance<ResolvedDependencyResult>()
+        .filter { dependency -> dependency.selected.id in identityComponents }
+        .mapNotNullTo(linkedSetOf()) { dependency ->
+            (dependency.requested as? ModuleComponentSelector)
+                ?.let { selector -> "${selector.group}:${selector.module}" }
+        }
+}
 
 private fun configureKotlinWinRTMultiplatformWinuiSourceSet(project: Project) {
     val kotlinExtension = project.extensions.findByType(KotlinMultiplatformExtension::class.java) ?: return
