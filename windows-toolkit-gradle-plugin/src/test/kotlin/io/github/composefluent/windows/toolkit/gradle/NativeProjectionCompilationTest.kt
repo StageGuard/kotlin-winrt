@@ -166,4 +166,35 @@ class NativeProjectionCompilationTest {
         runBinary("debug", "after")
         runBinary("release", "after")
     }
+
+    @Test
+    fun native_projection_declares_klib_modules_outside_the_source_build() {
+        val root = Files.createTempDirectory("kotlin-winrt-native-projection-dependencies-")
+        Files.writeString(root.resolve("settings.gradle"), "rootProject.name = 'native-projection-dependencies'\n")
+        Files.writeString(root.resolve("build.gradle"), """
+            plugins {
+                id 'org.jetbrains.kotlin.multiplatform'
+                id 'io.github.compose-fluent.windows-toolkit'
+            }
+            repositories { mavenCentral() }
+            kotlin { mingwX64() }
+            tasks.register('inspectProjectionDependencies') {
+                def declared = configurations.mingwX64WinRTProjectionImplementation.dependencies.collect { dependency ->
+                    dependency instanceof ExternalModuleDependency
+                        ? "module:${'$'}{dependency.group}:${'$'}{dependency.name}" : 'files'
+                }.sort().join(',')
+                doLast { println 'projectionDependencies=' + declared }
+            }
+        """.trimIndent())
+
+        val result = GradleRunner.create().withProjectDir(root.toFile()).withPluginClasspath()
+            .withArguments("inspectProjectionDependencies", "--offline", "--stacktrace").build()
+
+        // The plugin's own classpath carries only the JVM JARs of the runtime modules. A Native
+        // compilation must resolve their multiplatform publications to receive KLIBs.
+        assertTrue(result.output, result.output.contains(
+            "projectionDependencies=module:io.github.compose-fluent:winrt-authoring," +
+                "module:io.github.compose-fluent:winrt-runtime",
+        ))
+    }
 }

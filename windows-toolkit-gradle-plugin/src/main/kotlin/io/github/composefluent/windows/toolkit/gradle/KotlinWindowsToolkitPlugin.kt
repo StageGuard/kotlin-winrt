@@ -2864,8 +2864,8 @@ private fun configureStandaloneWinRTNativeProjectionCompilation(
         projection.defaultSourceSet.kotlin.setSrcDirs(emptyList<String>())
         projection.defaultSourceSet.dependsOn(sharedProjectionSources)
         projection.defaultSourceSet.dependencies {
-            implementation(kotlinWinRTRuntimeClasspathDependency(project))
-            implementation(kotlinWinRTAuthoringRuntimeClasspathDependency(project))
+            implementation(kotlinWinRTNativeLibraryDependency(project, ":winrt-runtime", "winrt-runtime"))
+            implementation(kotlinWinRTNativeLibraryDependency(project, ":winrt-authoring", "winrt-authoring"))
         }
         projection.compileTaskProvider.configure { task ->
             // Publish a regular KLIB file even when business compilations use unpacked KLIBs.
@@ -3452,6 +3452,24 @@ private fun kotlinWinRTAuthoringRuntimeClasspathDependency(project: Project): An
     )
         ?: kotlinWinRTCodeSourceFile("io.github.composefluent.winrt.authoring.WinRTAuthoringHostExports")?.let(project::files)
         ?: "io.github.compose-fluent:winrt-authoring:${kotlinWinRTPluginVersion()}"
+}
+
+/**
+ * Native compilations consume KLIBs. The plugin's own classpath carries only the JVM JARs of
+ * these modules, so outside the source build the multiplatform publication is the only usable
+ * source: Gradle selects its mingwX64 variant through the compilation's attributes.
+ */
+private fun kotlinWinRTNativeLibraryDependency(
+    project: Project,
+    projectPath: String,
+    moduleName: String,
+): Any {
+    val localProject = project.rootProject.findProject(projectPath)
+    return if (localProject != null) {
+        project.dependencies.project(mapOf("path" to localProject.path))
+    } else {
+        "io.github.compose-fluent:$moduleName:${kotlinWinRTPluginVersion()}"
+    }
 }
 
 private fun kotlinWinRTLocalOrPluginUnderTestDependency(
