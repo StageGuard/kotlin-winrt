@@ -12,7 +12,17 @@ internal class ComPtr private constructor(
 ) : AutoCloseable {
     // Own the native-to-managed edges on the RCW itself. Putting these on `support`
     // would root them through its cleaner and make a cross-heap cycle permanent.
-    internal val trackerSource = ReferenceTrackerSource()
+    @kotlin.concurrent.Volatile
+    private var trackerSource: ReferenceTrackerSource? = null
+
+    internal fun getOrCreateTrackerSource(): ReferenceTrackerSource {
+        trackerSource?.let { return it }
+        // Publish exactly one Kotlin dependent-handle source. The short initialization lock
+        // only creates managed graph state; COM attach and Dispose keep their existing contract.
+        return ComPtrTrackerSourceInitialization.lock.withLock {
+            trackerSource ?: ReferenceTrackerSource().also { trackerSource = it }
+        }
+    }
 
     @PublishedApi
     internal val raw: RawComPtr
@@ -25,10 +35,10 @@ internal class ComPtr private constructor(
     )
 
     init {
-        support.setTrackerSource(trackerSource)
         if (!PlatformAbi.isNull(referenceTrackerPointer)) {
             support.attachReferenceTracker(
                 trackerPointer = referenceTrackerPointer,
+                trackerSource = getOrCreateTrackerSource(),
                 addRefForObjectReference = false,
                 releaseTrackerSourceOnDispose = true,
                 retainTrackerPointer = ::invokeIUnknownAddRefOnPointer,
@@ -162,11 +172,18 @@ internal class ComPtr private constructor(
     }
 
     fun tryInitializeReferenceTracker(addRefFromTrackerSource: Boolean = true): Boolean =
-        support.tryInitializeReferenceTracker(
-            addRefFromTrackerSource = addRefFromTrackerSource,
-            retainTrackerPointer = ::invokeIUnknownAddRefOnPointer,
-            addRefFromTrackerSourceCallback = ::invokeReferenceTrackerAddRefOnPointer,
-        )
+        try {
+            // CsWinRT ComWrappersHelper.Init creates tracker state only after the tracker QI
+            // succeeds. Passing this owner temporarily preserves its Kotlin graph source.
+            support.tryInitializeReferenceTracker(
+                trackerSourceOwner = this,
+                addRefFromTrackerSource = addRefFromTrackerSource,
+                retainTrackerPointer = ::invokeIUnknownAddRefOnPointer,
+                addRefFromTrackerSourceCallback = ::invokeReferenceTrackerAddRefOnPointer,
+            )
+        } finally {
+            winRTKeepAlive(this)
+        }
 
     fun sameIdentity(other: ComPtr): Boolean = support.sameIdentity(other.support)
 
@@ -282,6 +299,10 @@ internal class ComPtr private constructor(
             )
         }
     }
+}
+
+private object ComPtrTrackerSourceInitialization {
+    val lock = PlatformLock()
 }
 
 internal fun closeComPtrSupport(support: RawComObjectReferenceSupport) {

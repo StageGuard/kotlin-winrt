@@ -396,4 +396,7 @@ internal object ReferenceTrackerManager {
 /** Kotlin counterpart of a ComWrappers dependent-handle source, owned only by its RCW. */
 internal class ReferenceTrackerSource {
     val targets = mutableListOf<Any>()
+    // One weak registration identity per strong RCW source; neither support nor its cleaner
+    // owns the graph edges. CsWinRT's CLR ComWrappers owns the corresponding dependent handles.
+    val weakReference = PlatformManagedWeakReference(this)
 }
