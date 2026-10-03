@@ -4145,6 +4145,9 @@ private fun configureKmpAppxResourceArtifactVariants(
             outgoing.artifact(task.flatMap { it.outputFile }) { artifact ->
                 artifact.builtBy(task)
                 artifact.type = "zip"
+                // Every target's archive is attached to the one root publication, where Maven
+                // tells files apart by classifier and extension only.
+                artifact.classifier = "$sourceSetName-appx-resources"
             }
         }
         project.plugins.withId("maven-publish") {
