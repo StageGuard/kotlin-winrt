@@ -319,6 +319,24 @@ internal class ComPtr private constructor(
             managedCcwReleaseIdentity = managedCcwReleaseIdentity,
         )
 
+        /**
+         * Consumes one owned ABI reference on success or construction failure.
+         * Unlike create(), callers must not release the input again after an exception.
+         * This is the runtime's explicit counterpart of CsWinRT Attach plus caller cleanup.
+         */
+        internal fun createForOwnedAbi(raw: RawComPtr, interfaceId: Guid): ComPtr = create(
+            raw = raw,
+            interfaceIdLowBits = interfaceId.abiLowBits,
+            interfaceIdHighBits = interfaceId.abiHighBits,
+            knownInterfaceId = interfaceId,
+            ownershipMode = ComOwnershipMode.Owned,
+            referenceTrackerPointer = PlatformAbi.nullComPtr,
+            isAggregated = false,
+            trackContext = true,
+            managedCcwReleaseIdentity = RawAddress.Null,
+            consumeOnFailure = true,
+        )
+
         private fun create(
             raw: RawComPtr,
             interfaceIdLowBits: Long,
@@ -329,24 +347,46 @@ internal class ComPtr private constructor(
             isAggregated: Boolean,
             trackContext: Boolean,
             managedCcwReleaseIdentity: RawAddress,
+            consumeOnFailure: Boolean = false,
         ): ComPtr {
             require(!PlatformAbi.isNull(raw)) {
                 "COM object reference cannot wrap a null pointer."
             }
-            val support = RawComObjectReferenceSupport(
-                pointer = raw,
-                interfaceIdLowBits = interfaceIdLowBits,
-                interfaceIdHighBits = interfaceIdHighBits,
-                knownInterfaceId = knownInterfaceId,
-                preventReleaseOnDispose = ownershipMode == ComOwnershipMode.Borrowed,
-                isAggregated = isAggregated,
-                trackContext = trackContext,
-                managedCcwReleaseIdentity = managedCcwReleaseIdentity,
-            )
-            return ComPtr(
-                referenceTrackerPointer = referenceTrackerPointer,
-                support = support,
-            )
+            var createdSupport: RawComObjectReferenceSupport? = null
+            try {
+                val support = RawComObjectReferenceSupport(
+                    pointer = raw,
+                    interfaceIdLowBits = interfaceIdLowBits,
+                    interfaceIdHighBits = interfaceIdHighBits,
+                    knownInterfaceId = knownInterfaceId,
+                    preventReleaseOnDispose = ownershipMode == ComOwnershipMode.Borrowed,
+                    isAggregated = isAggregated,
+                    trackContext = trackContext,
+                    managedCcwReleaseIdentity = managedCcwReleaseIdentity,
+                )
+                createdSupport = support
+                return ComPtr(
+                    referenceTrackerPointer = referenceTrackerPointer,
+                    support = support,
+                )
+            } catch (error: Throwable) {
+                if (consumeOnFailure) {
+                    try {
+                        val support = createdSupport
+                        if (support == null) {
+                            // Construction has not published a support/cleaner owner yet.
+                            WinRTPlatformApi.releaseRaw(raw.asRawAddress())
+                        } else {
+                            // The constructor may already have registered its cleaner. Both
+                            // paths share support's dispose-once guard, so do not raw-Release.
+                            closeComPtrSupport(support)
+                        }
+                    } catch (cleanupError: Throwable) {
+                        error.addSuppressed(cleanupError)
+                    }
+                }
+                throw error
+            }
         }
     }
 }
