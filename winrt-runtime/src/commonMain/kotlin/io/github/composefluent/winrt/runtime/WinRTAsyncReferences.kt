@@ -8,6 +8,7 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.concurrent.Volatile
 import kotlin.concurrent.atomics.AtomicInt
 import kotlin.concurrent.atomics.AtomicReference
 import kotlin.concurrent.atomics.ExperimentalAtomicApi
@@ -24,16 +25,37 @@ open class WinRTAsyncReferenceBase internal constructor(
 
     // IAsyncInfo is a sibling WinRT interface, not the prefix of each async interface's ABI vtable.
     // Resolve and own it separately so async RCWs use its actual vtable.
-    private val asyncInfoComPtr = lazy {
-        comPtr.queryInterface(WinRTAsyncInterfaceIds.IAsyncInfo).getOrThrow()
-    }
-    private val asyncInfoView = lazy {
-        WinRTAsyncInfoView(asyncInfoComPtr.value)
+    @Volatile
+    private var asyncInfoComPtr: Lazy<ComPtr>? = null
+
+    @Volatile
+    private var asyncInfoView: WinRTAsyncInfoView? = null
+
+    private fun getOrCreateAsyncInfoComPtr(): Lazy<ComPtr> {
+        asyncInfoComPtr?.let { return it }
+        // Keep the initializer's original direct edge to the primary COM owner.
+        val nativeOwner = comPtr
+        return AsyncInfoInitialization.lock.withLock {
+            asyncInfoComPtr ?: lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+                nativeOwner.queryInterface(WinRTAsyncInterfaceIds.IAsyncInfo).getOrThrow()
+            }.also { asyncInfoComPtr = it }
+        }
     }
 
-    internal fun asAsyncInfoView(): WinRTAsyncInfoView = asyncInfoView.value
+    internal fun asAsyncInfoView(): WinRTAsyncInfoView {
+        asyncInfoView?.let { return it }
+        // Publish the original synchronized holder before QI, and run QI outside the shared gate.
+        // CsWinRT IWinRTObject.GetObjectReferenceForType keeps this sibling interface owner cached.
+        val reference = getOrCreateAsyncInfoComPtr().value
+        return AsyncInfoInitialization.lock.withLock {
+            asyncInfoView ?: WinRTAsyncInfoView(reference).also { asyncInfoView = it }
+        }
+    }
 
-    internal fun hasAsyncInfoReference(): Boolean = asyncInfoComPtr.isInitialized()
+    internal fun hasAsyncInfoReference(): Boolean {
+        val reference = asyncInfoComPtr ?: return false
+        return reference.isInitialized()
+    }
 
     /**
      * Reads a terminal status without materializing the owned IAsyncInfo sibling. The await fast
@@ -54,10 +76,16 @@ open class WinRTAsyncReferenceBase internal constructor(
         }?.let(WinRTAsyncStatus::fromAbi)?.takeUnless { it == WinRTAsyncStatus.Started }
 
     internal fun releaseAsyncInfoReference() {
-        if (asyncInfoComPtr.isInitialized()) {
-            asyncInfoComPtr.value.close()
+        val reference = asyncInfoComPtr ?: return
+        if (reference.isInitialized()) {
+            reference.value.close()
         }
     }
+}
+
+// This gate creates only managed state; COM queries run through the original per-holder lazy lock.
+private object AsyncInfoInitialization {
+    val lock = PlatformLock()
 }
 
 open class WinRTAsyncInfoReference internal constructor(

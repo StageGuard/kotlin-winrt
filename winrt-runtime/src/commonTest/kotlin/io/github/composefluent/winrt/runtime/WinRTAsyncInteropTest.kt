@@ -250,6 +250,11 @@ class WinRTAsyncInteropTest {
         completedHandler.use { handle ->
             AsyncInfo.completedAction().use { action ->
                 assertEquals(WinRTAsyncStatus.Completed, action.status())
+                assertFalse(action.hasAsyncInfoReference())
+                val firstView = action.asAsyncInfoView()
+                assertTrue(action.hasAsyncInfoReference())
+                assertTrue(firstView === action.asAsyncInfoView())
+                assertEquals(WinRTAsyncStatus.Completed, firstView.status())
                 action.queryInterface(WinRTAsyncInterfaceIds.IAsyncInfo).getOrThrow().use { asyncInfo ->
                     assertEquals(WinRTAsyncInterfaceIds.IAsyncInfo, asyncInfo.interfaceId)
                 }
