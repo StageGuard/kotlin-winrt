@@ -52,6 +52,7 @@ import org.jetbrains.kotlin.gradle.plugin.KotlinJvmFactory
 import org.jetbrains.kotlin.gradle.plugin.getKotlinPluginVersion
 import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
 import org.jetbrains.kotlin.gradle.plugin.mpp.Executable
+import org.jetbrains.kotlin.gradle.tasks.CInteropProcess
 import org.jetbrains.kotlin.gradle.tasks.KotlinJvmCompile
 import org.jetbrains.kotlin.gradle.tasks.KotlinNativeCompile
 import java.io.File
@@ -2903,6 +2904,13 @@ private fun configureStandaloneWinRTNativeProjectionCompilation(
                 task.name.startsWith("transform") && task.name.endsWith("DependenciesMetadata")
             }.configureEach { task ->
                 task.mustRunAfter(projection.compileTaskProvider)
+            }
+            // cinterop passes the same business dependency files to its own compiler, so
+            // Gradle rejects the undeclared read of the projection KLIB without this ordering.
+            project.tasks.withType(CInteropProcess::class.java).configureEach { task ->
+                if (task.konanTarget == target.konanTarget) {
+                    task.mustRunAfter(projection.compileTaskProvider)
+                }
             }
             target.compilations.filter { it != projection }.forEach { business ->
                 // Business overlays retain access to internal helpers from their own projection

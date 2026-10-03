@@ -197,4 +197,35 @@ class NativeProjectionCompilationTest {
                 "module:io.github.compose-fluent:winrt-runtime",
         ))
     }
+
+    @Test
+    fun cinterop_is_ordered_after_the_native_projection_compilation() {
+        assumeTrue(System.getProperty("os.name").startsWith("Windows"))
+        val root = Files.createTempDirectory("kotlin-winrt-native-projection-cinterop-")
+        Files.writeString(root.resolve("settings.gradle"), "rootProject.name = 'native-projection-cinterop'\n")
+        Files.writeString(root.resolve("sample.def"), "package = sample.cinterop\n")
+        Files.writeString(root.resolve("build.gradle"), """
+            plugins {
+                id 'org.jetbrains.kotlin.multiplatform'
+                id 'io.github.compose-fluent.windows-toolkit'
+            }
+            repositories { mavenCentral() }
+            kotlin { mingwX64 { compilations.main.cinterops { sample { defFile project.file('sample.def') } } } }
+            windows { packageReferences { windowsSdk(null, false, true); type 'Windows.Foundation.IClosable' } }
+            tasks.register('inspectCinteropOrdering') {
+                def cinterop = tasks.named('cinteropSampleMingwX64').get()
+                def predecessors = cinterop.mustRunAfter.getDependencies(cinterop).collect { it.name }.sort().join(',')
+                doLast { println 'cinteropMustRunAfter=' + predecessors }
+            }
+        """.trimIndent())
+
+        val result = GradleRunner.create().withProjectDir(root.toFile()).withPluginClasspath()
+            .withArguments("inspectCinteropOrdering", "--offline", "--stacktrace").build()
+
+        // The business compilation's dependency files include the projection KLIB, and cinterop
+        // reads them as libraries. Gradle fails the build when that read has no declared order.
+        assertTrue(result.output, result.output.contains(
+            "cinteropMustRunAfter=compileWinRTProjectionKotlinMingwX64",
+        ))
+    }
 }
