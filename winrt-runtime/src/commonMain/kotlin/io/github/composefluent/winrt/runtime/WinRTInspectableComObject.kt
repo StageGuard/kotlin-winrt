@@ -215,10 +215,10 @@ internal class WinRTInspectableComObject(
         interfaceId: Guid,
         knownManagedValue: Any? = null,
     ): ComObjectReference? {
-        val localPointer = interfacePointerOrNull(interfaceId)
-        val pointer = if (localPointer != null) {
+        val localPointerValue = interfacePointerValueOrZero(interfaceId)
+        val pointer: RawAddress = if (localPointerValue != 0L) {
             if (addReferenceCount(knownManagedValue) == 0) return null
-            localPointer
+            RawAddress(localPointerValue)
         } else {
             tryAcquireExternalInterfacePointer(interfaceId)
         }
@@ -229,11 +229,11 @@ internal class WinRTInspectableComObject(
                     interfaceId = interfaceId,
                     trackContext = !referencesAreAgile,
                     managedCcwReleaseIdentity =
-                        canonicalObjectMemory.takeIf { localPointer != null } ?: RawAddress.Null,
+                        if (localPointerValue != 0L) canonicalObjectMemory else RawAddress.Null,
                 ),
             )
         } catch (failure: Throwable) {
-            if (localPointer != null) {
+            if (localPointerValue != 0L) {
                 releaseKnownLocalReference()
             } else {
                 WinRTPlatformApi.releaseRaw(pointer)
@@ -268,7 +268,7 @@ internal class WinRTInspectableComObject(
         interfacePointer(interfaceId)
 
     internal fun tryBorrowCachedInterfacePointer(interfaceId: Guid): RawAddress =
-        interfacePointerOrNull(interfaceId) ?: RawAddress.Null
+        RawAddress(interfacePointerValueOrZero(interfaceId))
 
     internal fun tryCreateStaticCallLease(
         interfaceId: Guid,
@@ -287,7 +287,9 @@ internal class WinRTInspectableComObject(
         interfaceId: Guid,
         identityVerifiedManagedValue: Any,
     ): WinRTProjectionMarshaler? {
-        val abi = interfacePointerOrNull(interfaceId) ?: return null
+        val abiValue = interfacePointerValueOrZero(interfaceId)
+        if (abiValue == 0L) return null
+        val abi = RawAddress(abiValue)
         beginStaticCallLease(identityVerifiedManagedValue)
         return try {
             lastStaticCallLease
@@ -370,16 +372,29 @@ internal class WinRTInspectableComObject(
         releaseReference()
     }
 
-    private fun interfacePointer(interfaceId: Guid): RawAddress =
-        interfacePointerOrNull(interfaceId) ?: throw WinRTUnsupportedOperationException(
-            "Managed COM object does not implement interface '$interfaceId'.",
-            KnownHResults.E_NOINTERFACE,
-        )
+    private fun interfacePointer(interfaceId: Guid): RawAddress {
+        val pointerValue = interfacePointerValueOrZero(interfaceId)
+        if (pointerValue == 0L) {
+            throw WinRTUnsupportedOperationException(
+                "Managed COM object does not implement interface '$interfaceId'.",
+                KnownHResults.E_NOINTERFACE,
+            )
+        }
+        return RawAddress(pointerValue)
+    }
 
-    private fun interfacePointerOrNull(interfaceId: Guid): RawAddress? =
-        ccwShape.interfaceIndex(interfaceId)
-            .takeIf { index -> index >= 0 }
-            ?.let(::interfaceObjectPointer)
+    private fun interfacePointerOrNull(interfaceId: Guid): RawAddress? {
+        val pointerValue = interfacePointerValueOrZero(interfaceId)
+        return if (pointerValue == 0L) null else RawAddress(pointerValue)
+    }
+
+    // CsWinRT's cached interface entries own IID/vtable metadata; only the local tear-off address
+    // depends on this host. Keep it a word until a caller actually needs the nullable ABI carrier.
+    @Suppress("NOTHING_TO_INLINE")
+    private inline fun interfacePointerValueOrZero(interfaceId: Guid): Long {
+        val index = ccwShape.interfaceIndex(interfaceId)
+        return if (index >= 0) interfaceObjectPointer(index).value else 0L
+    }
 
     private fun tryAcquireInterfacePointer(
         interfaceId: Guid,
