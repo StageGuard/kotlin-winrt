@@ -6,6 +6,7 @@ import com.squareup.kotlinpoet.ParameterizedTypeName
 import com.squareup.kotlinpoet.TypeName
 import io.github.composefluent.winrt.metadata.WinRTIntegralType
 import io.github.composefluent.winrt.metadata.WinRTMetadataParameterCategory
+import io.github.composefluent.winrt.metadata.WinRTTypeKind
 
 /** The sole recursive recipe builder, called only while [buildAbiCallPlan] is assembled. */
 internal fun KotlinProjectionRenderer.buildCallSiteRecipe(
@@ -705,8 +706,12 @@ internal fun KotlinProjectionAbiTypeBinding.closedCallSiteAbiTypeName(): String 
     }
 }
 
+internal fun KotlinProjectionAbiTypeBinding.hasKnownInspectableOutputInterface(): Boolean =
+    kind == KotlinProjectionAbiValueKind.InspectableReference &&
+        sourceTypeKind == WinRTTypeKind.RuntimeClass && interfaceId != null
+
 private fun KotlinProjectionAbiTypeBinding.hasExplicitCallSiteAbiIdentity(): Boolean =
-    mappedCallSiteType(this) != null || typeArguments.any { argument ->
+    hasKnownInspectableOutputInterface() || mappedCallSiteType(this) != null || typeArguments.any { argument ->
         argument.hasExplicitCallSiteAbiIdentity()
     }
 
@@ -1050,6 +1055,9 @@ private fun KotlinProjectionRenderer.isNullableProjectedType(binding: KotlinProj
 internal fun KotlinProjectionAbiTypeBinding.canonicalCallSiteTypeSignature(
     projectedTypeName: String = typeName,
 ): String {
+    if (hasKnownInspectableOutputInterface()) {
+        return "InspectableReference(${closedCallSiteAbiTypeName()}|default-interface)"
+    }
     if (kind in CANONICAL_RECIPE_SIGNATURE_KINDS) return kind.name
     return buildString {
         append(kind.name)

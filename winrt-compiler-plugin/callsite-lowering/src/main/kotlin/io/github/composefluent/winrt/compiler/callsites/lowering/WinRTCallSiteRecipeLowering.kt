@@ -3576,7 +3576,16 @@ internal class WinRTCallSiteRecipeLowering private constructor(
         storage: OutputStorage,
     ): IrExpression? {
         val address = scalarRead(builder, recipe, storage) ?: return null
-        return decodeComReferenceAddress(builder, returnType, recipe.referenceAccess, address)
+        val interfaceId = recipe.projectedTypeHandleSymbol?.let { typeHandleGetter ->
+            val owner = typeHandleGetter.owner.parent as? IrClass ?: return null
+            val typeHandle = builder.irCall(typeHandleGetter).apply {
+                arguments[0] = builder.irGetObject(owner.symbol)
+            }
+            val interfaceIdGetter = typeHandleGetter.owner.returnType.classOrNull
+                ?.propertyGetter("interfaceId") ?: return null
+            resolver.memberCall(builder, interfaceIdGetter, typeHandle, emptyList())
+        }
+        return decodeComReferenceAddress(builder, returnType, recipe.referenceAccess, address, interfaceId)
     }
 
     private fun decodeComReferenceAddress(
@@ -3584,6 +3593,7 @@ internal class WinRTCallSiteRecipeLowering private constructor(
         returnType: IrType,
         referenceAccess: WinRTProjectionCallSiteReferenceAccess?,
         address: IrExpression,
+        interfaceId: IrExpression? = null,
     ): IrExpression? {
         if (returnType.classFqName == WINRT_RAW_ADDRESS_FQ_NAME) return address
         return when (referenceAccess) {
@@ -3598,7 +3608,7 @@ internal class WinRTCallSiteRecipeLowering private constructor(
             WinRTProjectionCallSiteReferenceAccess.UNKNOWN_REFERENCE ->
                 constructOwnedComReference(builder, WINRT_IUNKNOWN_REFERENCE_FQ_NAME, address)
             WinRTProjectionCallSiteReferenceAccess.INSPECTABLE_REFERENCE ->
-                constructOwnedComReference(builder, WINRT_INSPECTABLE_REFERENCE_FQ_NAME, address)
+                constructOwnedComReference(builder, WINRT_INSPECTABLE_REFERENCE_FQ_NAME, address, interfaceId)
             else -> null
         }
     }
@@ -3607,6 +3617,7 @@ internal class WinRTCallSiteRecipeLowering private constructor(
         builder: DeclarationIrBuilder,
         classFqName: FqName,
         address: IrExpression,
+        interfaceId: IrExpression? = null,
     ): IrExpression? {
         val toRawComPtr = platformAbiToRawComPtr ?: return null
         val rawComPtr = builder.irCall(toRawComPtr).apply {
@@ -3621,6 +3632,13 @@ internal class WinRTCallSiteRecipeLowering private constructor(
             }
             if (pointerIndex < 0) return null
             arguments[pointerIndex] = rawComPtr
+            if (interfaceId != null) {
+                val interfaceIdIndex = constructor.owner.parameters.indexOfFirst { parameter ->
+                    parameter.kind == IrParameterKind.Regular && parameter.type.classFqName == WINRT_GUID_FQ_NAME
+                }
+                if (interfaceIdIndex < 0) return null
+                arguments[interfaceIdIndex] = interfaceId
+            }
         }
     }
 
@@ -4604,6 +4622,7 @@ private val WINRT_IUNKNOWN_REFERENCE_FQ_NAME = FqName("io.github.composefluent.w
 private val WINRT_INSPECTABLE_REFERENCE_FQ_NAME = FqName("io.github.composefluent.winrt.runtime.InspectableReference")
 private val WINRT_RAW_ADDRESS_FQ_NAME = FqName("io.github.composefluent.winrt.runtime.RawAddress")
 private val WINRT_RAW_COM_PTR_FQ_NAME = FqName("io.github.composefluent.winrt.runtime.RawComPtr")
+private val WINRT_GUID_FQ_NAME = FqName("io.github.composefluent.winrt.runtime.Guid")
 private val WINRT_OUT_FQ_NAME = FqName("io.github.composefluent.winrt.runtime.WinRTOut")
 private val WINRT_HRESULT_FQ_NAME = FqName("io.github.composefluent.winrt.runtime.HResult")
 private val WINRT_ABI_ARRAY_FQ_NAME = FqName("io.github.composefluent.winrt.runtime.WinRTAbiArray")
