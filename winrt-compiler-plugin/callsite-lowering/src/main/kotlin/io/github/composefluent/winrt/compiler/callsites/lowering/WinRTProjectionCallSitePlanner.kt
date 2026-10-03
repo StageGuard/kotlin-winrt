@@ -52,7 +52,6 @@ import org.jetbrains.kotlin.ir.visitors.acceptChildrenVoid
 import org.jetbrains.kotlin.name.CallableId
 import org.jetbrains.kotlin.name.ClassId
 import org.jetbrains.kotlin.name.FqName
-import org.jetbrains.kotlin.platform.jvm.isJvm
 import org.jetbrains.kotlin.platform.konan.isNative
 import org.jetbrains.kotlin.resolve.DescriptorUtils
 import org.jetbrains.kotlin.resolve.scopes.DescriptorKindFilter
@@ -846,10 +845,9 @@ internal class WinRTProjectionCallSitePlanner(
             typeSignature = signature,
         )
         // CsWinRT Type.Pinnable is an input-only factory over the existing struct ABI.
-        // Select this declared capability on JVM; Native keeps its owned CopyManaged/DisposeAbi path.
+        // The declared input factory supplies the existing struct carrier on both targets.
         // Outputs, array elements and structs without this codec keep their original storage recipe.
-        if (pluginContext.platform?.isJvm() != true ||
-            usage != RecipeUsage.INPUT ||
+        if (usage != RecipeUsage.INPUT ||
             carrier != WinRTProjectionCallSiteAbiCarrier.ADDRESS
         ) return storage
         val create = exactCodec(abiTypeName, projectedName, AbiCodecRole.CREATE_MARSHALER) { codec ->
