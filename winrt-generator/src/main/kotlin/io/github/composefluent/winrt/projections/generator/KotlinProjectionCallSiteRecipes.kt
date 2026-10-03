@@ -891,10 +891,9 @@ private fun KotlinProjectionRenderer.renderMappedProjectionOutputCodec(
             .add("} finally {\n")
             .indent()
             .add(
-                "if (!%T.isNull(__abi)) %T(%T.toRawComPtr(__abi)).close()\n",
+                "if (!%T.isNull(__abi)) %T.releaseRaw(__abi)\n",
                 PLATFORM_ABI_CLASS_NAME,
-                IUNKNOWN_REFERENCE_CLASS_NAME,
-                PLATFORM_ABI_CLASS_NAME,
+                WINRT_PLATFORM_API_CLASS_NAME,
             )
             .unindent()
             .add("}\n")
