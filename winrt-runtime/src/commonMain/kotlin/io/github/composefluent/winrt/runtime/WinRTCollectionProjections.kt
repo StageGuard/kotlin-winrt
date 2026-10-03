@@ -178,8 +178,21 @@ object WinRTReferenceValueAdapters {
             override fun createInputMarshaler(value: Any?): WinRTObjectMarshaler =
                 WinRTObjectMarshaller.createMarshaler(value)
 
-            override fun createOutputMarshaler(value: Any?): WinRTObjectMarshaler =
-                WinRTObjectMarshaller.createMarshaler(value)
+            // CsWinRT MarshalInspectable<T>.FromManaged detaches the caller's owned output.
+            // Closing this transfer carrier must leave that reference in the ABI result slot.
+            override fun createOutputMarshaler(value: Any?): WinRTObjectMarshaler {
+                val abi = WinRTObjectMarshaller.fromManaged(value)
+                return try {
+                    WinRTObjectMarshaler(abi)
+                } catch (error: Throwable) {
+                    try {
+                        disposeAbi(abi)
+                    } catch (cleanupError: Throwable) {
+                        error.addSuppressed(cleanupError)
+                    }
+                    throw error
+                }
+            }
         }
 
     fun <T : Any> valueType(
@@ -1635,19 +1648,45 @@ private fun <T> RawAddress.writeManagedValues(
     values: List<T>,
     adapter: WinRTReferenceValueAdapter<T>,
 ) {
-    values.forEachIndexed { index, value ->
-        adapter.createOutputMarshaler(value).use { marshaler ->
-            PlatformAbi.writePointerAt(this, index, marshaler.abi)
+    var writtenCount = 0
+    try {
+        values.forEachIndexed { index, value ->
+            writeManagedValue(value, adapter, index)
+            writtenCount++
         }
+    } catch (error: Throwable) {
+        // CsWinRT MarshalInterfaceHelper<T>.CopyManagedArray releases prior owned outputs.
+        // The scalar writer already rolled back the current element before propagating.
+        repeat(writtenCount) { index ->
+            try {
+                adapter.disposeAbi(PlatformAbi.readPointerAt(this, index))
+            } catch (cleanupError: Throwable) {
+                error.addSuppressed(cleanupError)
+            }
+        }
+        throw error
     }
 }
 
 private fun <T> RawAddress.writeManagedValue(
     value: T,
     adapter: WinRTReferenceValueAdapter<T>,
+    index: Int = 0,
 ) {
-    adapter.createOutputMarshaler(value).use { marshaler ->
-        PlatformAbi.writePointer(this, marshaler.abi)
+    val marshaler = adapter.createOutputMarshaler(value)
+    val abi = marshaler.abi
+    try {
+        marshaler.use {
+            PlatformAbi.writePointerAt(this, index, abi)
+        }
+    } catch (error: Throwable) {
+        // A successful output factory detached this owned ABI; use only closes its carrier.
+        try {
+            adapter.disposeAbi(abi)
+        } catch (cleanupError: Throwable) {
+            error.addSuppressed(cleanupError)
+        }
+        throw error
     }
 }
 
