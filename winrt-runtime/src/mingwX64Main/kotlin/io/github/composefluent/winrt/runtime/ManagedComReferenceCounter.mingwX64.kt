@@ -38,14 +38,14 @@ internal actual class PlatformManagedComReferenceCounter actual constructor(
 
     actual fun load(): Long = storage?.atomicLoad() ?: 0L
 
-    actual fun compareAndSet(expectedValue: Long, newValue: Long): Boolean =
-        storage?.let { pointer ->
-            compareExchangeManagedComReferenceCount(
-                pointer.rawValue,
-                expectedValue,
-                newValue,
-            ) == expectedValue
-        } ?: false
+    actual fun compareAndSet(expectedValue: Long, newValue: Long): Boolean {
+        val pointer = storage ?: return false
+        return compareExchangeManagedComReferenceCount(
+            pointer.rawValue,
+            expectedValue,
+            newValue,
+        ) == expectedValue
+    }
 
     actual fun store(newValue: Long) {
         storage?.let { pointer ->
