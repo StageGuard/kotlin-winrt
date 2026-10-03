@@ -132,6 +132,14 @@ object WinRTSystemProjectionMarshalers {
     fun typeNameFromAbi(source: RawAddress): KClass<*>? =
         TypeProjection.fromAbi(source)
 
+    /**
+     * Borrows Type.Pinnable-style input storage for one generated synchronous ABI call.
+     * Close on the acquiring thread in finally; the ABI address and HSTRING must not escape.
+     * Owned outputs and array elements continue to use [copyTypeNameTo].
+     */
+    fun createTypeNameInputMarshaler(value: KClass<*>?): WinRTProjectionMarshaler =
+        TypeProjection.createInputMarshaler(value)
+
     fun copyTypeNameTo(
         value: KClass<*>?,
         destination: RawAddress,

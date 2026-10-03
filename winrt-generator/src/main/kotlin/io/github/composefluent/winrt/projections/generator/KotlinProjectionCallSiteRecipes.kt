@@ -391,8 +391,13 @@ private fun KotlinProjectionRenderer.buildStorageRecipe(
             ),
         )
     }
-    mappedCallSiteAdapter(binding)?.let { adapter ->
-        return mappedProjectionRecipe(binding, adapter)
+    // CsWinRT Type.Pinnable changes the input lifetime, not the struct's physical ABI.
+    // Its factory is selected separately by buildCallSiteInputFactory; owned output and
+    // array storage still use the struct's copy/decode/dispose codecs.
+    if (binding.kind != KotlinProjectionAbiValueKind.Struct) {
+        mappedCallSiteAdapter(binding)?.let { adapter ->
+            return mappedProjectionRecipe(binding, adapter)
+        }
     }
     return when (binding.kind) {
         KotlinProjectionAbiValueKind.Unit -> error("Unit has no ABI marshaler recipe.")

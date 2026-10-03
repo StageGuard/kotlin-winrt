@@ -52,6 +52,7 @@ import org.jetbrains.kotlin.ir.visitors.acceptChildrenVoid
 import org.jetbrains.kotlin.name.CallableId
 import org.jetbrains.kotlin.name.ClassId
 import org.jetbrains.kotlin.name.FqName
+import org.jetbrains.kotlin.platform.jvm.isJvm
 import org.jetbrains.kotlin.resolve.DescriptorUtils
 import org.jetbrains.kotlin.resolve.scopes.DescriptorKindFilter
 
@@ -267,7 +268,7 @@ internal class WinRTProjectionCallSitePlanner(
         val signature = requiredFacts.kind.typeSignature(projectedName)
         return when (requiredFacts.kind) {
             AbiTypeKind.ENUM -> enumRecipe(type, abiTypeName, projectedName, signature, requiredFacts)
-            AbiTypeKind.STRUCT -> structRecipe(type, abiTypeName, projectedName, signature, requiredFacts)
+            AbiTypeKind.STRUCT -> structRecipe(type, abiTypeName, projectedName, signature, requiredFacts, usage)
             AbiTypeKind.COM_REFERENCE,
             AbiTypeKind.PROJECTION -> projectionRecipe(
                 type,
@@ -795,6 +796,7 @@ internal class WinRTProjectionCallSitePlanner(
         projectedName: String,
         signature: String,
         facts: AbiTypeFacts,
+        usage: RecipeUsage,
     ): WinRTProjectionCallSiteRecipe {
         val carrier = facts.carrier.loweringCarrier()
         val carrierType = facts.carrier.kotlinTypeName()
@@ -813,7 +815,7 @@ internal class WinRTProjectionCallSitePlanner(
         val disposeAbi = exactCodec(abiTypeName, projectedName, AbiCodecRole.DISPOSE_ABI) { codec ->
             codec.parameterTypes == listOf(WINRT_RAW_ADDRESS_FQ_NAME.asString())
         }
-        return WinRTProjectionCallSiteRecipe(
+        val storage = WinRTProjectionCallSiteRecipe(
             kind = WinRTProjectionCallSiteRecipeKind.STRUCT,
             abiCarriers = listOf(carrier),
             valueCarrier = carrier,
@@ -828,6 +830,31 @@ internal class WinRTProjectionCallSitePlanner(
                 disposeAbi = disposeAbi,
                 fromAbiCarrier = fromAbiCarrier,
             ),
+            typeSignature = signature,
+        )
+        // CsWinRT Type.Pinnable is an input-only factory over the existing struct ABI.
+        // Select this declared capability on JVM; Native keeps its owned CopyManaged/DisposeAbi path.
+        // Outputs, array elements and structs without this codec keep their original storage recipe.
+        if (pluginContext.platform?.isJvm() != true ||
+            usage != RecipeUsage.INPUT ||
+            carrier != WinRTProjectionCallSiteAbiCarrier.ADDRESS
+        ) return storage
+        val create = exactCodec(abiTypeName, projectedName, AbiCodecRole.CREATE_MARSHALER) { codec ->
+            codec.parameterTypes == listOf(projectedName)
+        } ?: return storage
+        val (carrierProperty, extraCarrierProperties) = create.factoryCarrierProperties()
+        return WinRTProjectionCallSiteRecipe(
+            kind = WinRTProjectionCallSiteRecipeKind.PROJECTION,
+            abiCarriers = storage.abiCarriers,
+            valueCarrier = storage.valueCarrier,
+            nullable = type.isNullable(),
+            callables = callables(
+                projectedName = projectedName,
+                createMarshaler = create,
+                carrierProperty = carrierProperty,
+                extraCarrierProperties = extraCarrierProperties,
+            ),
+            children = listOf(storage),
             typeSignature = signature,
         )
     }

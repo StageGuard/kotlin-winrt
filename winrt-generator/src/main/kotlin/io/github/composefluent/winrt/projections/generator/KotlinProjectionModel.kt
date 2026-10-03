@@ -852,6 +852,12 @@ internal val MAPPED_TYPES: List<KotlinProjectionMappedType> = listOf(
             abiLayoutExpression = CodeBlock.of("%T.TYPE_NAME", NATIVE_ABI_LAYOUT_CLASS_NAME),
             alignmentBytes = 8,
         ),
+        callSiteAdapter = KotlinProjectionMappedCallSiteAdapter(
+            runtimeProjectionClassName = WINRT_SYSTEM_PROJECTION_MARSHALERS_CLASS_NAME,
+            fromAbiFunctionName = "typeNameFromAbi",
+            createMarshalerFunctionName = "createTypeNameInputMarshaler",
+            inputFactoryReturnType = ClassName("io.github.composefluent.winrt.runtime", "WinRTProjectionMarshaler"),
+        ),
         simpleAbiLookup = true,
         descriptionName = "TypeName",
     ),
