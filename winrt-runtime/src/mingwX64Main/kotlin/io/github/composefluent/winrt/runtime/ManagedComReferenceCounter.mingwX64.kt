@@ -1,4 +1,8 @@
-@file:OptIn(kotlinx.cinterop.ExperimentalForeignApi::class)
+@file:OptIn(
+    kotlinx.cinterop.ExperimentalForeignApi::class,
+    kotlin.native.internal.InternalForKotlinNative::class,
+)
+@file:Suppress("INVISIBLE_MEMBER", "INVISIBLE_REFERENCE")
 
 package io.github.composefluent.winrt.runtime
 
@@ -12,7 +16,8 @@ import kotlinx.cinterop.rawValue
 import kotlinx.cinterop.reinterpret
 import kotlinx.cinterop.toCPointer
 import kotlinx.cinterop.value
-import platform.windows._InterlockedCompareExchange64
+import kotlin.native.internal.GCUnsafeCall
+import kotlin.native.internal.NativePtr
 
 @PublishedApi
 internal actual class PlatformManagedComReferenceCounter actual constructor(
@@ -35,7 +40,11 @@ internal actual class PlatformManagedComReferenceCounter actual constructor(
 
     actual fun compareAndSet(expectedValue: Long, newValue: Long): Boolean =
         storage?.let { pointer ->
-            _InterlockedCompareExchange64(pointer, newValue, expectedValue) == expectedValue
+            compareExchangeManagedComReferenceCount(
+                pointer.rawValue,
+                expectedValue,
+                newValue,
+            ) == expectedValue
         } ?: false
 
     actual fun store(newValue: Long) {
@@ -80,3 +89,15 @@ internal actual class PlatformManagedComReferenceCounter actual constructor(
 // avoids a second locked RMW on every steady-state AddRef and Release.
 private fun CPointer<LongVar>.atomicLoad(): Long =
     pointed.value
+
+// CsWinRT obtains its CCW IUnknown implementation from CLR ComWrappers. This
+// platform primitive changes only the existing aligned native count cell;
+// ManagedComHostState still owns every COM/GC-root transition and cleanup.
+// NativePtr uses the existing Kotlin/Native runtime pointer ABI (like cfree).
+// The named C leaf has no allocation, blocking call, COM call, or Kotlin callback.
+@GCUnsafeCall("kotlin_winrt_compare_exchange_managed_com_reference_count")
+private external fun compareExchangeManagedComReferenceCount(
+    address: NativePtr,
+    expectedValue: Long,
+    newValue: Long,
+): Long
