@@ -357,49 +357,93 @@ object ComWrappersSupport {
                 }
             }
 
-            val inspectable = IInspectableReference(pointer.asRawComPtr(), IID.IInspectable)
-            var ownershipTransferred = false
+            // A boxed value is decoded synchronously in this apartment. Keep the owned ABI
+            // pointer until decoding completes; only a lasting RCW needs ComPtr context,
+            // reference-tracker state, and a finalizer. The existing class factory keeps
+            // precedence over the closed-value plans used by CsWinRT's nullable factory.
+            var rawPointerNeedsRelease = true
             try {
-                val runtimeClassName = inspectable.tryGetRuntimeClassName()
-                RcwProjectionFactoryRegistry.resolveRuntimeClassFactory(null, runtimeClassName)?.let { factory ->
-                    val rcw = factory(inspectable)
-                    ownershipTransferred = true
-                    if (tryUseCache) {
-                        rcwCache[pointerKey] = rcw
-                        if (directPointerKey != pointerKey) {
-                            rcwCache[directPointerKey] = rcw
+                val runtimeClassName = InspectableReferenceSupport.getRuntimeClassName(
+                    noThrow = true,
+                    invokeGetRuntimeClassName = { hStringOut ->
+                        ComVtableInvoker.invokeArgs(
+                            instance = pointer.asRawComPtr(),
+                            slot = IInspectableVftblSlots.GetRuntimeClassName,
+                            arg0 = hStringOut,
+                        )
+                    },
+                )
+                val factory = RcwProjectionFactoryRegistry.resolveRuntimeClassFactory(null, runtimeClassName)
+                if (factory == null) {
+                    tryProjectInspectableValueForRuntimeClassName(pointer, runtimeClassName)
+                        ?.let { projectedValue ->
+                            try {
+                                WinRTPlatformApi.releaseRaw(pointer)
+                            } finally {
+                                rawPointerNeedsRelease = false
+                            }
+                            if (tryUseCache) {
+                                rcwCache[pointerKey] = projectedValue
+                                if (directPointerKey != pointerKey) {
+                                    rcwCache[directPointerKey] = projectedValue
+                                }
+                            }
+                            return@withLock projectedValue
                         }
-                    }
-                    return@withLock rcw
-                }
-                platformTryProjectInspectable(inspectable, runtimeClassName)?.let { projectedValue ->
-                    try {
-                        inspectable.close()
-                    } finally {
-                        ownershipTransferred = true
-                    }
-                    if (tryUseCache) {
-                        rcwCache[pointerKey] = projectedValue
-                        if (directPointerKey != pointerKey) {
-                            rcwCache[directPointerKey] = projectedValue
-                        }
-                    }
-                    return@withLock projectedValue
                 }
 
-                ownershipTransferred = true
-                if (tryUseCache) {
-                    rcwCache[pointerKey] = inspectable
-                    if (directPointerKey != pointerKey) {
-                        rcwCache[directPointerKey] = inspectable
+                val inspectable = IInspectableReference(pointer.asRawComPtr(), IID.IInspectable)
+                rawPointerNeedsRelease = false
+                var ownershipTransferred = false
+                try {
+                    factory?.let {
+                        val rcw = it(inspectable)
+                        ownershipTransferred = true
+                        if (tryUseCache) {
+                            rcwCache[pointerKey] = rcw
+                            if (directPointerKey != pointerKey) {
+                                rcwCache[directPointerKey] = rcw
+                            }
+                        }
+                        return@withLock rcw
                     }
+                    tryProjectInspectableValue(
+                        inspectable,
+                        runtimeClassName,
+                        runtimeClassProjectionAttempted = true,
+                    )?.let { projectedValue ->
+                        try {
+                            inspectable.close()
+                        } finally {
+                            ownershipTransferred = true
+                        }
+                        if (tryUseCache) {
+                            rcwCache[pointerKey] = projectedValue
+                            if (directPointerKey != pointerKey) {
+                                rcwCache[directPointerKey] = projectedValue
+                            }
+                        }
+                        return@withLock projectedValue
+                    }
+
+                    ownershipTransferred = true
+                    if (tryUseCache) {
+                        rcwCache[pointerKey] = inspectable
+                        if (directPointerKey != pointerKey) {
+                            rcwCache[directPointerKey] = inspectable
+                        }
+                    }
+                    inspectable
+                } catch (error: Throwable) {
+                    if (!ownershipTransferred && !inspectable.isDisposed) {
+                        inspectable.close()
+                    }
+                    throw error
                 }
-                inspectable
-            } catch (error: Throwable) {
-                if (!ownershipTransferred && !inspectable.isDisposed) {
-                    inspectable.close()
+            } finally {
+                if (rawPointerNeedsRelease) {
+                    WinRTPlatformApi.releaseRaw(pointer)
                 }
-                throw error
             }
         }
     }
