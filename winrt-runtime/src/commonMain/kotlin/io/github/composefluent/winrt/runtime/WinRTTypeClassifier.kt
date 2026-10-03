@@ -161,7 +161,7 @@ internal object WinRTTypeClassifier {
         )
 
     private val intrinsicTypesByType: Map<KClass<*>, WinRTIntrinsicType> =
-        buildMap {
+        buildMap(capacity = intrinsicClassKeyMapInitialCapacity(intrinsicTypes.sumOf { it.typeAliases.size })) {
             intrinsicTypes.forEach { knownType ->
                 knownType.typeAliases.forEach { alias ->
                     put(alias, knownType)
@@ -179,7 +179,7 @@ internal object WinRTTypeClassifier {
         }
 
     private val intrinsicTypesByPrimitiveArrayType: Map<KClass<*>, WinRTIntrinsicType> =
-        buildMap {
+        buildMap(capacity = intrinsicClassKeyMapInitialCapacity(intrinsicTypes.count { it.primitiveArrayType != null })) {
             intrinsicTypes.forEach { knownType ->
                 knownType.primitiveArrayType?.let { arrayType ->
                     put(arrayType, knownType)
