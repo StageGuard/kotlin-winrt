@@ -148,10 +148,31 @@ internal object XamlSystemProjectionRuntimeHooks {
 
     internal fun defaultCustomPropertyProviderInterfaceDefinition(
         existingInterfaceIds: Set<Guid>,
+    ): WinRTInspectableInterfaceDefinition? =
+        defaultCustomPropertyProviderInterfaceDefinition {
+            IID.ICustomPropertyProvider in existingInterfaceIds
+        }
+
+    internal fun defaultCustomPropertyProviderInterfaceDefinition(
+        existingInterfaceDefinitions: List<WinRTInspectableInterfaceDefinition>,
+    ): WinRTInspectableInterfaceDefinition? {
+        // WinRTCcwDefinition accepts a caller-owned List. Recheck the same membership used by the
+        // original hot cache, and visit the full list before reading feature switches as mapTo did.
+        var hasExistingCustomPropertyProvider = false
+        for (definition in existingInterfaceDefinitions) {
+            if (definition.interfaceId == IID.ICustomPropertyProvider) {
+                hasExistingCustomPropertyProvider = true
+            }
+        }
+        return defaultCustomPropertyProviderInterfaceDefinition { hasExistingCustomPropertyProvider }
+    }
+
+    private inline fun defaultCustomPropertyProviderInterfaceDefinition(
+        hasExistingCustomPropertyProvider: () -> Boolean,
     ): WinRTInspectableInterfaceDefinition? {
         if (!FeatureSwitches.enableDefaultCustomTypeMappings ||
             !FeatureSwitches.enableICustomPropertyProviderSupport ||
-            IID.ICustomPropertyProvider in existingInterfaceIds
+            hasExistingCustomPropertyProvider()
         ) {
             return null
         }

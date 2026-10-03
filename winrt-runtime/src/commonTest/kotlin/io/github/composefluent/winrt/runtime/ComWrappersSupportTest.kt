@@ -1428,6 +1428,71 @@ class ComWrappersSupportTest {
     }
 
     @Test
+    fun ccw_augmentation_hot_cache_rechecks_authored_provider_and_feature_switches() {
+        // CsWinRT's PregenerateNativeTypeInformation owns cached interface entries; authored
+        // ICustomPropertyProvider and feature-switch selection must still precede a hot-cache hit.
+        val publicInterfaceId = Guid("68686868-6868-6868-6868-686868686870")
+        val interfaces = mutableListOf(
+            WinRTInspectableInterfaceDefinition(publicInterfaceId, methods = emptyList()),
+        )
+        val definition = WinRTCcwDefinition(interfaces, defaultInterfaceId = publicInterfaceId)
+        val authoredProvider = WinRTInspectableInterfaceDefinition(
+            IID.ICustomPropertyProvider,
+            methods = emptyList(),
+        )
+        val mappingsKey = FeatureSwitches.EnableDefaultCustomTypeMappingsPropertyName
+        val providerKey = FeatureSwitches.EnableICustomPropertyProviderSupportPropertyName
+        InteropRuntimeHooks.clearForTests()
+        FeatureSwitches.overrideForTests(mappingsKey, true)
+        FeatureSwitches.overrideForTests(providerKey, true)
+        try {
+            val initial = InteropRuntimeHooks.augmentInspectableDefinition(definition)
+            val defaultProvider = initial.interfaceDefinitions.single { it.interfaceId == IID.ICustomPropertyProvider }
+            assertSame(initial, InteropRuntimeHooks.augmentInspectableDefinition(definition))
+
+            interfaces += authoredProvider
+            val withAuthoredProvider = InteropRuntimeHooks.augmentInspectableDefinition(definition)
+            assertNotSame(initial, withAuthoredProvider)
+            assertSame(
+                authoredProvider,
+                withAuthoredProvider.interfaceDefinitions.single { it.interfaceId == IID.ICustomPropertyProvider },
+            )
+            assertSame(withAuthoredProvider, InteropRuntimeHooks.augmentInspectableDefinition(definition))
+
+            interfaces.remove(authoredProvider)
+            val afterRemoval = InteropRuntimeHooks.augmentInspectableDefinition(definition)
+            assertSame(
+                defaultProvider,
+                afterRemoval.interfaceDefinitions.single { it.interfaceId == IID.ICustomPropertyProvider },
+            )
+            assertSame(afterRemoval, InteropRuntimeHooks.augmentInspectableDefinition(definition))
+
+            FeatureSwitches.overrideForTests(providerKey, false)
+            val providerDisabled = InteropRuntimeHooks.augmentInspectableDefinition(definition)
+            assertFalse(providerDisabled.interfaceDefinitions.any { it.interfaceId == IID.ICustomPropertyProvider })
+            assertSame(providerDisabled, InteropRuntimeHooks.augmentInspectableDefinition(definition))
+
+            FeatureSwitches.overrideForTests(providerKey, true)
+            FeatureSwitches.overrideForTests(mappingsKey, false)
+            val mappingsDisabled = InteropRuntimeHooks.augmentInspectableDefinition(definition)
+            assertFalse(mappingsDisabled.interfaceDefinitions.any { it.interfaceId == IID.ICustomPropertyProvider })
+            assertSame(mappingsDisabled, InteropRuntimeHooks.augmentInspectableDefinition(definition))
+
+            FeatureSwitches.overrideForTests(mappingsKey, true)
+            val restored = InteropRuntimeHooks.augmentInspectableDefinition(definition)
+            assertSame(
+                defaultProvider,
+                restored.interfaceDefinitions.single { it.interfaceId == IID.ICustomPropertyProvider },
+            )
+            assertSame(restored, InteropRuntimeHooks.augmentInspectableDefinition(definition))
+        } finally {
+            FeatureSwitches.overrideForTests(mappingsKey, null)
+            FeatureSwitches.overrideForTests(providerKey, null)
+            InteropRuntimeHooks.clearForTests()
+        }
+    }
+
+    @Test
     fun ccw_augmentation_preserves_authored_marshal_interface_order() {
         ComWrappersSupport.clearRegistriesForTests()
         val publicInterfaceId = Guid("69696969-6969-6969-6969-696969696969")
