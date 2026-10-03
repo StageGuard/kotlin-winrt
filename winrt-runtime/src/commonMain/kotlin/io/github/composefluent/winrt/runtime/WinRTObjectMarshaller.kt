@@ -39,10 +39,38 @@ object WinRTObjectMarshaller {
             } else {
                 createDelegateMarshaler(value)
             }
-            else -> ComWrappersSupport.tryUnwrapObject(value)?.let(::createUnwrappedInspectableMarshaler)
+            else -> tryCreateUnwrappedInspectableMarshaler(value)
                 ?: createManagedInspectableLeaseMarshaler(value)
                 ?: createMarshalerCore(value, declaredReferenceArrayElementType)
         }
+
+    /** Uses the existing projected-object unwrap rules without creating temporary RCW wrappers. */
+    private fun tryCreateUnwrappedInspectableMarshaler(value: Any): WinRTObjectMarshaler? {
+        // Raw carriers and composable identity keep their existing owned-reference path.
+        if (value is ComObjectReference || value is WinRTComposableObject) {
+            return ComWrappersSupport.tryUnwrapObject(value)?.let(::createUnwrappedInspectableMarshaler)
+        }
+        val reference = WinRTBorrowedReferenceSupport.tryBorrowReference(
+            value = value,
+            interfaceType = null,
+            unwrapWinRTObject = ::borrowableWinRTObject,
+            cloneReference = { it },
+        ) ?: return null
+        val lease = reference.comPtr.tryAcquireScopedQueryInterfaceLease(IID.IInspectable)
+            ?: return createUnwrappedInspectableMarshaler(cloneComReference(reference))
+        return try {
+            WinRTObjectMarshaler(lease.abi) {
+                try {
+                    lease.close()
+                } finally {
+                    winRTKeepAlive(value)
+                }
+            }
+        } catch (error: Throwable) {
+            lease.close()
+            throw error
+        }
+    }
 
     /**
      * Generic object parameters are frequently sent back synchronously from a delegate. When the

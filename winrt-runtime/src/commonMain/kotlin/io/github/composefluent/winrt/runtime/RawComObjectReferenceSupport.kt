@@ -19,6 +19,8 @@ internal class RawComObjectReferenceSupport(
     private var referenceTrackerPointer: RawComPtr = PlatformAbi.nullComPtr
     private var referenceTrackerRegistrationKey: Long = 0L
     private var releaseTrackerSourceOnDispose: Boolean = false
+    // Retain the existing agility/FTM probe result; a null context alone does not prove agility.
+    private val callsAreFreeThreaded = trackContext && ComThreadingSupport.isFreeThreaded(pointer)
     private var objectContext =
         if (trackContext) {
             ObjectReferenceContext.capture(
@@ -26,10 +28,14 @@ internal class RawComObjectReferenceSupport(
                 interfaceIdLowBits = interfaceIdLowBits,
                 interfaceIdHighBits = interfaceIdHighBits,
                 knownInterfaceId = knownInterfaceId,
+                callsAreFreeThreaded = callsAreFreeThreaded,
             )
         } else {
             null
         }
+
+    internal val canUseScopedQueryInterfaceLease: Boolean
+        get() = callsAreFreeThreaded && objectContext == null && !hasReferenceTracker && !isAggregated
 
     val interfaceId: Guid
         get() = knownInterfaceId ?: Guid.fromAbiWords(interfaceIdLowBits, interfaceIdHighBits)

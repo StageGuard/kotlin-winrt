@@ -171,6 +171,53 @@ internal class ComPtr private constructor(
         }
     }
 
+    /**
+     * CsWinRT CreateMarshaler2/AsValue(Guid) for an explicitly free-threaded, untracked parent.
+     * Keep a single GC registration for public marshalers that are abandoned without close.
+     * Non-agile, tracked, aggregated, or context-unclassified references keep their ComPtr path.
+     */
+    internal fun tryAcquireScopedQueryInterfaceLease(interfaceId: Guid): AbiReferenceLease<AutoCloseable>? {
+        if (!support.canUseScopedQueryInterfaceLease) return null
+        try {
+            val result = WinRTPlatformApi.queryInterfaceRaw(checkedPointer().asRawAddress(), interfaceId)
+            val scopedPointer = result.pointer
+            if (result.hResultValue == KnownHResults.E_NOINTERFACE.value || PlatformAbi.isNull(scopedPointer)) {
+                throw WinRTUnsupportedOperationException(
+                    "QueryInterface failed for $interfaceId with " + KnownHResults.E_NOINTERFACE,
+                    KnownHResults.E_NOINTERFACE,
+                )
+            }
+            WinRTPlatformApi.checkSucceededRaw(result.hResultValue)
+            var cleanup: ScopedComReferenceCleanup? = null
+            var transferred = false
+            try {
+                val releaseState = ScopedComReferenceCleanup(scopedPointer)
+                cleanup = releaseState
+                var registration: AutoCloseable? = null
+                val lease = AbiReferenceLeaseSupport.create<AutoCloseable>(
+                    abi = scopedPointer,
+                    cleanup = {
+                        try {
+                            registration?.close() ?: releaseState.close()
+                        } finally {
+                            winRTKeepAlive(this)
+                        }
+                    },
+                )
+                // The Cleaner action owns only releaseState, never its lease target/registration.
+                registration = scopedReferenceFinalizationHook.register(lease, releaseState::close)
+                transferred = true
+                return lease
+            } finally {
+                if (!transferred) {
+                    cleanup?.close() ?: WinRTPlatformApi.releaseRaw(scopedPointer)
+                }
+            }
+        } finally {
+            winRTKeepAlive(this)
+        }
+    }
+
     fun tryInitializeReferenceTracker(addRefFromTrackerSource: Boolean = true): Boolean =
         try {
             // CsWinRT ComWrappersHelper.Init creates tracker state only after the tracker QI
@@ -228,6 +275,9 @@ internal class ComPtr private constructor(
         )
 
     companion object {
+        // FinalizationHook owns a JVM Cleaner; share it across all scoped ABI leases.
+        private val scopedReferenceFinalizationHook = FinalizationHook()
+
         fun create(
             raw: RawComPtr,
             interfaceId: Guid,
@@ -303,6 +353,25 @@ internal class ComPtr private constructor(
 
 private object ComPtrTrackerSourceInitialization {
     val lock = PlatformLock()
+}
+
+/** Cleaner state holds only its owned ABI pointer, never the parent RCW or a managed source. */
+@OptIn(kotlin.concurrent.atomics.ExperimentalAtomicApi::class)
+private class ScopedComReferenceCleanup(
+    private val pointer: RawAddress,
+) : AutoCloseable {
+    private val closed = kotlin.concurrent.atomics.AtomicInt(0)
+
+    override fun close() {
+        // Also guards a register() failure after a Cleaner was already created.
+        if (!closed.compareAndSet(0, 1)) return
+        // The owned QI +1 alone keeps the native object alive until this release runs.
+        val release: () -> Unit = { WinRTPlatformApi.releaseRaw(pointer) }
+        // Preserve the existing ComPtr cleanup rule during a XAML reference-tracker walk.
+        if (!ReferenceTrackerManager.deferFinalizerRelease(release)) {
+            release()
+        }
+    }
 }
 
 internal fun closeComPtrSupport(support: RawComObjectReferenceSupport) {
