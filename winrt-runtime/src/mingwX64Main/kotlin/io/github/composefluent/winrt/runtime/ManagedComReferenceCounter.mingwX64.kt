@@ -19,6 +19,9 @@ import kotlinx.cinterop.value
 import kotlin.native.internal.GCUnsafeCall
 import kotlin.native.internal.NativePtr
 
+internal actual val useBulkManagedComInterfaceAttachment: Boolean
+    get() = true
+
 @PublishedApi
 internal actual class PlatformManagedComReferenceCounter actual constructor(
     initialValue: Long,
@@ -73,6 +76,23 @@ internal actual class PlatformManagedComReferenceCounter actual constructor(
                 managedComReferenceCounterSlot,
                 RawAddress(pointer.rawValue.toLong()),
             )
+        }
+    }
+
+    internal actual fun attachInterfaces(
+        objectMemoryView: NativeMemoryView,
+        interfaceObjectCount: Int,
+        interfaceObjectStrideBytes: Long,
+    ) {
+        val pointer = storage ?: return
+        val pointerWord = RawAddress(pointer.rawValue.toLong())
+        var index = 0
+        while (index < interfaceObjectCount) {
+            objectMemoryView.writePointer(
+                index * interfaceObjectStrideBytes + managedComReferenceCounterSlot * Long.SIZE_BYTES.toLong(),
+                pointerWord,
+            )
+            index += 1
         }
     }
 

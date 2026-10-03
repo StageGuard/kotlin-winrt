@@ -105,6 +105,22 @@ internal class ManagedComInboundBinding(
         }
     }
 
+    /** Initializes the binding slots of a private host before any interface pointer is published. */
+    internal fun attachInterfaces(
+        objectMemoryView: NativeMemoryView,
+        interfaceObjectCount: Int,
+        interfaceObjectStrideBytes: Long,
+    ) {
+        var index = 0
+        while (index < interfaceObjectCount) {
+            objectMemoryView.writePointer(
+                index * interfaceObjectStrideBytes + managedComInboundBindingSlot * Long.SIZE_BYTES.toLong(),
+                platformHandle,
+            )
+            index += 1
+        }
+    }
+
     internal fun detach(
         objectMemory: RawAddress,
         objectMemoryView: NativeMemoryView? = null,

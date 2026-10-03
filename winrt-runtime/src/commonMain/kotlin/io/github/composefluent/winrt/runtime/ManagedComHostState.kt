@@ -405,6 +405,14 @@ internal class ManagedComHostState(
         referenceCount.attach(objectMemory, objectMemoryView, objectMemoryOffsetBytes)
     }
 
+    internal fun attachReferenceCounterToInterfaces(
+        objectMemoryView: NativeMemoryView,
+        interfaceObjectCount: Int,
+        interfaceObjectStrideBytes: Long,
+    ) {
+        referenceCount.attachInterfaces(objectMemoryView, interfaceObjectCount, interfaceObjectStrideBytes)
+    }
+
     fun detachReferenceCounter(
         objectMemory: RawAddress,
         objectMemoryView: NativeMemoryView? = null,

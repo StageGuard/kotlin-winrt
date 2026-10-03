@@ -174,25 +174,43 @@ internal class WinRTInspectableComObject(
             interfaceObjectStrideBytes = managedComInterfaceObjectSizeBytes,
             forwardTarget = directQueryInterfaceForwardTarget(),
         )
+        val bulkAttachment = useBulkManagedComInterfaceAttachment
         var index = 0
         while (index < ccwShape.interfaceCount) {
             val objectMemoryOffsetBytes = index * managedComInterfaceObjectSizeBytes
-            val objectMemory = interfaceObjectPointer(index)
             hostOwnedMemory.memory.writePointer(
                 objectMemoryOffsetBytes,
                 RawAddress(ccwShape.vtablePointerValues[index]),
             )
-            inboundBinding.attach(
-                objectMemory = objectMemory,
-                objectMemoryView = hostOwnedMemory.memory,
-                objectMemoryOffsetBytes = objectMemoryOffsetBytes,
-            )
-            state.attachReferenceCounter(
-                objectMemory = objectMemory,
-                objectMemoryView = hostOwnedMemory.memory,
-                objectMemoryOffsetBytes = objectMemoryOffsetBytes,
-            )
+            if (!bulkAttachment) {
+                val objectMemory = interfaceObjectPointer(index)
+                inboundBinding.attach(
+                    objectMemory = objectMemory,
+                    objectMemoryView = hostOwnedMemory.memory,
+                    objectMemoryOffsetBytes = objectMemoryOffsetBytes,
+                )
+                state.attachReferenceCounter(
+                    objectMemory = objectMemory,
+                    objectMemoryView = hostOwnedMemory.memory,
+                    objectMemoryOffsetBytes = objectMemoryOffsetBytes,
+                )
+            }
             index += 1
+        }
+        // ComWrappersSupport.net5.cs.ComputeVtables caches per-type entries while the CLR owns
+        // each CCW instance record. Fill our private records before any pointer can be published;
+        // the binding and counter keep their existing per-host ownership.
+        if (bulkAttachment) {
+            inboundBinding.attachInterfaces(
+                objectMemoryView = hostOwnedMemory.memory,
+                interfaceObjectCount = ccwShape.interfaceCount,
+                interfaceObjectStrideBytes = managedComInterfaceObjectSizeBytes,
+            )
+            state.attachReferenceCounterToInterfaces(
+                objectMemoryView = hostOwnedMemory.memory,
+                interfaceObjectCount = ccwShape.interfaceCount,
+                interfaceObjectStrideBytes = managedComInterfaceObjectSizeBytes,
+            )
         }
     }
 
