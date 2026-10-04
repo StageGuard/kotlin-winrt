@@ -2536,14 +2536,12 @@ private fun configureWinRTGeneration(
     // IDE preparation task path so a clean import does not consume stale build outputs.
     project.afterEvaluate {
         val prepared = runCatching {
-            val identities = generateTask.get().dependencyIdentityFiles
-            if (identities.buildDependencies.getDependencies(null).isNotEmpty()) {
-                throw StaticPreparationUnavailable("dependency identity producers require IDE preparation tasks")
-            }
             prepareWinRTStaticProjectionSources(
                 project = project,
                 extension = extension.packageReferences,
-                dependencyIdentityFiles = identities.files,
+                dependencyIdentityFiles = configurationTimeDependencyIdentityFiles(
+                    generateTask.get().dependencyIdentityFiles,
+                ),
                 generatedOutputDirectory = generateTask.flatMap { it.outputDirectory },
                 supportOwnerIdentity = if (project.extensions.findByType(KotlinMultiplatformExtension::class.java) == null) {
                     authoringTargetArtifactName.get()
@@ -2736,11 +2734,13 @@ private fun configureStandaloneWinRTJvmProjectionCompilation(
     // task from a task collection callback is rejected by Gradle's mutation guard, so take a
     // stable snapshot after the model has been evaluated and then add the standalone tasks.
     project.afterEvaluate {
+        val nonJvmTargetTasks = nonJvmTargetCompileTaskNames(project)
         val businessTasks = project.tasks.withType(KotlinJvmCompile::class.java)
             .toList()
             .filterNot { task ->
                 task.name.contains("Test", ignoreCase = true) ||
-                    taskNameOwnsStaticProjectionSupport(task.name)
+                    taskNameOwnsStaticProjectionSupport(task.name) ||
+                    task.name in nonJvmTargetTasks
             }
         businessTasks.forEach(::configureBusinessTask)
 
@@ -2996,6 +2996,8 @@ private fun configureWinRTAuthoredCandidateValidation(
     project.tasks.withType(KotlinJvmCompile::class.java).all { compileTask ->
         if (!compileTask.name.startsWith("compileKotlin") ||
             taskNameOwnsStaticProjectionSupport(compileTask.name) ||
+            // A XAML semantic compilation gets no authoring options and writes no candidates.
+            isXamlSemanticTask(compileTask.name) ||
             compileTask.name.contains("Test", ignoreCase = true)
         ) {
             return@all
@@ -3052,6 +3054,15 @@ private enum class WinRTAuthoredArtifactPublication {
     Jvm,
     Native,
 }
+
+/**
+ * Whether the authored metadata of a Kotlin/JVM compilation is a resource of [project]. An
+ * application stages that metadata into its package instead, and an unpackaged one copies the
+ * package into the same resource directory. The package references passed along with a
+ * compilation do not carry this; only the extension knows whether an application is declared.
+ */
+internal fun shipsAuthoredMetadataAsResource(project: Project): Boolean =
+    project.extensions.findByType(WindowsExtension::class.java)?.applicationEnabled?.get() != true
 
 private fun registerWinRTAuthoredCandidateValidation(
     project: Project,
@@ -3187,10 +3198,10 @@ private fun registerWinRTAuthoredCandidateValidation(
             if (task is Copy) {
                 task.from(
                     project.provider {
-                        if ((extension as? WindowsExtension)?.applicationEnabled?.get() == true) {
-                            project.files()
-                        } else {
+                        if (shipsAuthoredMetadataAsResource(project)) {
                             project.files(outputs.authoredWinmd, outputs.authoredHostManifest)
+                        } else {
+                            project.files()
                         }
                     },
                     Action<CopySpec> { spec ->
@@ -4869,7 +4880,10 @@ private fun configureKotlinWinRTCompilerPluginOptions(
         )
     })
     project.tasks.withType(KotlinJvmCompile::class.java).configureEach(Action<KotlinJvmCompile> { task ->
-        if (taskNameOwnsStaticProjectionSupport(task.name) || isXamlSemanticTask(task.name)) {
+        if (taskNameOwnsStaticProjectionSupport(task.name) || isXamlSemanticTask(task.name) ||
+            // A compilation of another target has no projection to resolve the registrar from.
+            task.name in nonJvmTargetCompileTaskNames(project)
+        ) {
             return@Action
         }
         jvmToolchainVersion?.let { version ->

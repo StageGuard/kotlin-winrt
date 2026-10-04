@@ -232,22 +232,12 @@ abstract class BuildWinAppHostTask : DefaultTask() {
         val libRoot = outputRoot.resolve("lib")
         GradleFileOperations.cleanDirectory(libRoot)
         Files.createDirectories(libRoot)
-        val staged = linkedMapOf<String, Path>()
-        runtimeClasspath.files
-            .filter { it.isFile && it.name.endsWith(".jar", ignoreCase = true) }
-            .sortedBy { it.absolutePath.lowercase() }
-            .forEach { jar ->
-                val key = jar.name.lowercase()
-                val previous = staged[key]
-                if (previous != null && previous != jar.toPath().toAbsolutePath().normalize()) {
-                    throw IllegalStateException(
-                        "JVM application host cannot stage two runtime JARs with the same file name '${jar.name}': " +
-                            "$previous and ${jar.toPath().toAbsolutePath().normalize()}",
-                    )
-                }
-                if (previous == null) {
-                    staged[key] = jar.toPath().toAbsolutePath().normalize()
-                    Files.copy(jar.toPath(), libRoot.resolve(jar.name))
+        stagedRuntimeJarNames(runtimeClasspath.files.filter { it.isFile && it.name.endsWith(".jar", ignoreCase = true) })
+            .forEach { (jar, name) ->
+                val target = libRoot.resolve(name)
+                // JARs with one file name and one content share a staged file.
+                if (!Files.exists(target)) {
+                    Files.copy(jar.toPath(), target)
                 }
             }
     }
@@ -411,6 +401,31 @@ abstract class BuildWinAppHostTask : DefaultTask() {
     }
 }
 
+/**
+ * File names for the runtime JARs of a JVM application host, which keeps them in one directory
+ * and puts every JAR in it on the class path.
+ *
+ * Different modules can publish a JAR under one file name: a JetBrains redirect artifact is
+ * named like the androidx JAR it points to. Such JARs get a digest of their content in their
+ * name, so the result depends neither on where the files are nor on their order.
+ */
+internal fun stagedRuntimeJarNames(jars: Iterable<java.io.File>): Map<java.io.File, String> {
+    val distinctJars = jars.distinctBy { jar -> jar.toPath().toAbsolutePath().normalize() }
+    return distinctJars.groupBy { jar -> jar.name.lowercase() }.values.flatMap { sameName ->
+        sameName.map { jar ->
+            jar to if (sameName.size == 1) {
+                jar.name
+            } else {
+                "${jar.nameWithoutExtension}-${runtimeJarDigest(jar).take(8)}.${jar.extension}"
+            }
+        }
+    }.toMap()
+}
+
+private fun runtimeJarDigest(jar: java.io.File): String =
+    java.security.MessageDigest.getInstance("SHA-256").digest(jar.readBytes())
+        .joinToString("") { byte -> "%02x".format(byte) }
+
 internal fun applicationHostSource(
     mainClass: String,
     packageType: String,
@@ -511,6 +526,36 @@ internal fun applicationHostSource(
         }
     }
 
+    static void kotlin_winrt_remove_last_path_component(wchar_t *path) {
+        for (int i = lstrlenW(path); i > 0; --i) {
+            if (path[i - 1] == L'\\' || path[i - 1] == L'/') {
+                path[i - 1] = L'\0';
+                return;
+            }
+        }
+        path[0] = L'\0';
+    }
+
+    // The libraries of a Java runtime import each other by name: zip.dll needs java.dll.
+    // java.exe finds them because they are next to it. This host is not, and the default
+    // search continues on PATH, where the java.dll of another JDK answers for the one that
+    // belongs to this jvm.dll. Search the runtime's own bin directory first, as java.exe does.
+    static void kotlin_winrt_use_runtime_library_directory(const wchar_t *jvm_path) {
+        wchar_t directory[MAX_PATH * 4];
+        int length;
+        lstrcpynW(directory, jvm_path, ARRAYSIZE(directory));
+        // <home>\bin\server\jvm.dll and <home>\bin\jvm.dll both belong to <home>\bin.
+        kotlin_winrt_remove_last_path_component(directory);
+        length = lstrlenW(directory);
+        if (length > 7 && (directory[length - 7] == L'\\' || directory[length - 7] == L'/') &&
+            lstrcmpiW(directory + length - 6, L"server") == 0) {
+            directory[length - 7] = L'\0';
+        }
+        if (directory[0] != L'\0') {
+            SetDllDirectoryW(directory);
+        }
+    }
+
     static HMODULE kotlin_winrt_load_jvm_at(const wchar_t *home, const wchar_t *suffix) {
         wchar_t path[MAX_PATH * 4];
         if (home == NULL || home[0] == L'\0') {
@@ -518,6 +563,10 @@ internal fun applicationHostSource(
         }
         lstrcpynW(path, home, ARRAYSIZE(path));
         kotlin_winrt_append_wide(path, ARRAYSIZE(path), suffix);
+        if (GetFileAttributesW(path) == INVALID_FILE_ATTRIBUTES) {
+            return NULL;
+        }
+        kotlin_winrt_use_runtime_library_directory(path);
         return LoadLibraryW(path);
     }
 

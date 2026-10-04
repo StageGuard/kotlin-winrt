@@ -199,8 +199,9 @@ internal fun configureWinRTXamlPipeline(
             kmp.sourceSets.getByName("winuiMain").kotlin.srcDir(applicationHeader.flatMap { it.sourceOutputDirectory.dir("shared") })
         }
         val kotlinApi = project.plugins.getPlugin(KotlinApiPlugin::class.java) as KotlinJvmFactory
+        val nonJvmTargetTasks = nonJvmTargetCompileTaskNames(project)
         val businessTasks = project.tasks.withType(KotlinJvmCompile::class.java).toList().filter {
-            !it.name.contains("Test", true) && !it.name.startsWith("compileKotlinWinRT")
+            !it.name.contains("Test", true) && !it.name.startsWith("compileKotlinWinRT") && it.name !in nonJvmTargetTasks
         }
         businessTasks.forEach { business ->
             val suffix = business.name.removePrefix("compileKotlin")

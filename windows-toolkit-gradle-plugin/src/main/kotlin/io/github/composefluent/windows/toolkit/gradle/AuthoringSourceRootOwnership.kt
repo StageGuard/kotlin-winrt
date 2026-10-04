@@ -35,6 +35,22 @@ internal fun winRTMainSourceSets(project: Project): Set<KotlinSourceSet> {
         .toSet()
 }
 
+/**
+ * Compile tasks of the multiplatform targets that are not JVM targets. Kotlin compiles an Android
+ * target with a KotlinJvmCompile task as well, but such a compilation is not a WinRT consumer: it
+ * has neither the WinRT runtime nor the projections of its dependencies on its class path, so it
+ * gets no projection or XAML compilation of its own.
+ *
+ * The Android library target of the Android Gradle plugin reports the `jvm` platform type, so
+ * the target class decides, as it does for [winRTMainSourceSets].
+ */
+internal fun nonJvmTargetCompileTaskNames(project: Project): Set<String> {
+    val kotlin = project.extensions.findByType(KotlinMultiplatformExtension::class.java) ?: return emptySet()
+    return kotlin.targets.filter { target -> target !is KotlinJvmTarget }
+        .flatMap { target -> target.compilations.map { compilation -> compilation.compileTaskProvider.name } }
+        .toSet()
+}
+
 internal fun winRTSourceRootOwners(project: Project): Map<String, String> = buildMap {
     winRTMainSourceSets(project).sortedBy { it.name }.forEach { sourceSet ->
         sourceSet.kotlin.srcDirs.filterNot { isKotlinWindowsToolkitPluginOwnedAuthoringSourceRoot(it.toPath()) }.forEach { root ->
