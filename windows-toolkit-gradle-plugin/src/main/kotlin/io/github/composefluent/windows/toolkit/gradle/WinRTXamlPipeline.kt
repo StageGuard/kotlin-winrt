@@ -106,7 +106,11 @@ internal fun configureWinRTXamlPipeline(
         GenerateWinRTXamlApplicationHeaderTask::class.java) { task ->
         task.group = "kotlin-winrt"
         task.description = "Exports adjacent Kotlin XAML type declarations for XamlCompiler pass 1."
-        task.sourceRoots.from(xamlSourceRoots)
+        // Only markup selects the declarations this header describes. A library without XAML
+        // takes the references and dependency schemas written here, and none of its sources.
+        task.sourceRoots.from(hasXaml.flatMap { enabled ->
+            if (enabled) xamlSourceRoots else project.providers.provider { emptyList<File>() }
+        })
         task.sourceRootOwners.set(sourceRootOwners.map { owners -> owners.mapValues { (_, owner) -> if (owner == "commonMain") "winuiMain" else owner } })
         task.metadataIndex.set(metadataIndex)
         task.preparedMetadataManifest.set(metadataManifest)
