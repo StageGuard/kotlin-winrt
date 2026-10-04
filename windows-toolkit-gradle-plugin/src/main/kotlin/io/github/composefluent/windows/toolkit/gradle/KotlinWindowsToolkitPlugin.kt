@@ -3053,6 +3053,15 @@ private enum class WinRTAuthoredArtifactPublication {
     Native,
 }
 
+/**
+ * Whether the authored metadata of a Kotlin/JVM compilation is a resource of [project]. An
+ * application stages that metadata into its package instead, and an unpackaged one copies the
+ * package into the same resource directory. The package references passed along with a
+ * compilation do not carry this; only the extension knows whether an application is declared.
+ */
+internal fun shipsAuthoredMetadataAsResource(project: Project): Boolean =
+    project.extensions.findByType(WindowsExtension::class.java)?.applicationEnabled?.get() != true
+
 private fun registerWinRTAuthoredCandidateValidation(
     project: Project,
     extension: PackageReferencesConfiguration,
@@ -3187,10 +3196,10 @@ private fun registerWinRTAuthoredCandidateValidation(
             if (task is Copy) {
                 task.from(
                     project.provider {
-                        if ((extension as? WindowsExtension)?.applicationEnabled?.get() == true) {
-                            project.files()
-                        } else {
+                        if (shipsAuthoredMetadataAsResource(project)) {
                             project.files(outputs.authoredWinmd, outputs.authoredHostManifest)
+                        } else {
+                            project.files()
                         }
                     },
                     Action<CopySpec> { spec ->
