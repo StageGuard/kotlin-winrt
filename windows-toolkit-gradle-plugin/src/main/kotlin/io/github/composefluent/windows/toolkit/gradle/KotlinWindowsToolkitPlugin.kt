@@ -2736,11 +2736,13 @@ private fun configureStandaloneWinRTJvmProjectionCompilation(
     // task from a task collection callback is rejected by Gradle's mutation guard, so take a
     // stable snapshot after the model has been evaluated and then add the standalone tasks.
     project.afterEvaluate {
+        val nonJvmTargetTasks = nonJvmTargetCompileTaskNames(project)
         val businessTasks = project.tasks.withType(KotlinJvmCompile::class.java)
             .toList()
             .filterNot { task ->
                 task.name.contains("Test", ignoreCase = true) ||
-                    taskNameOwnsStaticProjectionSupport(task.name)
+                    taskNameOwnsStaticProjectionSupport(task.name) ||
+                    task.name in nonJvmTargetTasks
             }
         businessTasks.forEach(::configureBusinessTask)
 

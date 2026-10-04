@@ -33,8 +33,9 @@ internal fun configureWinRTXamlLibraryPipeline(
             .flatMap { listOf("-P", "plugin:io.github.composefluent.winrt.compiler:$it") }
     }
     val kotlinApi = project.plugins.getPlugin(KotlinApiPlugin::class.java) as KotlinJvmFactory
+    val nonJvmTargetTasks = nonJvmTargetCompileTaskNames(project)
     project.tasks.withType(KotlinJvmCompile::class.java).toList().filter {
-        !it.name.contains("Test", true) && !it.name.startsWith("compileKotlinWinRT")
+        !it.name.contains("Test", true) && !it.name.startsWith("compileKotlinWinRT") && it.name !in nonJvmTargetTasks
     }.forEach { business ->
         val suffix = business.name.removePrefix("compileKotlin")
         val root = project.layout.buildDirectory.dir("generated/kotlin-winrt/xaml/library/$suffix")
