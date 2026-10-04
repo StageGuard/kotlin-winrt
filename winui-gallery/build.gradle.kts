@@ -184,7 +184,7 @@ windows {
             "Windows.Storage.ApplicationData", "Windows.System.Launcher",
             "WinUI3Package.SettingsCard", "WinUI3Package.SettingsExpander",
             "WinUI3Package.WindowEx", "WinUI3Package.TenMicaBackdrop",
-            "WinUI3Package.ModernStandardWindowContextMenu",
+            "WinUI3Package.MicaBackdropWithFallback", "WinUI3Package.ModernStandardWindowContextMenu",
         ).forEach(::type)
     }
 }

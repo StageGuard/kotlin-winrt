@@ -35,7 +35,9 @@ internal class MainWindow : winui3package.WindowEx() {
         super.initializeComponent()
         GalleryWindows.track(checkNotNull(window))
         title = "Kotlin WinUI Gallery"
-        systemBackdrop = winui3package.TenMicaBackdrop().apply { bindThemeTo = root }
+        systemBackdrop = winui3package.MicaBackdropWithFallback().apply {
+            fallback = winui3package.TenMicaBackdrop().apply { bindThemeTo = root }
+        }
         contextMenu = winui3package.ModernStandardWindowContextMenu()
         GalleryNavigationHost.navigate = ::navigate
         root.requestedTheme = theme
