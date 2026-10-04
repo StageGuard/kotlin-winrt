@@ -8,6 +8,11 @@ import microsoft.ui.xaml.controls.*
 import microsoft.ui.xaml.media.*
 @WinRTXamlContentProperty("Example")
 internal class ControlExample : UserControl() {
+    init {
+        // Gallery's shadowed property defaults to Left. Initialize the inherited
+        // property before x:Bind reads it, preserving page-specific overrides.
+        horizontalContentAlignment = HorizontalAlignment.Left
+    }
     private var ready = false
     private var sourceReady = false
     private var sourceSample: GallerySampleCode? = null
