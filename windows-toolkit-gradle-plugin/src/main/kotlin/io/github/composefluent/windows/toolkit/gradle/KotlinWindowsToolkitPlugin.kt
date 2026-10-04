@@ -102,6 +102,10 @@ internal val KOTLIN_APPX_RESOURCE_TARGET_ATTRIBUTE: Attribute<String> =
     Attribute.of("io.github.composefluent.winrt.appx-resource-target", String::class.java)
 private const val KOTLIN_WINRT_COMPILER_PLUGIN_ID: String = "io.github.composefluent.winrt.compiler"
 internal const val KOTLIN_WINRT_LIBRARY_DEPENDENCY_IDENTITY_CONFIGURATION: String = "kotlinWinRTLibraryDependencyIdentity"
+// Projection and semantic intermediates do not own packaged application resources.
+private val KOTLIN_WINRT_INTERNAL_COMPILATIONS = setOf(
+    "winRTProjection", "winRTXamlSemantic", "winRTXamlLibrarySemantic",
+)
 
 /** Resolves a complete JDK for JVM host generation instead of inheriting the daemon JVM. */
 private fun configuredJvmToolchainHome(
@@ -1989,7 +1993,8 @@ private fun configureAppxResourceGeneration(
         // not be emitted under the same FQN as the shared accessor.
         kotlin.targets.withType(KotlinJvmTarget::class.java).configureEach { target ->
             target.compilations.configureEach { compilation ->
-                if (!compilation.name.endsWith("Test", ignoreCase = true)) {
+                if (!compilation.name.endsWith("Test", ignoreCase = true) &&
+                    compilation.name !in KOTLIN_WINRT_INTERNAL_COMPILATIONS) {
                     configureSourceSet(compilation.defaultSourceSet)
                 }
             }
@@ -1997,7 +2002,8 @@ private fun configureAppxResourceGeneration(
         kotlin.targets.withType(KotlinNativeTarget::class.java).configureEach { target ->
             if (!target.isMingwX64Target()) return@configureEach
             target.compilations.configureEach { compilation ->
-                if (!compilation.name.endsWith("Test", ignoreCase = true) && compilation.name != "winRTProjection") {
+                if (!compilation.name.endsWith("Test", ignoreCase = true) &&
+                    compilation.name !in KOTLIN_WINRT_INTERNAL_COMPILATIONS) {
                     configureSourceSet(compilation.defaultSourceSet)
                 }
             }
@@ -4056,7 +4062,7 @@ private fun configureKmpAppxResourceArtifactVariants(
     val resourceDependencyCollectors = mutableListOf<() -> Unit>()
 
     fun configureCompilation(compilation: KotlinCompilation<*>, resourceTarget: String) {
-        if (compilation.name == "winRTProjection") return
+        if (compilation.name in KOTLIN_WINRT_INTERNAL_COMPILATIONS) return
         val sourceSetName = compilation.defaultSourceSet.name
         if (!configuredSourceSets.add(sourceSetName)) {
             return

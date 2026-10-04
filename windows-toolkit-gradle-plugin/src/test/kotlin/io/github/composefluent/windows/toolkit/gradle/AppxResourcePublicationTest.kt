@@ -96,12 +96,18 @@ class AppxResourcePublicationTest {
                 id 'maven-publish'
             }
             repositories { mavenCentral() }
-            kotlin { jvm('libraryDesktop') }
+            kotlin { jvm('libraryDesktop') {
+                compilations.create('winRTXamlSemantic')
+                compilations.create('winRTXamlLibrarySemantic')
+            } }
             tasks.register('inspectPublication') {
                 doLast {
                     def usages = publishing.publications.kotlinMultiplatform.component.get().usages.collect { it.name }
                     assert !usages.contains('kotlinAppxResourcesElements')
                     assert usages.contains('kotlinAppxResourcesElementsLibraryDesktopMain')
+                    assert !usages.any { it.contains('WinRTXaml') }
+                    assert !tasks.names.any { it.startsWith('packageAppxResources') && it.contains('WinRTXaml') }
+                    assert !tasks.names.any { it.startsWith('generateAppxResources') && it.contains('WinRTXaml') }
                 }
             }
         """.trimIndent())
