@@ -3,6 +3,7 @@ package io.github.composefluent.winrt.compiler
 import io.github.composefluent.winrt.compiler.authoring.KotlinWinRTAuthoredTypeCandidate
 import io.github.composefluent.winrt.compiler.authoring.KotlinWinRTAuthoringCandidateFile
 import io.github.composefluent.winrt.compiler.authoring.readAuthoringMetadataIndex
+import io.github.composefluent.winrt.metadata.WinRTMetadataLoader
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -39,6 +40,41 @@ class KotlinWinRTAuthoringScannerCliTest {
         declarations.writeText(declarationText.replace("sample.MainPage", "sample.MissingPage"))
         assertTrue(runCatching { KotlinWinRTAuthoringScannerCli.main(args) }.exceptionOrNull()
             ?.message.orEmpty().contains("must resolve"))
+    }
+
+    @Test
+    fun xaml_header_ignores_object_expressions_outside_classes() {
+        // An object expression is an unnamed OBJECT_DECLARATION node. Inside a class it is skipped
+        // as a nested declaration; in a top-level property or function it is not nested.
+        val root = Files.createTempDirectory("kotlin-winrt-xaml-header-object-expression-")
+        root.resolve("Model.kt").writeText(
+            """
+            package sample
+
+            val runner: Runnable = object : Runnable { override fun run() {} }
+
+            fun createRunner(): Runnable = object : Runnable { override fun run() {} }
+
+            class Model { var title: String = "" }
+            """.trimIndent(),
+        )
+        root.resolve("Dictionary.xaml").writeText(
+            """
+            <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="using:sample">
+                <local:Model x:Key="model"/>
+            </ResourceDictionary>
+            """.trimIndent(),
+        )
+        val index = root.resolve("index.tsv")
+        index.writeText("Windows.Foundation.IStringable\tInterface\t\n")
+        val output = root.resolve("KotlinXaml.winmd")
+
+        KotlinWinRTAuthoringScannerCli.main(arrayOf("--xaml-header", "--metadata-index", index.toString(),
+            "--source-root", root.toString(), "--output", output.toString()))
+
+        val types = WinRTMetadataLoader.load(output).namespaces.flatMap { it.types }.map { it.qualifiedName }
+        assertEquals(listOf("sample.Model"), types)
     }
 
     @Test
