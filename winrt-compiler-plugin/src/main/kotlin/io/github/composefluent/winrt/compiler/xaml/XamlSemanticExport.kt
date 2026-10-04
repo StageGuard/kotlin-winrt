@@ -160,7 +160,7 @@ private class XamlSemanticExport(
         WinRTPortableExecutableMetadataWriter.writeXamlSchemaWinmd(
             applicationHeader?.let { WinRTMetadataLoader.loadTypeAssemblyNames(listOf(it)).values.distinct().singleOrNull() }
                 ?: "KotlinXaml", authored, applicationMembers, output.resolveSibling("KotlinXaml.winmd"),
-            WinRTMetadataLoader.loadTypeAssemblyNames(references),
+            loadXamlReferenceTypeAssemblyNames(references),
             types.values.filter { it.kind == WinRTTypeKind.Enum.name || it.kind == WinRTTypeKind.Struct.name }
                 .mapTo(mutableSetOf()) { it.qualifiedName },
         )

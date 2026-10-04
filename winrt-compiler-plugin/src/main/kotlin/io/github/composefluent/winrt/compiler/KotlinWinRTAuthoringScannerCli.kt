@@ -27,6 +27,7 @@ import io.github.composefluent.winrt.metadata.WinRTXamlApplicationTypeMembers
 import io.github.composefluent.winrt.metadata.WinRTXamlApplicationTypeDescriptor
 import io.github.composefluent.winrt.metadata.WinRTCollectionInterfaceKind
 import io.github.composefluent.winrt.compiler.xaml.writeXamlBindingSupportSource
+import io.github.composefluent.winrt.compiler.xaml.loadXamlReferenceTypeAssemblyNames
 import io.github.composefluent.winrt.compiler.xaml.xamlKotlinTypeArguments
 import io.github.composefluent.winrt.compiler.xaml.xamlPropertyRegistrationSource
 import io.github.composefluent.winrt.compiler.xaml.xamlAttachedRegistrationSources
@@ -211,7 +212,7 @@ object KotlinWinRTAuthoringScannerCli {
         }
         WinRTPortableExecutableMetadataWriter.writeXamlSchemaWinmd(
             options.xamlAssemblyName?.let { "$it.KotlinXaml" } ?: "KotlinXaml", descriptors, members, options.output,
-            WinRTMetadataLoader.loadTypeAssemblyNames(options.references),
+            loadXamlReferenceTypeAssemblyNames(options.references),
             index.values.filter { it.kind == WinRTTypeKind.Enum.name || it.kind == WinRTTypeKind.Struct.name }
                 .mapTo(mutableSetOf()) { it.qualifiedName },
         )

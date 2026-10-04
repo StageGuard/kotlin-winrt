@@ -18,6 +18,50 @@ import io.github.composefluent.winrt.runtime.WinRTXamlLoadState
 
 class XamlSemanticExportTest {
     @Test
+    fun component_identity_takes_precedence_over_its_own_xaml_schema() {
+        // CsWinRT resolves a component TypeRef to its declaring assembly. The extra
+        // Kotlin XAML schema describes members without exporting a second component.
+        val root = Files.createTempDirectory("xaml-component-identity")
+        val schema = root.resolve("Library.KotlinXaml.winmd")
+        val component = root.resolve("Library.winmd")
+        WinRTPortableExecutableMetadataWriter.writeXamlSchemaWinmd("Library.KotlinXaml",
+            listOf(WinRTXamlApplicationTypeDescriptor("sample.Component"),
+                WinRTXamlApplicationTypeDescriptor("sample.Model")), emptyMap(), schema, emptyMap())
+        WinRTPortableExecutableMetadataWriter.writeAuthoredWinmd("Library",
+            listOf(WinRTAuthoredRuntimeClassDescriptor("sample.Component",
+                interfaceNames = listOf("Windows.Foundation.IStringable"))), component,
+            mapOf("Windows.Foundation.IStringable" to "Windows.Foundation.FoundationContract",
+                "Windows.Foundation.Metadata.VersionAttribute" to "Windows.Foundation.FoundationContract",
+                "Windows.Foundation.Metadata.DefaultAttribute" to "Windows.Foundation.FoundationContract",
+                "Windows.Foundation.Metadata.ActivatableAttribute" to "Windows.Foundation.FoundationContract"))
+        val expected = mapOf("sample.Component" to "Library", "sample.Model" to "Library.KotlinXaml")
+        assertEquals(expected, loadXamlReferenceTypeAssemblyNames(listOf(schema, component)))
+        assertEquals(expected, loadXamlReferenceTypeAssemblyNames(listOf(component, schema)))
+        assertThrows(IllegalArgumentException::class.java) {
+            WinRTMetadataLoader.loadTypeAssemblyNames(listOf(schema, component))
+        }
+    }
+
+    @Test
+    fun xaml_schema_does_not_hide_an_unrelated_declaring_assembly() {
+        val root = Files.createTempDirectory("xaml-conflicting-identity")
+        val schema = root.resolve("Library.KotlinXaml.winmd")
+        val component = root.resolve("Other.winmd")
+        WinRTPortableExecutableMetadataWriter.writeXamlSchemaWinmd("Library.KotlinXaml",
+            listOf(WinRTXamlApplicationTypeDescriptor("sample.Component")), emptyMap(), schema, emptyMap())
+        WinRTPortableExecutableMetadataWriter.writeAuthoredWinmd("Other",
+            listOf(WinRTAuthoredRuntimeClassDescriptor("sample.Component",
+                interfaceNames = listOf("Windows.Foundation.IStringable"))), component,
+            mapOf("Windows.Foundation.IStringable" to "Windows.Foundation.FoundationContract",
+                "Windows.Foundation.Metadata.VersionAttribute" to "Windows.Foundation.FoundationContract",
+                "Windows.Foundation.Metadata.DefaultAttribute" to "Windows.Foundation.FoundationContract",
+                "Windows.Foundation.Metadata.ActivatableAttribute" to "Windows.Foundation.FoundationContract"))
+        assertThrows(IllegalArgumentException::class.java) {
+            loadXamlReferenceTypeAssemblyNames(listOf(schema, component))
+        }
+    }
+
+    @Test
     fun semantic_pass_exports_private_handler_without_exposing_it_in_winmd() {
         val references = System.getenv("WINRT_TEST_XAMLC_REFERENCES")
         val compiler = System.getenv("WINRT_TEST_XAMLC")

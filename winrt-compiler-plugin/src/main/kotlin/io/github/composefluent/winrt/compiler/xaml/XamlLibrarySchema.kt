@@ -103,7 +103,7 @@ private class XamlLibrarySchema(private val root: Path, private val assembly: St
         }
         Files.createDirectories(root)
         WinRTPortableExecutableMetadataWriter.writeXamlSchemaWinmd("$assembly.KotlinXaml", descriptors, members,
-            root.resolve("KotlinXaml.winmd"), WinRTMetadataLoader.loadTypeAssemblyNames(references), types.values
+            root.resolve("KotlinXaml.winmd"), loadXamlReferenceTypeAssemblyNames(references), types.values
                 .filter { it.kind in setOf(WinRTTypeKind.Enum.name, WinRTTypeKind.Struct.name) }.mapTo(mutableSetOf()) { it.qualifiedName })
         val registrar = "KotlinXamlLibraryDefinitions_" + assembly.replace(Regex("[^A-Za-z0-9_]"), "_")
         val source = root.resolve("src/io/github/composefluent/winrt/generated/xaml/$registrar.kt")
