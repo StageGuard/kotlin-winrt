@@ -183,6 +183,8 @@ abstract class WindowsExtension @Inject constructor(
         archiveUrl.convention(compilerVersion.map { version ->
             "https://github.com/compose-fluent/microsoft-ui-xaml/releases/download/kotlin-xamlc-v$version/kotlin-xamlc-$version-win-x64.zip"
         })
+        exportLibrarySchema.convention(project.providers.gradleProperty("kotlinWinRT.xaml.exportLibrarySchema")
+            .map(String::toBoolean).orElse(true))
     }
 
     fun xaml(action: Action<in WinRTXamlConfiguration>) = action.execute(xaml)
@@ -238,6 +240,11 @@ abstract class WinRTXamlConfiguration @Inject constructor(objects: ObjectFactory
     val compilerDirectory: DirectoryProperty = objects.directoryProperty()
     val genXbfDirectory: DirectoryProperty = objects.directoryProperty()
     val minimumWindowsVersion: Property<String> = objects.property(String::class.java).convention("10.0.19041.0")
+    /**
+     * Whether a library without XAML exports a XAML schema of its public classes, which takes a
+     * second compilation of its sources. A library whose classes no markup names can do without.
+     */
+    val exportLibrarySchema: Property<Boolean> = objects.property(Boolean::class.java)
 }
 
 abstract class WinAppConfiguration @Inject constructor(

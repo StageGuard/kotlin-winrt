@@ -62,6 +62,11 @@ property types are exported by an isolated semantic compilation. These models
 do not have to be authored Windows Runtime components. Consumer compilations
 receive the schema and runtime registrar for both JVM and Native.
 
+The export runs for every library without XAML that applies the toolkit, and
+compiles its sources a second time. A library whose classes no markup names
+switches it off with `windows { xaml { exportLibrarySchema = false } }` or
+`-PkotlinWinRT.xaml.exportLibrarySchema=false`.
+
 Classless XAML dictionaries can live in a library's resource source sets. They
 compile to XBF and enter the existing AppX resource variants without generating
 SDK projections or synthetic page connectors. Their relative resource paths are

@@ -108,8 +108,10 @@ object KotlinWinRTAuthoringScannerCli {
         val declarations = sources.flatMap { path ->
             val source = parseSource(path)
             source.classes().filter { !source.isNestedClass(it) && source.isEffectivelyAuthorableClass(it) &&
-                (source.isRuntimeClassDeclaration(it) || source.isObjectDeclaration(it)) && !source.hasTypeParameters(it) }.map { klass ->
-                val simpleName = requireNotNull(source.className(klass))
+                (source.isRuntimeClassDeclaration(it) || source.isObjectDeclaration(it)) && !source.hasTypeParameters(it) }.mapNotNull { klass ->
+                // An object expression in a top-level property or function is an unnamed
+                // node outside every class. It declares no type that markup could name.
+                val simpleName = source.className(klass) ?: return@mapNotNull null
                 val name = listOf(source.packageName(), simpleName).filter(String::isNotBlank).joinToString(".")
                 XamlHeaderClass(source, klass, name, candidates[name], sourceSetName = sourceSetForPath(path, options.sourceRootOwners))
             }
