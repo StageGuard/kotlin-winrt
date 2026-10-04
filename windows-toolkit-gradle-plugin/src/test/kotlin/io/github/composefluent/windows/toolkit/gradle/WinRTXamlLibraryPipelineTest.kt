@@ -44,6 +44,16 @@ class WinRTXamlLibraryPipelineTest {
         assertTrue(byProperty.output, byProperty.output.contains("schemaExport=;"))
     }
 
+    // The semantic compilation gets no authoring options and writes no candidates, so only the
+    // compilation of the library itself is validated against the source scan.
+    @Test
+    fun semantic_compilation_gets_no_authored_candidate_validation() {
+        val result = run(writeLibrary("kotlin-winrt-xaml-library-validation-"), "inspectSchemaExport")
+
+        assertTrue(result.output, result.output.contains(
+            "candidateValidation=validateCompileKotlinLibraryDesktopWinRTAuthoredCandidates;"))
+    }
+
     private fun run(root: Path, vararg arguments: String) =
         GradleRunner.create().withProjectDir(root.toFile()).withPluginClasspath()
             .withArguments(*arguments, "--offline", "--stacktrace").build()
@@ -88,6 +98,8 @@ class WinRTXamlLibraryPipelineTest {
                 doLast {
                     println 'schemaExport=' +
                         tasks.names.findAll { it.startsWith('compileKotlinWinRTXamlLibrarySemantic') }.sort().join(',') + ';'
+                    println 'candidateValidation=' +
+                        tasks.names.findAll { it.endsWith('WinRTAuthoredCandidates') }.sort().join(',') + ';'
                 }
             }
         """)

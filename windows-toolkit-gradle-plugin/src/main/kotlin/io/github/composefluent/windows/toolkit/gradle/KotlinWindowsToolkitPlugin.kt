@@ -2996,6 +2996,8 @@ private fun configureWinRTAuthoredCandidateValidation(
     project.tasks.withType(KotlinJvmCompile::class.java).all { compileTask ->
         if (!compileTask.name.startsWith("compileKotlin") ||
             taskNameOwnsStaticProjectionSupport(compileTask.name) ||
+            // A XAML semantic compilation gets no authoring options and writes no candidates.
+            isXamlSemanticTask(compileTask.name) ||
             compileTask.name.contains("Test", ignoreCase = true)
         ) {
             return@all
