@@ -25,11 +25,30 @@ class WinRTXamlLibraryPipelineTest {
         assertTrue(Files.isRegularFile(root.resolve("build/generated/kotlin-winrt/xaml/application/KotlinXaml.winmd")))
     }
 
+    @Test
+    fun library_schema_export_is_on_by_default_and_can_be_switched_off() {
+        val exported = run(writeLibrary("kotlin-winrt-xaml-library-export-"), "inspectSchemaExport")
+        assertTrue(exported.output, exported.output.contains(
+            "schemaExport=compileKotlinWinRTXamlLibrarySemanticLibraryDesktop;"))
+
+        val byExtension = run(
+            writeLibrary("kotlin-winrt-xaml-library-no-export-", "windows { xaml { exportLibrarySchema = false } }"),
+            "generateWinRTXamlApplicationHeader", "inspectSchemaExport",
+        )
+        assertEquals(TaskOutcome.SKIPPED, byExtension.task(":generateWinRTXamlApplicationHeader")?.outcome)
+        assertTrue(byExtension.output, byExtension.output.contains("schemaExport=;"))
+
+        val byProperty = run(writeLibrary("kotlin-winrt-xaml-library-no-export-property-"),
+            "generateWinRTXamlApplicationHeader", "inspectSchemaExport", "-PkotlinWinRT.xaml.exportLibrarySchema=false")
+        assertEquals(TaskOutcome.SKIPPED, byProperty.task(":generateWinRTXamlApplicationHeader")?.outcome)
+        assertTrue(byProperty.output, byProperty.output.contains("schemaExport=;"))
+    }
+
     private fun run(root: Path, vararg arguments: String) =
         GradleRunner.create().withProjectDir(root.toFile()).withPluginClasspath()
             .withArguments(*arguments, "--offline", "--stacktrace").build()
 
-    private fun writeLibrary(prefix: String): Path {
+    private fun writeLibrary(prefix: String, configuration: String = ""): Path {
         val root = Files.createTempDirectory(prefix)
         write(root.resolve("settings.gradle"), """
             pluginManagement {
@@ -63,6 +82,13 @@ class WinRTXamlLibraryPipelineTest {
             kotlin {
                 jvm('libraryDesktop')
                 sourceSets.commonMain.kotlin.srcDir(generateVersion)
+            }
+            $configuration
+            tasks.register('inspectSchemaExport') {
+                doLast {
+                    println 'schemaExport=' +
+                        tasks.names.findAll { it.startsWith('compileKotlinWinRTXamlLibrarySemantic') }.sort().join(',') + ';'
+                }
             }
         """)
         write(root.resolve("src/commonMain/kotlin/sample/Model.kt"), """
