@@ -4878,7 +4878,10 @@ private fun configureKotlinWinRTCompilerPluginOptions(
         )
     })
     project.tasks.withType(KotlinJvmCompile::class.java).configureEach(Action<KotlinJvmCompile> { task ->
-        if (taskNameOwnsStaticProjectionSupport(task.name) || isXamlSemanticTask(task.name)) {
+        if (taskNameOwnsStaticProjectionSupport(task.name) || isXamlSemanticTask(task.name) ||
+            // A compilation of another target has no projection to resolve the registrar from.
+            task.name in nonJvmTargetCompileTaskNames(project)
+        ) {
             return@Action
         }
         jvmToolchainVersion?.let { version ->
