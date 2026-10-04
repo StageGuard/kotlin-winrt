@@ -526,6 +526,36 @@ internal fun applicationHostSource(
         }
     }
 
+    static void kotlin_winrt_remove_last_path_component(wchar_t *path) {
+        for (int i = lstrlenW(path); i > 0; --i) {
+            if (path[i - 1] == L'\\' || path[i - 1] == L'/') {
+                path[i - 1] = L'\0';
+                return;
+            }
+        }
+        path[0] = L'\0';
+    }
+
+    // The libraries of a Java runtime import each other by name: zip.dll needs java.dll.
+    // java.exe finds them because they are next to it. This host is not, and the default
+    // search continues on PATH, where the java.dll of another JDK answers for the one that
+    // belongs to this jvm.dll. Search the runtime's own bin directory first, as java.exe does.
+    static void kotlin_winrt_use_runtime_library_directory(const wchar_t *jvm_path) {
+        wchar_t directory[MAX_PATH * 4];
+        int length;
+        lstrcpynW(directory, jvm_path, ARRAYSIZE(directory));
+        // <home>\bin\server\jvm.dll and <home>\bin\jvm.dll both belong to <home>\bin.
+        kotlin_winrt_remove_last_path_component(directory);
+        length = lstrlenW(directory);
+        if (length > 7 && (directory[length - 7] == L'\\' || directory[length - 7] == L'/') &&
+            lstrcmpiW(directory + length - 6, L"server") == 0) {
+            directory[length - 7] = L'\0';
+        }
+        if (directory[0] != L'\0') {
+            SetDllDirectoryW(directory);
+        }
+    }
+
     static HMODULE kotlin_winrt_load_jvm_at(const wchar_t *home, const wchar_t *suffix) {
         wchar_t path[MAX_PATH * 4];
         if (home == NULL || home[0] == L'\0') {
@@ -533,6 +563,10 @@ internal fun applicationHostSource(
         }
         lstrcpynW(path, home, ARRAYSIZE(path));
         kotlin_winrt_append_wide(path, ARRAYSIZE(path), suffix);
+        if (GetFileAttributesW(path) == INVALID_FILE_ATTRIBUTES) {
+            return NULL;
+        }
+        kotlin_winrt_use_runtime_library_directory(path);
         return LoadLibraryW(path);
     }
 

@@ -40,6 +40,25 @@ class BuildWinAppHostTaskTest {
         assertFalse(source.contains("if (false) {"))
     }
 
+    // The runtime's zip.dll imports java.dll by name. The host is not next to them, so without
+    // this the loader goes on to PATH and takes the java.dll of whichever JDK is there.
+    @Test
+    fun generated_host_searches_the_runtime_bin_directory_before_it_loads_the_jvm() {
+        val source = applicationHostSource(
+            mainClass = "sample.MainKt",
+            packageType = WindowsPackageType.None.name,
+            runtimeMode = WinAppJvmRuntimeMode.Bundled.name,
+            externalJvmHome = "",
+        )
+        val load = source.substringAfter("static HMODULE kotlin_winrt_load_jvm_at(")
+            .substringBefore("static HMODULE kotlin_winrt_load_jvm_module(")
+        val useRuntimeDirectory = load.indexOf("kotlin_winrt_use_runtime_library_directory(path);")
+
+        assertTrue(source.contains("SetDllDirectoryW(directory);"))
+        assertTrue(useRuntimeDirectory >= 0)
+        assertTrue(useRuntimeDirectory < load.indexOf("return LoadLibraryW(path);"))
+    }
+
     // A JetBrains redirect artifact is a JAR without classes that is named like the androidx JAR
     // it points to. Both are on the runtime class path, and the host keeps its JARs in one directory.
     @Test
