@@ -4021,6 +4021,7 @@ private fun configureWinRTIdentityProjectDependencies(
     }
     if (selectedVariant == null) {
         project.configurations.configureEach(::observeConfiguration)
+        identityDependencies.withDependencies { resolutionStarted = true }
     } else {
         val observeSelectedVariant = {
             val selected = selectedVariant.get()
@@ -4030,6 +4031,10 @@ private fun configureWinRTIdentityProjectDependencies(
         }
         if (observeSelectedVariantImmediately) {
             observeSelectedVariant()
+        }
+        identityDependencies.withDependencies {
+            observeSelectedVariant()
+            resolutionStarted = true
         }
         project.gradle.projectsEvaluated { observeSelectedVariant() }
     }
