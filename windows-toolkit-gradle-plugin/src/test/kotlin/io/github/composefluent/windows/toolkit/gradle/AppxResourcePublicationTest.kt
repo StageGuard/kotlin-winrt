@@ -354,6 +354,37 @@ class AppxResourcePublicationTest {
         )
     }
 
+    @Test
+    fun kmp_targets_publish_distinct_resource_archives_in_the_root_publication() {
+        val root = Files.createTempDirectory("kotlin-winrt-kmp-resource-publication-")
+        writeGradleFile(root.resolve("settings.gradle"), "rootProject.name = 'producer'")
+        writeGradleFile(root.resolve("build.gradle"), """
+            plugins {
+                id 'org.jetbrains.kotlin.multiplatform'
+                id 'io.github.compose-fluent.windows-toolkit'
+                id 'maven-publish'
+            }
+            repositories { mavenCentral() }
+            kotlin { jvm('desktop'); mingwX64('nativeDesktop') }
+            tasks.register('inspectPublication') {
+                doLast {
+                    def classifiers = publishing.publications.kotlinMultiplatform.artifacts
+                        .findAll { it.extension == 'zip' }.collect { it.classifier }.sort()
+                    println 'resourceClassifiers=' + classifiers.join(',')
+                }
+            }
+        """.trimIndent())
+
+        val result = GradleRunner.create().withProjectDir(root.toFile()).withPluginClasspath()
+            .withArguments("inspectPublication", "--offline", "--stacktrace").build()
+
+        // Both archives belong to the root publication. Maven rejects a publication whose files
+        // share one classifier and extension.
+        assertTrue(result.output, result.output.contains(
+            "resourceClassifiers=desktopMain-appx-resources,nativeDesktopMain-appx-resources",
+        ))
+    }
+
     private fun publish(projectDir: Path, repository: Path) {
         val result = GradleRunner.create()
             .withProjectDir(projectDir.toFile())
