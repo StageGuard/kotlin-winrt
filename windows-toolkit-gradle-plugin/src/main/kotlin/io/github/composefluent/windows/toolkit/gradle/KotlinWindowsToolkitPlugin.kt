@@ -2536,14 +2536,12 @@ private fun configureWinRTGeneration(
     // IDE preparation task path so a clean import does not consume stale build outputs.
     project.afterEvaluate {
         val prepared = runCatching {
-            val identities = generateTask.get().dependencyIdentityFiles
-            if (identities.buildDependencies.getDependencies(null).isNotEmpty()) {
-                throw StaticPreparationUnavailable("dependency identity producers require IDE preparation tasks")
-            }
             prepareWinRTStaticProjectionSources(
                 project = project,
                 extension = extension.packageReferences,
-                dependencyIdentityFiles = identities.files,
+                dependencyIdentityFiles = configurationTimeDependencyIdentityFiles(
+                    generateTask.get().dependencyIdentityFiles,
+                ),
                 generatedOutputDirectory = generateTask.flatMap { it.outputDirectory },
                 supportOwnerIdentity = if (project.extensions.findByType(KotlinMultiplatformExtension::class.java) == null) {
                     authoringTargetArtifactName.get()
