@@ -232,22 +232,12 @@ abstract class BuildWinAppHostTask : DefaultTask() {
         val libRoot = outputRoot.resolve("lib")
         GradleFileOperations.cleanDirectory(libRoot)
         Files.createDirectories(libRoot)
-        val staged = linkedMapOf<String, Path>()
-        runtimeClasspath.files
-            .filter { it.isFile && it.name.endsWith(".jar", ignoreCase = true) }
-            .sortedBy { it.absolutePath.lowercase() }
-            .forEach { jar ->
-                val key = jar.name.lowercase()
-                val previous = staged[key]
-                if (previous != null && previous != jar.toPath().toAbsolutePath().normalize()) {
-                    throw IllegalStateException(
-                        "JVM application host cannot stage two runtime JARs with the same file name '${jar.name}': " +
-                            "$previous and ${jar.toPath().toAbsolutePath().normalize()}",
-                    )
-                }
-                if (previous == null) {
-                    staged[key] = jar.toPath().toAbsolutePath().normalize()
-                    Files.copy(jar.toPath(), libRoot.resolve(jar.name))
+        stagedRuntimeJarNames(runtimeClasspath.files.filter { it.isFile && it.name.endsWith(".jar", ignoreCase = true) })
+            .forEach { (jar, name) ->
+                val target = libRoot.resolve(name)
+                // JARs with one file name and one content share a staged file.
+                if (!Files.exists(target)) {
+                    Files.copy(jar.toPath(), target)
                 }
             }
     }
@@ -410,6 +400,31 @@ abstract class BuildWinAppHostTask : DefaultTask() {
         }
     }
 }
+
+/**
+ * File names for the runtime JARs of a JVM application host, which keeps them in one directory
+ * and puts every JAR in it on the class path.
+ *
+ * Different modules can publish a JAR under one file name: a JetBrains redirect artifact is
+ * named like the androidx JAR it points to. Such JARs get a digest of their content in their
+ * name, so the result depends neither on where the files are nor on their order.
+ */
+internal fun stagedRuntimeJarNames(jars: Iterable<java.io.File>): Map<java.io.File, String> {
+    val distinctJars = jars.distinctBy { jar -> jar.toPath().toAbsolutePath().normalize() }
+    return distinctJars.groupBy { jar -> jar.name.lowercase() }.values.flatMap { sameName ->
+        sameName.map { jar ->
+            jar to if (sameName.size == 1) {
+                jar.name
+            } else {
+                "${jar.nameWithoutExtension}-${runtimeJarDigest(jar).take(8)}.${jar.extension}"
+            }
+        }
+    }.toMap()
+}
+
+private fun runtimeJarDigest(jar: java.io.File): String =
+    java.security.MessageDigest.getInstance("SHA-256").digest(jar.readBytes())
+        .joinToString("") { byte -> "%02x".format(byte) }
 
 internal fun applicationHostSource(
     mainClass: String,

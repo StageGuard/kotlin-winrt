@@ -1,6 +1,9 @@
 package io.github.composefluent.windows.toolkit.gradle
 
+import java.nio.file.Files
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -35,5 +38,26 @@ class BuildWinAppHostTaskTest {
         assertTrue(source.contains("if (0) {"))
         assertFalse(source.contains("if (true) {"))
         assertFalse(source.contains("if (false) {"))
+    }
+
+    // A JetBrains redirect artifact is a JAR without classes that is named like the androidx JAR
+    // it points to. Both are on the runtime class path, and the host keeps its JARs in one directory.
+    @Test
+    fun runtime_jars_of_different_modules_with_one_file_name_are_all_staged() {
+        val root = Files.createTempDirectory("kotlin-winrt-host-runtime-jars-")
+        fun jar(module: String, name: String, content: String) =
+            Files.createDirectories(root.resolve(module)).resolve(name).also { Files.writeString(it, content) }.toFile()
+        val library = jar("androidx.lifecycle", "lifecycle-common-jvm-2.11.0.jar", "classes")
+        val redirect = jar("org.jetbrains.androidx.lifecycle", "lifecycle-common-jvm-2.11.0.jar", "redirect")
+        val libraryCopy = jar("copy", "lifecycle-common-jvm-2.11.0.jar", "classes")
+        val other = jar("org.jetbrains.kotlin", "kotlin-stdlib-2.4.0.jar", "stdlib")
+
+        val names = stagedRuntimeJarNames(listOf(redirect, other, library, libraryCopy, library))
+
+        assertEquals("kotlin-stdlib-2.4.0.jar", names.getValue(other))
+        assertTrue(names.getValue(library), Regex("lifecycle-common-jvm-2\\.11\\.0-[0-9a-f]{8}\\.jar").matches(names.getValue(library)))
+        assertNotEquals(names.getValue(library), names.getValue(redirect))
+        assertEquals(names.getValue(library), names.getValue(libraryCopy))
+        assertEquals(names, stagedRuntimeJarNames(listOf(libraryCopy, library, other, redirect)))
     }
 }
