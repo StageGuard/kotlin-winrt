@@ -37,6 +37,32 @@ class WinRTXamlDeclarationsTest {
     }
 
     @Test
+    fun property_protocol_tracks_defaults_and_rejects_ambiguous_members() {
+        val original = WinRTXamlDeclarations.parse(fixture())
+        val first = WinRTXamlPropertyDeclaration("Count", "Int32", false, true, "CountChanged", "2", null,
+            WinRTXamlSourceLocation(3, 5))
+        val second = first.copy(name = "Title", typeName = "String", isValueType = false,
+            changedHandler = "TitleChanged", defaultValue = "escaped \"text\"\nline")
+        val page = original.pages.single().copy(features = original.pages.single().features + "properties",
+            properties = listOf(first, second))
+        val index = original.copy(schemaVersion = 3, pages = listOf(page))
+        val canonical = WinRTXamlDeclarations.canonicalText(index)
+        assertEquals(second.defaultValue, WinRTXamlDeclarations.parse(canonical).pages.single().properties.last().defaultValue)
+        assertEquals(WinRTXamlDeclarations.fingerprint(index), WinRTXamlDeclarations.fingerprint(index.copy(
+            pages = listOf(page.copy(properties = page.properties.reversed())))))
+        assertNotEquals(WinRTXamlDeclarations.fingerprint(index), WinRTXamlDeclarations.fingerprint(index.copy(
+            pages = listOf(page.copy(properties = listOf(first.copy(defaultValue = "3"), second))))))
+        for (invalid in listOf(
+            index.copy(schemaVersion = 2),
+            index.copy(pages = listOf(page.copy(properties = listOf(first, first)))),
+            index.copy(pages = listOf(page.copy(properties = listOf(first.copy(name = "myButton"))))),
+            index.copy(pages = listOf(page.copy(properties = listOf(first.copy(isReadOnly = true))))),
+            index.copy(pages = listOf(page.copy(properties = listOf(first.copy(defaultValueMarkup = "<Button/>"))))),
+            index.copy(pages = listOf(page.copy(properties = listOf(first, second.copy(changedHandler = first.changedHandler))))),
+        )) assertThrows(IllegalArgumentException::class.java) { WinRTXamlDeclarations.canonicalText(invalid) }
+    }
+
+    @Test
     fun rejects_incompatible_or_ambiguous_declarations() {
         for (invalid in listOf(
             fixture().replace("\"SchemaVersion\": 1", "\"SchemaVersion\": ${WinRTXamlDeclarations.SCHEMA_VERSION + 1}"),
