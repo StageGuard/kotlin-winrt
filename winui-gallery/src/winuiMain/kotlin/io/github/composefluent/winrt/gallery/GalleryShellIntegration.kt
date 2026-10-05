@@ -12,20 +12,26 @@ import windows.ui.startscreen.JumpList
 import windows.ui.startscreen.JumpListItem
 import windows.ui.startscreen.JumpListSystemGroupKind
 
+private val jumpListUpdates = Mutex()
+
 internal suspend fun updateGalleryJumpList() {
     if (!GalleryPreferences.packaged || !JumpList.isSupported()) return
-    val list = JumpList.loadCurrentAsync().await()
-    list.items.clear(); list.systemGroupKind = JumpListSystemGroupKind.None
-    for (group in listOf("Recent", "Favorites")) {
-        GalleryPreferences.routes(group).forEach { id ->
-            val page = GalleryCatalog.pages.firstOrNull { it.id == id } ?: return@forEach
-            list.items.add(JumpListItem.createWithArguments(id, page.title).apply {
-                groupName = group; description = "Go to ${page.title}"
-                logo = Uri(page.image.ifBlank { "ms-appx:///Assets/AppList.png" })
-            })
+    // Loading the shell and navigating to the initial route can request updates
+    // together. Keep the whole load/save transaction exclusive across windows.
+    jumpListUpdates.withLock {
+        val list = JumpList.loadCurrentAsync().await()
+        list.items.clear(); list.systemGroupKind = JumpListSystemGroupKind.None
+        for (group in listOf("Recent", "Favorites")) {
+            GalleryPreferences.routes(group).forEach { id ->
+                val page = GalleryCatalog.pages.firstOrNull { it.id == id } ?: return@forEach
+                list.items.add(JumpListItem.createWithArguments(id, page.title).apply {
+                    groupName = group; description = "Go to ${page.title}"
+                    logo = Uri(page.image.ifBlank { "ms-appx:///Assets/AppList.png" })
+                })
+            }
         }
+        list.saveAsync().await()
     }
-    list.saveAsync().await()
 }
 
 // Activation ordering: https://learn.microsoft.com/windows/apps/develop/notifications/app-notifications/app-notifications-quickstart
