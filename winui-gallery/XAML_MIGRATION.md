@@ -182,8 +182,8 @@ inspection. Native and IDE status are recorded independently.
 
 ## Target and IDE acceptance
 
-- JVM: complete XBF/Kotlin/authoring/PRI package build passes. The current package opens ItemsRepeater with the shared Recipe model and style dictionaries; all five existing basic-control interaction checks pass.
-- mingwX64: both clean Windows CI builds produce signed Release MSIX packages with the released compiler. The CI Native package opens ItemsRepeater on the local Windows host and passes all five existing basic-control interaction checks. Local semantic/XBF compilation and XAML ABI checks pass; local Release linking encountered a shared-heap exhaustion and then an unexplained daemon exit, so the current Native runtime check uses the CI binary.
+- JVM: the complete XBF/Kotlin/authoring/PRI pipeline and signed MSIX package build pass locally with the released compiler. The resulting development package passes all five existing basic-control checks with package identity and captured assertion output. ItemsRepeater also opens with the shared Recipe model and style dictionaries.
+- mingwX64: the complete XBF/Kotlin/authoring/PRI pipeline and signed Release MSIX package build pass locally with the released compiler. The resulting development package passes all five existing basic-control checks with package identity and captured assertion output. Earlier CI binaries also opened ItemsRepeater with the shared model and style dictionaries.
 - IDE: CLI FIR/IR integration exists. This repository does not ship a Kotlin IDE plugin for no-annotation discovery, a XAML designer or hot reload. Gradle success is not IDE completion/navigation validation.
 
 The real resource-library build graph passes no-change, dictionary edit, rename,
@@ -191,6 +191,10 @@ last-XAML removal and restoration checks on both targets. The real Gallery JVM
 graph also passes a batch change of control type, element name and handler
 parameter type, followed by restoration of the original sources. No additional
 validation harness is shipped for these checks.
+
+Runtime and authoring tests on both targets cover aggregated page collection,
+external COM pinning, borrowed interface lifetimes, apartment releases after
+reference tracking, and composition alias invalidation after disposal.
 
 The current Computer Use runtime cannot initialize its Windows helper. The
 earlier route activation results and current CLI interaction checks therefore
