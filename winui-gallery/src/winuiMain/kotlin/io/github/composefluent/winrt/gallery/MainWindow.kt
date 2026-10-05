@@ -34,7 +34,7 @@ internal class MainWindow : winui3package.WindowEx() {
     override fun initializeComponent() {
         super.initializeComponent()
         GalleryWindows.track(checkNotNull(window))
-        title = "Kotlin WinUI Gallery"
+        title = checkNotNull(GalleryTitle)
         systemBackdrop = winui3package.MicaBackdropWithFallback().apply {
             fallback = winui3package.TenMicaBackdrop().apply { bindThemeTo = root }
         }

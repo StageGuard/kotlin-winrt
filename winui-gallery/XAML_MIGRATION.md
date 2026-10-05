@@ -13,7 +13,7 @@ Native controls and data scopes are produced by the shared projection,
 authoring and compiler pipelines; the Gallery has no private ABI shim.
 
 The Windows JVM and `mingwX64` builds compile every listed route and the shared
-resources with CI compiler `0.1.0-preview.5`, protocol 2. The original template, phased
+resources with CI compiler `0.1.0-preview.6`, protocol 3. The original template, phased
 binding, deferred element, `x:Bind` expression and substitution paths are
 implemented by the compiler pipeline. The 355 independent sample documents live in
 `SampleDefinitions/<Route>/*.txt`; pure markup examples display one XAML tab.
