@@ -38,6 +38,7 @@ import org.gradle.api.file.RegularFile
 import org.gradle.api.provider.Provider
 import org.gradle.api.tasks.Copy
 import org.gradle.api.tasks.Input
+import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.SourceSetContainer
 import org.gradle.api.tasks.JavaExec
 import org.gradle.api.tasks.testing.Test
@@ -1334,6 +1335,22 @@ private fun configureWinAppTasks(
         },
     )
     val stageApplicationPackageTask = registerApplicationPackageStage("stageWinAppPackage")
+    val launcherIconTask = project.tasks.register(
+        taskName("compileWinAppIcon"),
+        CompileWinAppIconTask::class.java,
+        Action<CompileWinAppIconTask> { task ->
+            task.group = "windows-package"
+            task.description = "Compiles the launcher ICO into Win32 resources for JVM and Native executables."
+            task.launcherIcon.set(options.launcherIcon)
+            task.windowsSdkVersion.set(project.provider { extension.windowsSdkVersion.orNull.orEmpty() })
+            task.windowsSdkRegistryRoots.set(windowsSdkRegistryRoots)
+            task.outputFile.set(project.layout.buildDirectory.file(
+                selectedVariant.map { variant ->
+                    "kotlin-winrt/application-icon/${variant.id.toSafeDirectoryName()}/launcher.res"
+                },
+            ))
+        },
+    )
     configureMingwApplicationEntry(
         project,
         mingwApplicationEntryTask,
@@ -1341,6 +1358,7 @@ private fun configureWinAppTasks(
         stageApplicationPackageTask,
         selectedVariant,
         options.console,
+        launcherIconTask,
     )
     val launcherCompileTask = project.tasks.register(
         taskName("compileWinAppLauncher"),
@@ -1349,6 +1367,9 @@ private fun configureWinAppTasks(
             task.group = "windows-package"
             task.description = "Compiles the native Kotlin/WinRT JVM application launcher independently from staging."
             task.launcherOnly.set(true)
+            task.launcherIconResource.set(options.launcherIcon.flatMap {
+                launcherIconTask.flatMap { icon -> icon.outputFile }
+            })
             task.outputDirectory.set(
                 project.layout.buildDirectory.dir(
                     selectedVariant.map { variant ->
@@ -1900,6 +1921,7 @@ private fun configureMingwApplicationEntry(
     stageApplicationPackageTask: TaskProvider<StageWinAppPackageTask>,
     selectedVariant: Provider<WinAppVariant>,
     console: Provider<Boolean>,
+    launcherIconTask: TaskProvider<CompileWinAppIconTask>,
 ) {
     val kotlinExtension = project.extensions.findByType(KotlinMultiplatformExtension::class.java) ?: return
     val applicationLayoutDirectory = project.provider {
@@ -1926,6 +1948,14 @@ private fun configureMingwApplicationEntry(
             executable.entryPoint = entryTask.flatMap { it.entryPoint }.get()
         }
         executable.linkerOpts(if (console.get()) "-Wl,/SUBSYSTEM:CONSOLE" else "-Wl,/SUBSYSTEM:WINDOWS")
+        if (launcherIconTask.get().launcherIcon.isPresent) {
+            val resource = launcherIconTask.flatMap { it.outputFile }
+            executable.linkerOpts(resource.get().asFile.absolutePath)
+            executable.linkTaskProvider.configure { task ->
+                task.dependsOn(launcherIconTask)
+                task.inputs.file(resource).withPathSensitivity(PathSensitivity.NONE)
+            }
+        }
         // Kotlin/Native's model name (for example, releaseExecutable) is not the staged file
         // name. Keep the output file Provider as the single source for payload, manifest and run
         // task wiring so custom binary names and target-specific base names remain consistent.

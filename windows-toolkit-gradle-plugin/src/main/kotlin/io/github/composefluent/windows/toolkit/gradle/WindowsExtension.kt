@@ -298,6 +298,8 @@ abstract class WinAppOptions @Inject constructor(
     /** Defaults to the module's selected Windows SDK; may describe a separately tested OS version. */
     val maxVersionTested: Property<String> = objects.property(String::class.java)
     val mainClass: Property<String> = objects.property(String::class.java)
+    /** Win32 .ico file embedded in the JVM launcher or Kotlin/Native executable. */
+    val launcherIcon: RegularFileProperty = objects.fileProperty()
     val console: Property<Boolean> = objects.property(Boolean::class.java).convention(false)
     val generateProjectPri: Property<Boolean> = objects.property(Boolean::class.java).convention(true)
     val projectPriIndexName: Property<String> = objects.property(String::class.java).convention("")
@@ -369,6 +371,7 @@ abstract class WinAppOptions @Inject constructor(
         minWindowsVersion.convention(defaults.minWindowsVersion)
         maxVersionTested.convention(defaults.maxVersionTested)
         mainClass.convention(defaults.mainClass)
+        launcherIcon.convention(defaults.launcherIcon)
         console.convention(defaults.console)
         generateProjectPri.convention(defaults.generateProjectPri)
         projectPriIndexName.convention(defaults.projectPriIndexName)

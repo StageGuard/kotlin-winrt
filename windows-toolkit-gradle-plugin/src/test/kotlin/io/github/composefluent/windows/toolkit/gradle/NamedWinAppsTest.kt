@@ -44,6 +44,7 @@ class NamedWinAppsTest {
         extension.packageReferences.windowsSdk("10.0.26100.0")
         extension.application { application ->
             application.mainClass.set("sample.First")
+            application.launcherIcon.set(project.layout.projectDirectory.file("shared.ico"))
             application.minWindowsVersion.set("10.0.19041.0")
             application.packagePayloadFiles.from(project.file("shared.txt"))
             application.variants.create("first") {
@@ -53,6 +54,7 @@ class NamedWinAppsTest {
             application.variants.create("second") {
                 it.variant("jvm:main")
                 it.mainClass.set("sample.Second")
+                it.launcherIcon.set(project.layout.projectDirectory.file("second.ico"))
                 it.minWindowsVersion.set("10.0.22000.0")
                 it.maxVersionTested.set("10.0.28000.0")
                 it.packagePayloadFiles.setFrom(project.file("second.txt"))
@@ -70,6 +72,14 @@ class NamedWinAppsTest {
         assertEquals("sample.Second", second.mainClass.get())
         assertTrue(first.console.get())
         assertTrue(second.console.get())
+        val firstIcon = project.tasks.getByName("compileWinAppIconFirst") as CompileWinAppIconTask
+        val secondIcon = project.tasks.getByName("compileWinAppIconSecond") as CompileWinAppIconTask
+        assertEquals("shared.ico", firstIcon.launcherIcon.get().asFile.name)
+        assertEquals("second.ico", secondIcon.launcherIcon.get().asFile.name)
+        assertNotEquals(firstIcon.outputFile.get(), secondIcon.outputFile.get())
+        val firstLauncher = project.tasks.getByName("compileWinAppLauncherFirst") as BuildWinAppHostTask
+        assertEquals(firstIcon.outputFile.get(), firstLauncher.launcherIconResource.get())
+        assertTrue(firstIcon in firstLauncher.taskDependencies.getDependencies(firstLauncher))
         assertNotEquals(first.outputDirectory.get(), second.outputDirectory.get())
         assertNotEquals(first.generatedSourceDirectory.get(), second.generatedSourceDirectory.get())
         val firstPackagedRun = project.tasks.getByName("runWinAppPackageFirst") as RunWinAppPackageTask

@@ -69,6 +69,12 @@ abstract class BuildWinAppHostTask : DefaultTask() {
     @get:PathSensitive(PathSensitivity.RELATIVE)
     abstract val launcherExecutable: RegularFileProperty
 
+    /** Compiled Win32 icon resource, shared with the Kotlin/Native link path. */
+    @get:InputFile
+    @get:Optional
+    @get:PathSensitive(PathSensitivity.NONE)
+    abstract val launcherIconResource: RegularFileProperty
+
     @get:Input
     abstract val mainClass: Property<String>
 
@@ -362,6 +368,7 @@ abstract class BuildWinAppHostTask : DefaultTask() {
         val arguments = buildList {
             add(toolchain.compiler)
             addAll(toolchain.compilerArguments)
+            launcherIconResource.orNull?.let { add(it.asFile.absolutePath) }
             addAll(
                 listOf(
                     "/nologo",
