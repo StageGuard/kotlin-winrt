@@ -37,9 +37,28 @@ class XamlPluginCapabilityTest {
             val source = File(root, "Page.kt").apply { writeText("""
                 package probe
                 interface Connector { fun connect(): String }
+                annotation class NumberLiteral(val value: String)
                 class Page {
                     private var clicks = 0
-                    private fun onClick(): String = namedElement + (++clicks)
+                    private fun onClick(
+                        @NumberLiteral("-128") byte: Byte,
+                        @NumberLiteral("255") unsignedByte: UByte,
+                        @NumberLiteral("-32768") short: Short,
+                        @NumberLiteral("65535") unsignedShort: UShort,
+                        @NumberLiteral("-2147483648") int: Int,
+                        @NumberLiteral("4294967295") unsignedInt: UInt,
+                        @NumberLiteral("-9223372036854775808") long: Long,
+                        @NumberLiteral("18446744073709551615") unsignedLong: ULong,
+                        @NumberLiteral("1.2345678") float: Float,
+                        @NumberLiteral("-0.0") double: Double,
+                    ): String {
+                        check(byte == Byte.MIN_VALUE && unsignedByte == UByte.MAX_VALUE)
+                        check(short == Short.MIN_VALUE && unsignedShort == UShort.MAX_VALUE)
+                        check(int == Int.MIN_VALUE && unsignedInt == UInt.MAX_VALUE)
+                        check(long == Long.MIN_VALUE && unsignedLong == ULong.MAX_VALUE)
+                        check(float == 1.2345678f && double.toRawBits() == (-0.0).toRawBits())
+                        return namedElement + (++clicks)
+                    }
                 }
                 class Unrelated
                 fun exercise(): String {
@@ -54,7 +73,7 @@ class XamlPluginCapabilityTest {
             URLClassLoader(arrayOf(destination.toURI().toURL()), javaClass.classLoader).use { loader ->
                 assertEquals("element1:element2:element1", loader.loadClass("probe.PageKt").getMethod("exercise").invoke(null))
                 val page = loader.loadClass("probe.Page")
-                assertTrue(java.lang.reflect.Modifier.isPrivate(page.getDeclaredMethod("onClick").modifiers))
+                assertTrue(java.lang.reflect.Modifier.isPrivate(page.declaredMethods.single { it.name.startsWith("onClick") }.modifiers))
                 assertFalse(java.lang.reflect.Modifier.isStatic(page.getDeclaredField("namedElement").modifiers))
                 assertTrue(page.methods.none { it.name == "setNamedElement" })
                 assertTrue(loader.loadClass("probe.Unrelated").interfaces.isEmpty())

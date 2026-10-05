@@ -17,6 +17,7 @@ import org.jetbrains.kotlin.fir.symbols.impl.*
 import org.jetbrains.kotlin.fir.types.*
 import org.jetbrains.kotlin.ir.builders.*
 import org.jetbrains.kotlin.ir.declarations.*
+import org.jetbrains.kotlin.ir.expressions.IrConst
 import org.jetbrains.kotlin.ir.symbols.UnsafeDuringIrConstructionAPI
 import org.jetbrains.kotlin.ir.util.fqNameWhenAvailable
 import org.jetbrains.kotlin.name.CallableId
@@ -92,7 +93,15 @@ private class ProbeBodies(private val targets: Set<ClassId>) : IrGenerationExten
             check((bridge.origin as? IrDeclarationOrigin.GeneratedByPlugin)?.pluginKey == ProbeKey)
             val handler = page.declarations.filterIsInstance<IrSimpleFunction>().single { it.name.asString() == "onClick" }
             bridge.body = DeclarationIrBuilder(pluginContext, bridge.symbol).irBlockBody {
-                +irReturn(irCall(handler.symbol).apply { dispatchReceiver = irGet(requireNotNull(bridge.dispatchReceiverParameter)) })
+                +irReturn(irCall(handler.symbol).apply {
+                    dispatchReceiver = irGet(requireNotNull(bridge.dispatchReceiverParameter))
+                    // Exercise the production x:Bind constant adapter through real K2 lowering.
+                    handler.parameters.filter { it.kind == IrParameterKind.Regular }.forEachIndexed { index, parameter ->
+                        val literal = parameter.annotations.single().arguments[0] as IrConst
+                        arguments[index + 1] = XamlCompiledBindingBodies(pluginContext, emptyMap())
+                            .numericLiteral(literal.value as String, parameter.type, this@irBlockBody)
+                    }
+                })
             }
         }
     }

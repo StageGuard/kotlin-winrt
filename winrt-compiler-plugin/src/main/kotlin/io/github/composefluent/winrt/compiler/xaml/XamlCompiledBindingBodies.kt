@@ -787,11 +787,31 @@ internal class XamlCompiledBindingBodies(
                 expression.typeName == "null" -> irNull(expected?.makeNullable() ?: pluginContext.irBuiltIns.anyNType)
                 expression.typeName == "System.Boolean" || expected?.isBoolean() == true -> irBoolean(expression.value == "true")
                 expression.typeName == "System.String" || expected?.isString() == true -> irString(expression.value.orEmpty())
-                expected?.isInt() == true -> irInt(requireNotNull(expression.value).toInt())
-                expected?.isLong() == true -> irLong(requireNotNull(expression.value).toLong())
-                else -> IrConstImpl.double(startOffset, endOffset, pluginContext.irBuiltIns.doubleType, requireNotNull(expression.value).toDouble())
+                else -> numericLiteral(requireNotNull(expression.value), expected, builder)
             }
             else -> error("Compiled XAML expression ${expression.kind} needs its capability slice")
+        }
+    }
+
+    internal fun numericLiteral(value: String, expected: IrType?, builder: IrBuilderWithScope): IrConst = with(builder) {
+        // FunctionNumberParam validates the original text against the parameter type.
+        // This is the final IR adaptation of the shared metadata classification.
+        // FIR uses signed constant carriers with unsigned IR types too; never round
+        // their bits through Double or parse a constant again during binding updates.
+        val scalar = expected?.classFqName?.asString()?.removePrefix("kotlin.")?.let(::winRTFundamentalTypeForName)
+        val type = expected?.makeNotNull() ?: pluginContext.irBuiltIns.doubleType
+        when (scalar) {
+            WinRTFundamentalType.Int8 -> IrConstImpl.byte(startOffset, endOffset, type, value.toByte())
+            WinRTFundamentalType.UInt8 -> IrConstImpl.byte(startOffset, endOffset, type, value.toUByte().toByte())
+            WinRTFundamentalType.Int16 -> IrConstImpl.short(startOffset, endOffset, type, value.toShort())
+            WinRTFundamentalType.UInt16 -> IrConstImpl.short(startOffset, endOffset, type, value.toUShort().toShort())
+            WinRTFundamentalType.Int32 -> IrConstImpl.int(startOffset, endOffset, type, value.toInt())
+            WinRTFundamentalType.UInt32 -> IrConstImpl.int(startOffset, endOffset, type, value.toUInt().toInt())
+            WinRTFundamentalType.Int64 -> IrConstImpl.long(startOffset, endOffset, type, value.toLong())
+            WinRTFundamentalType.UInt64 -> IrConstImpl.long(startOffset, endOffset, type, value.toULong().toLong())
+            WinRTFundamentalType.Float -> IrConstImpl.float(startOffset, endOffset, type, value.toFloat())
+            WinRTFundamentalType.Double -> IrConstImpl.double(startOffset, endOffset, type, value.toDouble())
+            else -> IrConstImpl.double(startOffset, endOffset, pluginContext.irBuiltIns.doubleType, value.toDouble())
         }
     }
 
