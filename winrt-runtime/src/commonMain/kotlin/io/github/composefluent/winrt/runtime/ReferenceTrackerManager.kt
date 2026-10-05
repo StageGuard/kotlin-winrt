@@ -212,7 +212,13 @@ internal object ReferenceTrackerManager {
                 finalizerReleases.toList().also { finalizerReleases.clear() }
             }
             // A failed release must not strand the other references queued by this collection.
-            releaseAll(releases)
+            try {
+                releaseAll(releases)
+            } finally {
+                // Finalizers avoid crossing apartments while Native GC waits for them.
+                // XAML has unlocked its graph; release this apartment's queued owners now.
+                drainDeferredComReleasesForCurrentContext()
+            }
         }
     }
 
