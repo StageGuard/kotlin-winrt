@@ -45,16 +45,27 @@ class WinRTXamlBindingState {
 
     fun connected(connectionId: Int): Boolean {
         val pending = deferredAssignments.filterKeys { it.first == connectionId }
+        if (pending.isEmpty()) return false
         pending.keys.forEach(deferredAssignments::remove)
-        pending.values.forEach { it() }
-        return pending.isNotEmpty()
+        // CSharpPagePass2.Connect applies deferred values before installing
+        // TwoWay listeners. Reconnection is still a source-to-target update.
+        val wasUpdating = updating
+        updating = true
+        try {
+            pending.values.forEach { it() }
+        } catch (error: Throwable) {
+            failUpdate(error)
+        } finally {
+            updating = wasUpdating
+        }
+        return true
     }
 
     /** Target changes must not write back values while a source update is running. */
     fun changeTarget(change: () -> Unit, update: (Boolean) -> Unit) {
         if (!active || updating) return
         updating = true
-        try { change() } finally { updating = false }
+        try { change() } catch (error: Throwable) { failUpdate(error) } finally { updating = false }
         refresh(false, update)
     }
 
@@ -65,10 +76,7 @@ class WinRTXamlBindingState {
             disconnect(phase)
             update(initial)
         } catch (error: Throwable) {
-            active = false
-            deferredAssignments.clear()
-            try { disconnect() } catch (cleanupError: Throwable) { error.addSuppressed(cleanupError) }
-            throw error
+            failUpdate(error)
         } finally {
             updating = false
         }
@@ -78,6 +86,13 @@ class WinRTXamlBindingState {
         active = false
         deferredAssignments.clear()
         disconnect()
+    }
+
+    private fun failUpdate(error: Throwable): Nothing {
+        try { stopTracking() } catch (cleanupError: Throwable) {
+            if (cleanupError !== error) error.addSuppressed(cleanupError)
+        }
+        throw error
     }
 
     private fun disconnect(phase: Int? = null) {

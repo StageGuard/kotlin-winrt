@@ -55,6 +55,11 @@ compilation, final XAML compilation, and main Kotlin compilation stages.
 Compiled bindings use generated calls with template scopes, phase tracking,
 deferred elements, converters and binding updates. JVM and Native execution
 remain separate integration checks, recorded in the Gallery migration inventory.
+Replaying a deferred target value is a source update and suppresses TwoWay
+write-back, matching XamlCompiler's assignment-before-listener connection order.
+A failed update, deferred setter or write-back stops tracking, discards pending
+assignments and attempts every subscription removal before propagating the
+original error. Cleanup errors are attached to that original error.
 `FallbackValue` and `TargetNullValue` literals use the target member type and the
 same SDK, mapped-type and `CreateFromString` conversion bridge as `x:Property`
 defaults. Numeric function arguments and indexes become constants of their
