@@ -7,6 +7,7 @@ import org.jetbrains.kotlin.fir.FirSession
 import org.jetbrains.kotlin.fir.declarations.FirClassLikeDeclaration
 import org.jetbrains.kotlin.fir.extensions.*
 import org.jetbrains.kotlin.fir.plugin.*
+import org.jetbrains.kotlin.fir.resolve.providers.symbolProvider
 import org.jetbrains.kotlin.fir.symbols.impl.*
 import org.jetbrains.kotlin.fir.types.*
 import org.jetbrains.kotlin.name.*
@@ -31,6 +32,11 @@ internal val xamlBindingsUnloadedName = Name.identifier("_kotlinXamlBindingsUnlo
 internal val xamlRefreshBindingsName = Name.identifier("updateBindings")
 internal val xamlBindingScopeId = ClassId.topLevel(FqName("io.github.composefluent.winrt.runtime.WinRTXamlBindingScope"))
 internal val xamlBindingScopeOwnerId = ClassId.topLevel(FqName("io.github.composefluent.winrt.runtime.WinRTXamlBindingScopeOwner"))
+internal val xamlPropertyEventId = ClassId.topLevel(FqName("io.github.composefluent.winrt.runtime.WinRTXamlPropertyChangedEvent"))
+internal fun WinRTXamlPropertyDeclaration.eventStorageName() = Name.identifier("_kotlinXamlPropertyEvent_$name")
+internal fun WinRTXamlPropertyDeclaration.eventFunctions(): List<Name> = changedHandler?.let {
+    listOf(Name.identifier("add$it"), Name.identifier("remove$it"))
+}.orEmpty()
 internal val xamlScopeUpdateName = Name.identifier("_kotlinXamlUpdateScope")
 internal val xamlScopeConnectName = Name.identifier("_kotlinXamlConnectScope")
 internal val xamlScopeWriteBackName = Name.identifier("_kotlinXamlWriteBackScope")
@@ -66,6 +72,9 @@ private class XamlDeclarations(session: FirSession, private val pages: Map<Class
     override fun getCallableNamesForClass(classSymbol: FirClassSymbol<*>, context: MemberGenerationContext): Set<Name> {
         val page = pages[classSymbol.classId] ?: return emptySet()
         return page.connections.mapNotNull { it.storageName()?.let(Name::identifier) }.toSet() +
+            page.properties.map { Name.identifier(it.name) } +
+            page.properties.filterNot { it.isReadOnly }.map { it.eventStorageName() } +
+            page.properties.flatMap { it.eventFunctions() } +
             setOf(xamlStateName, xamlConstructionStateName, xamlConstructionName, xamlLoadName, xamlInitializeName, xamlConnectName, xamlBindingName) +
             if (page.hasCompiledBindings()) setOf(xamlBindingStateName, xamlUpdateBindingsName, xamlBindingsChangedName,
                 xamlBindingsLoadingName, xamlBindingsUnloadedName, xamlRefreshBindingsName) + page.bindBackNames() +
@@ -76,6 +85,19 @@ private class XamlDeclarations(session: FirSession, private val pages: Map<Class
         val owner = context?.owner ?: return emptyList()
         val page = pages[owner.classId] ?: return emptyList()
         val name = callableId.callableName
+        val property = page.properties.singleOrNull { it.name == name.asString() }
+        if (property != null) {
+            val exact = ClassId.topLevel(FqName(property.typeName))
+            val id = if (session.symbolProvider.getClassLikeSymbolByClassId(exact) is FirClassSymbol<*>) exact
+                else xamlTypeClassId(property.typeName)
+            return listOf(createMemberProperty(owner, XamlDeclarationKey, name,
+                id.createConeType(session, nullable = !property.isValueType), isVal = property.isReadOnly).symbol)
+        }
+        if (page.properties.any { !it.isReadOnly && it.eventStorageName() == name }) {
+            return listOf(createMemberProperty(owner, XamlDeclarationKey, name, xamlPropertyEventId.createConeType(session)) {
+                visibility = Visibilities.Private
+            }.symbol)
+        }
         val element = page.connections.singleOrNull { it.storageName() == name.asString() }
         val state = name == xamlStateName || name == xamlConstructionStateName
         val type = if (state) xamlStateId else if (name == xamlBindingStateName) xamlBindingStateId
@@ -89,6 +111,17 @@ private class XamlDeclarations(session: FirSession, private val pages: Map<Class
         val owner = context?.owner ?: return emptyList()
         val page = pages[owner.classId] ?: return emptyList()
         val name = callableId.callableName
+        if (page.properties.any { name in it.eventFunctions() }) {
+            // PropertyChangedEventHandler is a typealias to EventHandler<Args?>,
+            // so FIR must construct the expanded delegate type.
+            val args = ClassId.topLevel(FqName("microsoft.ui.xaml.data.PropertyChangedEventArgs"))
+                .createConeType(session, nullable = true)
+            val handler = ClassId.topLevel(FqName("windows.foundation.EventHandler"))
+                .createConeType(session, typeArguments = arrayOf(args))
+            return listOf(createMemberFunction(owner, XamlDeclarationKey, name, session.builtinTypes.unitType.coneType) {
+                valueParameter(Name.identifier("handler"), handler)
+            }.symbol)
+        }
         if (name in xamlScopeNames && page.hasTemplateScopes()) {
             return listOf(createMemberFunction(owner, XamlDeclarationKey, name,
                 if (name == xamlScopeCreateName) session.builtinTypes.nullableAnyType.coneType else session.builtinTypes.unitType.coneType) {

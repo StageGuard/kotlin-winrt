@@ -112,7 +112,8 @@ private class XamlSemanticExport(
             // constructor is needed only if IXamlType activates it from markup.
             authored += WinRTXamlApplicationTypeDescriptor(page.className, page.baseTypeName,
                 listOf("Microsoft.UI.Xaml.Markup.IComponentConnector"), isActivatable = isActivatable)
-            applicationMembers[page.className] = xamlApplicationProperties(klass, types, applicationTypes)
+            applicationMembers[page.className] = xamlApplicationProperties(klass, types, applicationTypes,
+                xamlProperties = page.properties)
             val handlers = page.connections.flatMap { it.events }.map { it.handlerName }.distinct().sorted().map { name ->
                 val handler = requireNotNull(xamlIrFunctions(klass, name).singleOrNull()) {
                     "XAML ${page.className}: missing or overloaded handler $name"

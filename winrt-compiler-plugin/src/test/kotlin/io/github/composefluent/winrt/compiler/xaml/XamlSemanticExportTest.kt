@@ -137,7 +137,17 @@ class XamlSemanticExportTest {
         val root = File("build/xaml-semantic-integration").absoluteFile.apply { mkdirs() }
         val xaml = File(root, "MainPage.xaml").apply { writeText("""
             <Page xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-                xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" x:Class="probe.MainPage">
+                xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="using:probe" x:Class="probe.MainPage">
+                <x:Properties>
+                    <x:Property Name="Counter" Type="x:Int32" DefaultValue="2" />
+                    <x:Property Name="ReadOnlyCount" Type="x:Int32" IsReadOnly="True" DefaultValue="7" />
+                    <x:Property Name="ChoiceValue" Type="local:Choice" />
+                    <x:Property Name="ParsedValue" Type="local:ParsedValue" DefaultValue="12" />
+                    <x:Property Name="Title" Type="x:String" ChangedHandler="TitleUpdated" DefaultValue="escaped &quot;text&quot;" />
+                    <x:Property Name="DefaultButton" Type="Button">
+                        <x:Property.DefaultValue><Button Content="Default" /></x:Property.DefaultValue>
+                    </x:Property>
+                </x:Properties>
                 <Button x:Name="myButton" Click="onClick" Content="Click" />
             </Page>
         """.trimIndent()) }
@@ -152,7 +162,9 @@ class XamlSemanticExportTest {
         val header = File(root, "Header.winmd")
         WinRTPortableExecutableMetadataWriter.writeXamlSchemaWinmd(
             "Header", listOf(WinRTXamlApplicationTypeDescriptor(
-                "probe.MainPage", "Microsoft.UI.Xaml.Controls.Page")), emptyMap(), header.toPath(),
+                "probe.MainPage", "Microsoft.UI.Xaml.Controls.Page"),
+                WinRTXamlApplicationTypeDescriptor("probe.Choice", "System.Enum", enumEntries = listOf("Zero", "One")),
+                WinRTXamlApplicationTypeDescriptor("probe.ParsedValue")), emptyMap(), header.toPath(),
             WinRTMetadataLoader.loadTypeAssemblyNames(directories.flatMap {
                 it.listFiles()!!.filter { file -> file.extension == "winmd" }.map { file -> file.toPath() }
             }))
@@ -182,9 +194,13 @@ class XamlSemanticExportTest {
         val input = File(root, "declarations.json").apply { writeText(WinRTXamlDeclarations.canonicalText(declarations)) }
         val index = File(root, "metadata.tsv").apply { writeText(
             "Microsoft.UI.Xaml.Controls.Page\tRuntimeClass\t\tSystem.Object\n" +
+                "Microsoft.UI.Xaml.Controls.Button\tRuntimeClass\t\tSystem.Object\n" +
                 "Microsoft.UI.Xaml.RoutedEventArgs\tRuntimeClass\t\tSystem.Object\n") }
         val source = File(root, "MainPage.kt").apply { writeText("""
             package probe
+            enum class Choice { Zero, One }
+            @io.github.composefluent.winrt.runtime.WinRTXamlCreateFromString("parse")
+            class ParsedValue(val value: Int) { companion object { fun parse(text: String) = ParsedValue(text.toInt()) } }
             class MainPage(failConstruction: Boolean = false) : microsoft.ui.xaml.controls.Page() {
                 var constructed = false
                 var tag = "primary"
@@ -203,16 +219,35 @@ class XamlSemanticExportTest {
                     check(tag != "failHook") { "hook failed" }
                 }
                 private fun onClick(sender: Any?, args: microsoft.ui.xaml.RoutedEventArgs) { myButton.text += "clicked" }
+                fun changeCounter(value: Int) { Counter = value }
             }
             fun exercise(): String {
                 val first = MainPage()
                 check(first.initializationCount == 1)
+                check(first.Counter == 2 && first.ReadOnlyCount == 7 && first.Title == "escaped \"text\"")
+                check(first.ChoiceValue == Choice.Zero)
+                check(first.ParsedValue!!.value == 12)
+                check(first.DefaultButton!!.text == "Default")
+                val calls = mutableListOf<String>()
+                val handler = microsoft.ui.xaml.data.PropertyChangedEventHandler { sender, args ->
+                    check(sender === first); calls += args!!.propertyName!!
+                }
+                first.addCounterChanged(handler)
+                first.Counter = 3
+                first.Counter = 3
+                first.changeCounter(4)
+                check(calls == listOf("Counter", "Counter"))
+                first.removeCounterChanged(handler)
+                first.changeCounter(5)
+                check(calls.size == 2)
                 first.initializeComponent()
+                check(first.Counter == 5)
                 first.myButton.raise()
                 first.initializeComponent()
                 first.myButton.raise()
                 val factory: () -> MainPage = ::MainPage
                 val second = factory()
+                check(second.Counter == 2 && second.DefaultButton !== first.DefaultButton)
                 second.initializeComponent()
                 second.myButton.raise()
                 check(first.getBindingConnector(0, null) == null)
@@ -270,7 +305,27 @@ class XamlSemanticExportTest {
         val symbols = File(root, "symbols.json")
         val registrar = File(root, "Definitions.kt").apply { writeText("""
             package io.github.composefluent.winrt.generated.xaml
-            object KotlinXamlApplicationDefinitionsProbe { fun registerAll() {} }
+            object KotlinXamlApplicationDefinitionsProbe { fun registerAll() {
+                io.github.composefluent.winrt.runtime.registerWinRTXamlEnumType(probe.Choice::class, "probe.Choice", probe.Choice.entries.toTypedArray())
+                io.github.composefluent.winrt.runtime.registerWinRTXamlTypeDefinition(io.github.composefluent.winrt.runtime.WinRTXamlTypeDefinition(
+                    type = probe.ParsedValue::class, name = "probe.ParsedValue", baseName = "System.Object", isWinRTComponent = false,
+                    createFromString = { probe.ParsedValue.parse(it) }))
+            } }
+            internal inline fun <reified T> kotlinWinRTXamlMemberValue(value: Any?): T {
+                if (value is T || value !is String) return value as T
+                return io.github.composefluent.winrt.runtime.convertWinRTXamlLiteral(T::class, value) { type, text ->
+                    check(type == Int::class); text.toInt()
+                } as T
+            }
+        """.trimIndent()) }
+        val markup = File(root, "Markup.kt").apply { writeText("""
+            package microsoft.ui.xaml.markup
+            class XamlReader { companion object Metadata {
+                fun load(text: String): Any {
+                    check(text.contains("xmlns=") && text.contains("Content=\"Default\""))
+                    return microsoft.ui.xaml.controls.Button().apply { this.text = "Default" }
+                }
+            } }
         """.trimIndent()) }
         fun compile(final: Boolean = false): Pair<ExitCode, String> {
             val classpath = listOf(Unit::class.java, WinRTXamlLoadState::class.java).joinToString(File.pathSeparator) {
@@ -278,11 +333,12 @@ class XamlSemanticExportTest {
             }
             val options = mapOf("xamlDeclarations" to input.absolutePath) + if (final)
                 mapOf("xamlImplementation" to File(root, "final.output.json").absolutePath)
-            else mapOf("metadataIndex" to index.absolutePath, "xamlSemanticOutput" to symbols.absolutePath, "xamlReferencesFile" to referenceFile.absolutePath)
+            else mapOf("metadataIndex" to index.absolutePath, "xamlSemanticOutput" to symbols.absolutePath, "xamlReferencesFile" to referenceFile.absolutePath,
+                "xamlApplicationHeader" to header.absolutePath)
             val arguments = listOf("-no-stdlib", "-no-reflect", "-jvm-target", "17", "-classpath", classpath,
                 "-Xplugin=${System.getProperty("winrt.test.fullPluginJar")}", "-d", File(root, if (final) "final" else "semantic-only").absolutePath,
                 source.absolutePath, base.absolutePath, argsType.absolutePath, button.absolutePath, connector.absolutePath,
-                uri.absolutePath, registrar.absolutePath) +
+                uri.absolutePath, registrar.absolutePath, markup.absolutePath) +
                 options.flatMap { (key, value) -> listOf("-P", "plugin:io.github.composefluent.winrt.compiler:$key=$value") }
             val diagnostics = ByteArrayOutputStream()
             val result = PrintStream(diagnostics).use { K2JVMCompiler().exec(it, *arguments.toTypedArray()) }
@@ -296,10 +352,14 @@ class XamlSemanticExportTest {
         assertEquals("onClick", handler.getValue("Name").jsonPrimitive.content)
         assertEquals(listOf("System.Object", "Microsoft.UI.Xaml.RoutedEventArgs"),
             handler.getValue("ParameterTypeNames").jsonArray.map { it.jsonPrimitive.content })
-        val page = WinRTMetadataLoader.load(File(root, "KotlinXaml.winmd").toPath()).namespaces.single().types.single()
+        val page = WinRTMetadataLoader.load(File(root, "KotlinXaml.winmd").toPath()).namespaces.single().types.single { it.name == "MainPage" }
         // Application schema includes private methods for XAML access checks; it is
         // distinct from the authored component's exported ABI.
         assertEquals(WinRTMethodVisibility.Private, page.methods.single { it.name == "onClick" }.visibility)
+        assertEquals(setOf("Counter", "ReadOnlyCount", "Title", "DefaultButton"), page.properties
+            .filter { it.name in setOf("Counter", "ReadOnlyCount", "Title", "DefaultButton") }.map { it.name }.toSet())
+        assertTrue(page.properties.single { it.name == "ReadOnlyCount" }.isReadOnly)
+        assertTrue(page.events.any { it.name == "TitleUpdated" })
         val finalOutput = invokeXaml("final", JsonObject(compilerInput + mapOf(
             "IsPass1" to JsonPrimitive(false), "KotlinSymbols" to output,
             "LocalAssembly" to JsonArray(listOf(item(File(root, "KotlinXaml.winmd")))),
@@ -343,11 +403,15 @@ class XamlSemanticExportTest {
                 Any::class.java, loader.loadClass("microsoft.ui.xaml.RoutedEventArgs")).modifiers))
             assertFalse(java.lang.reflect.Modifier.isStatic(pageClass.getDeclaredField("myButton").modifiers))
             assertTrue(pageClass.methods.none { it.name == "setMyButton" })
+            assertTrue(pageClass.methods.none { it.name == "setReadOnlyCount" })
             assertEquals("external:reference", loader.loadClass("consumer.ConsumerKt").getMethod("exercise").invoke(null))
         }
         val validSource = source.readText()
         source.writeText("""
             package probe
+            enum class Choice { Zero, One }
+            @io.github.composefluent.winrt.runtime.WinRTXamlCreateFromString("parse")
+            class ParsedValue(val value: Int) { companion object { fun parse(text: String) = ParsedValue(text.toInt()) } }
             class MainPage : microsoft.ui.xaml.controls.Page() {
                 private fun onClick(sender: Any?, args: microsoft.ui.xaml.RoutedEventArgs) { myButton.text += "clicked" }
             }

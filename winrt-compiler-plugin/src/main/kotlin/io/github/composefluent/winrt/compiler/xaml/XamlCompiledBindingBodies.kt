@@ -24,6 +24,7 @@ import org.jetbrains.kotlin.name.*
 internal class XamlCompiledBindingBodies(
     private val pluginContext: IrPluginContext,
     private val classes: Map<String?, IrClass>,
+    private val pages: Map<String, WinRTXamlPageDeclaration> = emptyMap(),
 ) {
     private fun projection(name: String): IrClass = if (name == "System.Object") pluginContext.irBuiltIns.anyClass.owner
         else classes[name] ?: requireNotNull(pluginContext.referenceClass(
@@ -167,8 +168,12 @@ internal class XamlCompiledBindingBodies(
                         else -> null
                     }
                     val notifier = projection("Microsoft.UI.Xaml.Data.INotifyPropertyChanged")
+                    val changedEvent = pages[sourceClass.fqNameWhenAvailable?.asString()]?.properties
+                        ?.singleOrNull { it.name == expression.name }?.changedHandler
                     val subscribe = irBlock {
                         if (dp != null) +subscribeProperty(this, observerClass, observer(), state(), irGet(sourceObject), dp, changed)
+                        else if (changedEvent != null) +subscribeEvent(this, observerClass, observer(), state(),
+                            irGet(sourceObject), sourceClass, changedEvent, changed)
                         else if (sourceClass.defaultType.isSubtypeOfClass(notifier.symbol)) +subscribeEvent(this, observerClass,
                             observer(), state(), irGet(sourceObject), notifier, "PropertyChanged", changed)
                         // CSharpPagePass2.UpdateChildListeners also tracks collection

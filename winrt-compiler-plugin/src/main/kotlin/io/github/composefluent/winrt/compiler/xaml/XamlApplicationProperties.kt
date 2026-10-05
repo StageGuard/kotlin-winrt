@@ -26,9 +26,12 @@ internal fun xamlApplicationTypeReference(type: IrType, types: Map<String, Index
     val primitive = winRTFundamentalTypeForName(name.removePrefix("kotlin."))
     val indexed = resolveIndexedWinRTTypeByProjectedName(name, types)
     val collection = winRTCollectionAbiNameForKotlinType(name)
+    val mapped = winRTMappedTypeForKotlinName(name)
     val metadataName = when {
         primitive != null -> primitive.toKotlinProjectionTypeName()
         name == "kotlin.Any" -> "System.Object"
+        isWinRTGuidTypeName(name.substringAfterLast('.')) && name == "io.github.composefluent.winrt.runtime.Guid" -> "System.Guid"
+        mapped != null -> mapped.abiQualifiedName
         name in applicationTypes -> name
         collection != null -> "$collection`${arguments.size}"
         indexed != null -> indexed.qualifiedName.substringBefore('`') + if (arguments.isEmpty()) "" else "`${arguments.size}"
@@ -53,6 +56,7 @@ internal fun xamlApplicationProperties(
     strictPublicProperties: Boolean = true,
     includeInternal: Boolean = true,
     accessible: (IrDeclaration) -> Boolean = { true },
+    xamlProperties: List<WinRTXamlPropertyDeclaration> = emptyList(),
 ): WinRTXamlApplicationTypeMembers {
     if (klass.kind == org.jetbrains.kotlin.descriptors.ClassKind.ENUM_CLASS) return WinRTXamlApplicationTypeMembers()
     fun visible(function: IrSimpleFunction?) = function != null && accessible(function) &&
@@ -76,7 +80,8 @@ internal fun xamlApplicationProperties(
         .mapTo(mutableSetOf()) { it.name.asString() }
     val properties = owners.flatMap { owner -> owner.declarations.filterIsInstance<IrProperty>().map { owner to it } }
         .filter { (_, property) -> accessible(property) && property.getter?.let(accessible) == true &&
-            property.origin == IrDeclarationOrigin.DEFINED && property.getter != null &&
+            (property.origin == IrDeclarationOrigin.DEFINED ||
+                xamlProperties.any { it.name == property.name.asString() }) && property.getter != null &&
             property.getter?.dispatchReceiverParameter != null &&
             property.getter!!.parameters.none { parameter ->
                 parameter.kind == IrParameterKind.ExtensionReceiver || parameter.kind == IrParameterKind.Context
@@ -106,7 +111,9 @@ internal fun xamlApplicationProperties(
             val handlerType = runCatching { resolve(parameter.type) }.getOrNull() ?: return@mapNotNull null
             if (types[handlerType.qualifiedName?.substringBefore('`')]?.kind != WinRTTypeKind.Delegate.name) return@mapNotNull null
             WinRTXamlApplicationEvent(name, handlerType)
-        }
+        } + xamlProperties.mapNotNull { property -> property.changedHandler?.let {
+            WinRTXamlApplicationEvent(it, WinRTTypeRef.named("Microsoft.UI.Xaml.Data.PropertyChangedEventHandler"))
+        } }
     val methods = owners.flatMap { owner ->
         owner.declarations.filterIsInstance<IrSimpleFunction>()
             .filter { accessible(it) && it.origin == IrDeclarationOrigin.DEFINED && it.overriddenSymbols.isEmpty() &&
