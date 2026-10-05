@@ -52,22 +52,31 @@ internal fun xamlApplicationProperties(
     applicationTypes: Set<String>,
     strictPublicProperties: Boolean = true,
     includeInternal: Boolean = true,
+    accessible: (IrDeclaration) -> Boolean = { true },
 ): WinRTXamlApplicationTypeMembers {
     if (klass.kind == org.jetbrains.kotlin.descriptors.ClassKind.ENUM_CLASS) return WinRTXamlApplicationTypeMembers()
-    fun visible(function: IrSimpleFunction?) = function != null &&
+    fun visible(function: IrSimpleFunction?) = function != null && accessible(function) &&
         (function.visibility == DescriptorVisibilities.PUBLIC || (includeInternal && function.visibility == DescriptorVisibilities.INTERNAL))
 
-    fun resolve(type: IrType): WinRTTypeRef = xamlApplicationTypeReference(type, types, applicationTypes)
+    fun resolve(type: IrType): WinRTTypeRef {
+        fun available(type: IrType): Boolean =
+            (type.classOrNull?.owner?.let(accessible) != false) &&
+                (type as? IrSimpleType)?.arguments.orEmpty().all { it.typeOrNull?.let(::available) != false }
+        require(available(type)) { "XAML signature refers to an unavailable Kotlin type: $type" }
+        return xamlApplicationTypeReference(type, types, applicationTypes)
+    }
 
-    val owners = listOf(klass) + listOfNotNull(klass.companionObject())
+    val owners = (listOf(klass) + listOfNotNull(klass.companionObject())).filter(accessible)
     fun visibleOwner(owner: IrClass) = owner === klass || owner.visibility == DescriptorVisibilities.PUBLIC ||
         (includeInternal && owner.visibility == DescriptorVisibilities.INTERNAL)
     val dependencyPropertyNames = owners.filter { it.kind == org.jetbrains.kotlin.descriptors.ClassKind.OBJECT }
         .flatMap { it.declarations.filterIsInstance<IrProperty>() }
-        .filter { it.getter?.returnType?.classFqName?.asString() == "microsoft.ui.xaml.DependencyProperty" }
+        .filter { accessible(it) && it.getter?.let(accessible) == true &&
+            it.getter?.returnType?.classFqName?.asString() == "microsoft.ui.xaml.DependencyProperty" }
         .mapTo(mutableSetOf()) { it.name.asString() }
     val properties = owners.flatMap { owner -> owner.declarations.filterIsInstance<IrProperty>().map { owner to it } }
-        .filter { (_, property) -> property.origin == IrDeclarationOrigin.DEFINED && property.getter != null &&
+        .filter { (_, property) -> accessible(property) && property.getter?.let(accessible) == true &&
+            property.origin == IrDeclarationOrigin.DEFINED && property.getter != null &&
             property.getter?.dispatchReceiverParameter != null &&
             property.getter!!.parameters.none { parameter ->
                 parameter.kind == IrParameterKind.ExtensionReceiver || parameter.kind == IrParameterKind.Context
@@ -100,7 +109,7 @@ internal fun xamlApplicationProperties(
         }
     val methods = owners.flatMap { owner ->
         owner.declarations.filterIsInstance<IrSimpleFunction>()
-            .filter { it.origin == IrDeclarationOrigin.DEFINED && it.overriddenSymbols.isEmpty() &&
+            .filter { accessible(it) && it.origin == IrDeclarationOrigin.DEFINED && it.overriddenSymbols.isEmpty() &&
                 !it.isSuspend && it.typeParameters.isEmpty() &&
                 it.parameters.none { parameter -> parameter.kind == IrParameterKind.ExtensionReceiver ||
                     parameter.kind == IrParameterKind.Context || parameter.varargElementType != null } &&

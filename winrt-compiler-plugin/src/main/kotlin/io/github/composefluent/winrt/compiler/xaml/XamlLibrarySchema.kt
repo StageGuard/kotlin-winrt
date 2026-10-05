@@ -20,6 +20,9 @@ import org.jetbrains.kotlin.ir.symbols.UnsafeDuringIrConstructionAPI
 import org.jetbrains.kotlin.ir.types.*
 import org.jetbrains.kotlin.ir.util.isNullable
 import org.jetbrains.kotlin.ir.util.*
+import org.jetbrains.kotlin.ir.expressions.IrGetEnumValue
+import org.jetbrains.kotlin.name.FqName
+import org.jetbrains.kotlin.name.Name
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.io.path.writeText
@@ -61,7 +64,7 @@ private class XamlLibrarySchema(private val root: Path, private val assembly: St
     override fun generate(moduleFragment: IrModuleFragment, pluginContext: IrPluginContext) {
         val types = readAuthoringMetadataIndex(metadataIndex)
         fun publicClasses(declarations: List<IrDeclaration>): List<IrClass> = declarations.filterIsInstance<IrClass>()
-            .filter { it.visibility == DescriptorVisibilities.PUBLIC }
+            .filter { it.visibility == DescriptorVisibilities.PUBLIC && xamlLibraryDeclarationAccessible(it) }
             .flatMap { listOf(it) + publicClasses(it.declarations) }
         val classes = moduleFragment.files.flatMap { publicClasses(it.declarations) }
             .filter { it.origin == IrDeclarationOrigin.DEFINED && it.typeParameters.isEmpty() && !it.isInner &&
@@ -80,7 +83,8 @@ private class XamlLibrarySchema(private val root: Path, private val assembly: St
         } }
         val members = classes.associate { klass ->
             klass.fqNameWhenAvailable!!.asString() to xamlApplicationProperties(klass, types, names,
-                strictPublicProperties = false, includeInternal = false).let { schema -> schema.copy(
+                strictPublicProperties = false, includeInternal = false,
+                accessible = ::xamlLibraryDeclarationAccessible).let { schema -> schema.copy(
                 properties = schema.properties.filter { property -> property.isPublic &&
                     (klass.declarations + klass.companionObject()?.declarations.orEmpty()).filterIsInstance<IrProperty>().any { it.name.asString() == property.name &&
                         it.getter?.visibility == DescriptorVisibilities.PUBLIC } },
@@ -99,7 +103,7 @@ private class XamlLibrarySchema(private val root: Path, private val assembly: St
                 interfaces.getValue(klass).map { it.first.typeName },
                 isActivatable = defaultConstructor(klass) != null, isSealed = klass.modality == Modality.FINAL,
                 enumEntries = if (klass.kind == ClassKind.ENUM_CLASS) klass.declarations.filterIsInstance<IrEnumEntry>()
-                    .map { it.name.asString() } else null)
+                    .filter(::xamlLibraryDeclarationAccessible).map { it.name.asString() } else null)
         }
         Files.createDirectories(root)
         WinRTPortableExecutableMetadataWriter.writeXamlSchemaWinmd("$assembly.KotlinXaml", descriptors, members,
@@ -109,7 +113,7 @@ private class XamlLibrarySchema(private val root: Path, private val assembly: St
         val source = root.resolve("src/io/github/composefluent/winrt/generated/xaml/$registrar.kt")
         Files.createDirectories(source.parent)
         source.writeText(buildString {
-            appendLine("@file:Suppress(\"UNCHECKED_CAST\")")
+            appendLine("@file:Suppress(\"UNCHECKED_CAST\", \"DEPRECATION\")")
             appendLine("@file:OptIn(kotlin.ExperimentalUnsignedTypes::class)")
             appendLine("package io.github.composefluent.winrt.generated.xaml")
             appendLine("object $registrar {")
@@ -117,7 +121,8 @@ private class XamlLibrarySchema(private val root: Path, private val assembly: St
             for ((klass, descriptor) in classes.zip(descriptors)) {
                 val name = descriptor.runtimeClassName
                 if (klass.kind == ClassKind.ENUM_CLASS) {
-                    appendLine("    io.github.composefluent.winrt.runtime.registerWinRTXamlEnumType($name::class, ${literal(name)}, $name.entries.toTypedArray())")
+                    val entries = requireNotNull(descriptor.enumEntries).joinToString(", ") { literal(it) }
+                    appendLine("    io.github.composefluent.winrt.runtime.registerWinRTXamlEnumType($name::class, ${literal(name)}, $name.entries.filter { it.name in setOf($entries) }.toTypedArray())")
                     continue
                 }
                 appendLine("    io.github.composefluent.winrt.runtime.registerWinRTXamlTypeDefinition(io.github.composefluent.winrt.runtime.WinRTXamlTypeDefinition(")
@@ -133,7 +138,7 @@ private class XamlLibrarySchema(private val root: Path, private val assembly: St
                 appendLine("      isWinRTComponent = ${requiresComponentAuthoring(componentTypes(klass), klass.hasAnnotation(org.jetbrains.kotlin.name.FqName(WINRT_AUTHORED_RUNTIME_CLASS_ANNOTATION)))},")
                 if (descriptor.isActivatable) appendLine("      activate = { $name() },")
                 val initializer = if (klass.kind == ClassKind.OBJECT) name else klass.companionObject()
-                    ?.takeIf { it.visibility == DescriptorVisibilities.PUBLIC }?.let { "$name.${it.name.asString()}" }
+                    ?.takeIf { it.visibility == DescriptorVisibilities.PUBLIC && xamlLibraryDeclarationAccessible(it) }?.let { "$name.${it.name.asString()}" }
                 initializer?.let { appendLine("      initializer = { $it; Unit },") }
                 members.getValue(name).contentProperty?.let { content ->
                     appendLine("      contentProperty = ${literal(content)},")
@@ -152,7 +157,8 @@ private class XamlLibrarySchema(private val root: Path, private val assembly: St
                     val kotlinType = propertyType.sourceType()
                     appendLine(xamlPropertyRegistrationSource(name, member, kotlinType, convert).prependIndent("        ") + ",")
                 }
-                val functions = (klass.declarations + klass.companionObject()?.declarations.orEmpty()).filterIsInstance<IrSimpleFunction>()
+                val functions = (klass.declarations + klass.companionObject()?.takeIf(::xamlLibraryDeclarationAccessible)?.declarations.orEmpty())
+                    .filterIsInstance<IrSimpleFunction>().filter(::xamlLibraryDeclarationAccessible)
                 val accessors = members.getValue(name).methods.filter { it.isStatic && it.isPublic }.map { method ->
                     val function = functions.single { function -> function.name.asString() == method.name && function.visibility == DescriptorVisibilities.PUBLIC &&
                         (function.parentClassOrNull?.kind == ClassKind.OBJECT) == method.isStatic &&
@@ -179,7 +185,7 @@ private class XamlLibrarySchema(private val root: Path, private val assembly: St
     }
 
     private fun defaultConstructor(klass: IrClass): IrConstructor? = if (klass.kind != ClassKind.CLASS || klass.modality == Modality.ABSTRACT) null
-        else klass.constructors.firstOrNull { it.visibility == DescriptorVisibilities.PUBLIC &&
+        else klass.constructors.firstOrNull { it.visibility == DescriptorVisibilities.PUBLIC && xamlLibraryDeclarationAccessible(it) &&
             it.parameters.filter { it.kind == IrParameterKind.Regular }.all { it.defaultValue != null } }
 
     private fun IrType.sourceType(): String {
@@ -188,4 +194,15 @@ private class XamlLibrarySchema(private val root: Path, private val assembly: St
         return name + (if (args.isEmpty()) "" else args.joinToString(", ", "<", ">")) + if (isNullable()) "?" else ""
     }
     private fun literal(value: String): String = kotlinx.serialization.json.JsonPrimitive(value).toString()
+}
+
+/** Kotlin's HIDDEN and ERROR declarations cannot be named by a compiled accessor.
+ * Keep this adaptation at the IR schema boundary; CsWinRT's public member filtering
+ * remains the owner of the projected shape in xamlApplicationProperties.
+ */
+@OptIn(UnsafeDuringIrConstructionAPI::class)
+private fun xamlLibraryDeclarationAccessible(declaration: IrDeclaration): Boolean {
+    val annotation = (declaration as? IrAnnotationContainer)?.getAnnotation(FqName("kotlin.Deprecated")) ?: return true
+    val level = (annotation.getValueArgument(Name.identifier("level")) as? IrGetEnumValue)?.symbol?.owner?.name?.asString()
+    return level != "ERROR" && level != "HIDDEN"
 }

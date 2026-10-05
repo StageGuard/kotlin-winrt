@@ -18,6 +18,72 @@ import io.github.composefluent.winrt.runtime.WinRTXamlLoadState
 
 class XamlSemanticExportTest {
     @Test
+    fun library_schema_and_compiled_accessors_omit_unavailable_kotlin_declarations() {
+        // CsWinRT WinRTTypeWriter filters public exported members. A Kotlin model
+        // additionally excludes HIDDEN/ERROR declarations from compiled XAML access.
+        val root = Files.createTempDirectory("xaml-library-availability").toFile()
+        try {
+            val source = File(root, "Models.kt").apply { writeText("""
+                @file:Suppress("DEPRECATION_ERROR")
+                package probe
+                @Deprecated("removed", level = DeprecationLevel.HIDDEN) class Hidden {
+                    class Nested
+                }
+                @Deprecated("removed", level = DeprecationLevel.ERROR) class Removed
+                @Deprecated("legacy") class Legacy { var text = "legacy" }
+                class NoActivation @Deprecated("removed", level = DeprecationLevel.ERROR) constructor()
+                enum class Choice { Current, @Deprecated("removed", level = DeprecationLevel.HIDDEN) Removed }
+                class Model {
+                    var current = "current"
+                    @Deprecated("removed", level = DeprecationLevel.ERROR) var removed = "removed"
+                    @get:Deprecated("removed", level = DeprecationLevel.HIDDEN) val hiddenGetter = "hidden"
+                    @set:Deprecated("removed", level = DeprecationLevel.ERROR) var readOnly = "readable"
+                    val unavailableType = Removed()
+                    @Deprecated("removed", level = DeprecationLevel.HIDDEN) fun hiddenMethod() = "hidden"
+                    fun currentMethod() = "current"
+                    companion object {
+                        @Deprecated("removed", level = DeprecationLevel.ERROR) fun overload(value: String) = value
+                        fun overload(value: Int) = value
+                    }
+                }
+            """.trimIndent()) }
+            val metadata = File(root, "metadata.tsv").apply { writeText("") }
+            val references = File(root, "references.txt").apply { writeText("") }
+            val schema = File(root, "schema")
+            val classpath = listOf(Unit::class.java, WinRTXamlLoadState::class.java).joinToString(File.pathSeparator) {
+                File(it.protectionDomain.codeSource.location.toURI()).absolutePath
+            }
+            fun compile(sources: List<File>, destination: String, export: Boolean) {
+                val options = if (export) mapOf("metadataIndex" to metadata.absolutePath,
+                    "xamlLibraryOutput" to schema.absolutePath, "xamlLibraryAssembly" to "Probe",
+                    "xamlLibraryReferences" to references.absolutePath) else emptyMap()
+                val arguments = listOf("-no-stdlib", "-no-reflect", "-jvm-target", "17", "-classpath", classpath,
+                    "-d", File(root, destination).absolutePath) + sources.map { it.absolutePath } +
+                    (if (export) listOf("-Xplugin=${System.getProperty("winrt.test.fullPluginJar")}") else emptyList()) +
+                    options.flatMap { (key, value) -> listOf("-P", "plugin:io.github.composefluent.winrt.compiler:$key=$value") }
+                val diagnostics = ByteArrayOutputStream()
+                val result = PrintStream(diagnostics).use { K2JVMCompiler().exec(it, *arguments.toTypedArray()) }
+                assertEquals(diagnostics.toString(), ExitCode.OK, result)
+            }
+            compile(listOf(source), "export", true)
+            val types = WinRTMetadataLoader.load(File(schema, "KotlinXaml.winmd").toPath()).namespaces.flatMap { it.types }
+            assertEquals(setOf("probe.Legacy", "probe.Model", "probe.NoActivation", "probe.Choice"),
+                types.map { it.qualifiedName }.toSet())
+            val model = types.single { it.name == "Model" }
+            assertEquals(setOf("current", "readOnly"), model.properties.map { it.name }.toSet())
+            assertTrue(model.properties.single { it.name == "readOnly" }.isReadOnly)
+            assertTrue(model.methods.none { it.name in setOf("hiddenMethod", "get_hiddenGetter", "get_removed") })
+            assertEquals(1, model.methods.count { it.name == "overload" })
+            val accessors = schema.resolve("src").walkTopDown().filter { it.isFile && it.extension == "kt" }.toList()
+            assertEquals(1, accessors.size)
+            assertFalse(accessors.single().readText().contains("activate = { probe.NoActivation() }"))
+            compile(listOf(source) + accessors, "with-accessors", false)
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
     fun component_identity_takes_precedence_over_its_own_xaml_schema() {
         // CsWinRT resolves a component TypeRef to its declaring assembly. The extra
         // Kotlin XAML schema describes members without exporting a second component.
