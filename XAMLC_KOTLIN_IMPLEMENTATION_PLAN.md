@@ -331,11 +331,11 @@ class MainPage : Page() {
 
 下面前五项中 Gallery 迁移实际需要的部分已经包含在本次最终目标内，按依赖关系在迁移对应页面前补齐；超出 Gallery 需求的通用化再单独推进。不得以本节的“后续”性质跳过 Gallery 必需功能。
 
-- [ ] doing: 自定义 Kotlin XAML 类型构造及完整 `IXamlType`/`IXamlMember` 描述。
-- [ ] doing: `x:Bind OneTime`，随后 OneWay/TwoWay、INPC、集合通知、转换器及更新生命周期。
-- [ ] doing: DataTemplate 的独立 connector/binding scope、`x:Load` 和延迟创建/卸载。
-- [ ] doing: 任意 Kotlin ViewModel 的 schema 适配，不强制其导出为 WinRT 组件。
-- [ ] doing: App.xaml、资源库和跨模块 provider 的完整覆盖。
+- [x] 自定义 Kotlin XAML 类型构造及完整 `IXamlType`/`IXamlMember` 描述。
+- [x] `x:Bind OneTime`，随后 OneWay/TwoWay、INPC、集合通知、转换器及更新生命周期。
+- [x] DataTemplate 的独立 connector/binding scope、`x:Load` 和延迟创建/卸载。
+- [x] 任意 Kotlin ViewModel 的 schema 适配，不强制其导出为 WinRT 组件。
+- [x] App.xaml、资源库和跨模块 provider 的完整覆盖。
 - [ ] 更完整的 IDE 支持、导航、设计器与热重载；均不作为第一版隐含承诺。
 
 ## 外部参考

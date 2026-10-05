@@ -19,6 +19,13 @@ implemented by the compiler pipeline. The 355 independent sample documents live 
 `SampleDefinitions/<Route>/*.txt`; pure markup examples display one XAML tab.
 Complete page code is not repeated in each source expander.
 
+Runtime and generated-code checks on both targets cover independent binding
+instances, deferred assignment, failed-update cleanup, template phases and
+recycling, ControlTemplate completion and deferred namescopes, and ordinary
+model metadata with inherited and read-only members. Released-compiler and
+Gradle checks cover semantic export, library schemas and incremental resources.
+These checks validate the implementation separately from the UI acceptance below.
+
 The table records preliminary direct-executable load checks for all 122 routes
 on both targets. These short checks reported a live window and no immediate
 navigation or initialization error. Direct execution does not give the process
