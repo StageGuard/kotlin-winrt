@@ -85,6 +85,11 @@ object ComWrappersSupport {
     // identity. Match CsWinRT's reference-owning registration lifetime without
     // putting implicitly unboxed (possibly interned) scalar values in this table.
     private val registeredRcwReferences = WeakKeyStateMap<Any, ComObjectReference> { it.close() }
+    // CLR's native wrapper owns a registered composition. A weak owner proves
+    // its aliases are live without rooting the owner or its managed outer.
+    @OptIn(ExperimentalAtomicApi::class)
+    private val registeredComposableReferences =
+        WeakKeyStateMap<Any, AtomicReference<PlatformManagedWeakReference<WinRTComposableObjectReference>>>()
     private val closedInterfaceRcwCache = ClosedInterfaceRcwIdentityCache()
 
     init {
@@ -785,15 +790,19 @@ object ComWrappersSupport {
     // each call instead of caching a pointer after its reference was released.
     internal fun canCacheRcwIdentity(value: Any): Boolean = value is IWinRTObject || value is ComObjectReference ||
         (value is WinRTComposableObject && value.winRTComposableObjectReference != null) ||
-        registeredRcwReferences[value] != null
+        registeredRcwReferences[value] != null || liveRegisteredComposition(value) != null
 
     internal fun hasLiveRcwIdentity(value: Any): Boolean = when (value) {
         is WinRTObjectBase<*> -> value.tryGetInitializedNativeObject()?.isDisposed == false
         is IWinRTObject -> !value.nativeObject.isDisposed
         is ComObjectReference -> !value.isDisposed
         is WinRTComposableObject -> value.winRTComposableObjectReference?.instance?.isDisposed == false
-        else -> registeredRcwReferences[value]?.isDisposed == false
+        else -> registeredRcwReferences[value]?.isDisposed == false || liveRegisteredComposition(value) != null
     }
+
+    @OptIn(ExperimentalAtomicApi::class)
+    private fun liveRegisteredComposition(value: Any): WinRTComposableObjectReference? =
+        registeredComposableReferences[value]?.load()?.get()?.takeUnless { it.instance.isDisposed }
 
     private inline fun validateCachedRcw(
         pointerKey: Long,
@@ -1329,6 +1338,7 @@ object ComWrappersSupport {
             }
         }
 
+    @OptIn(ExperimentalAtomicApi::class)
     fun createComposableCCWForObject(
         value: Any,
         outerInterfaceId: Guid?,
@@ -1372,7 +1382,6 @@ object ComWrappersSupport {
             val innerPointer = PlatformAbi.fromRawComPtr(factoryResult.inner)
             if (!PlatformAbi.isNull(innerPointer)) {
                 host.registerExternalPointerAlias(innerPointer)
-                registerObjectForComInterface(value, innerPointer, retainUnownedReference = false)
             }
             val instancePointer = PlatformAbi.fromRawComPtr(factoryResult.instance)
             if (PlatformAbi.isNull(instancePointer)) {
@@ -1382,7 +1391,6 @@ object ComWrappersSupport {
                 )
             }
             host.registerExternalPointerAlias(instancePointer)
-            registerObjectForComInterface(value, instancePointer, retainUnownedReference = false)
             val aggregatesManagedOuter = isAggregation && factoryInstanceUsesManagedOuter(
                 instancePointer, host.borrowCachedInterfacePointer(host.primaryInterfaceId),
             )
@@ -1400,7 +1408,6 @@ object ComWrappersSupport {
                 }
             if (projectedInstancePointer != instancePointer) {
                 host.registerExternalPointerAlias(projectedInstancePointer)
-                registerObjectForComInterface(value, projectedInstancePointer, retainUnownedReference = false)
             }
             val referenceTrackerProbePointer =
                 if (!PlatformAbi.isNull(innerPointer)) innerPointer else projectedInstancePointer
@@ -1479,7 +1486,14 @@ object ComWrappersSupport {
                 // inner and tracker are released in their original apartment.
                 cleanup = if (nativeLifetime == null) host::close else ({}),
                 managedValue = value,
-            )
+            ).also { reference ->
+                val weakOwner = PlatformManagedWeakReference(reference)
+                registeredComposableReferences.getOrPut(value) { AtomicReference(weakOwner) }.store(weakOwner)
+                listOf(innerPointer, instancePointer, projectedInstancePointer)
+                    .filterNot(PlatformAbi::isNull).distinct().forEach { pointer ->
+                        registerObjectForComInterface(value, pointer, retainUnownedReference = false)
+                    }
+            }
         } catch (failure: Throwable) {
             try {
                 closeAllAutoCloseables(listOfNotNull(composedReference, innerReference, outerReference))
@@ -1520,11 +1534,13 @@ object ComWrappersSupport {
     }
 
     /** Test-only global reset. Callers must ensure no projected call is using a cached ABI. */
+    @OptIn(ExperimentalAtomicApi::class)
     fun clearRegistriesForTests() {
         ReferenceTrackerManager.clearForTests()
         ccwHostCache.clear()
         advanceCcwHostCacheGeneration()
         registeredRcwReferences.clear()
+        registeredComposableReferences.clear()
         rcwCache.clear()
         closedInterfaceRcwCache.clear()
         RuntimeRegistryResetSupport.clearForTests()

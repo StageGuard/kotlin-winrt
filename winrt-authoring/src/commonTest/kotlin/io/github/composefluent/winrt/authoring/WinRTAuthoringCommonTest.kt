@@ -573,6 +573,14 @@ class WinRTAuthoringCommonTest {
                 ComWrappersSupport.findObject(PlatformAbi.fromRawComPtr(requireNotNull(composed.inner).pointer), OuterComponent::class),
             )
         }
+        // A live composition restores the outer, but disposing it must not leave
+        // that alias valid while the independently retained inner is still alive.
+        assertEquals(
+            null,
+            ComWrappersSupport.findObject(
+                PlatformAbi.fromRawComPtr(requireNotNull(retainedInner).pointer), OuterComponent::class,
+            ),
+        )
         retainedInner?.close()
     }
 
