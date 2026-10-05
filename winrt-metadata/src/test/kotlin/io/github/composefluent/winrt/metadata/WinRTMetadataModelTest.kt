@@ -3570,6 +3570,14 @@ class WinRTMetadataModelTest {
         assertEquals(false, name.isPrivate)
         assertEquals("Sample.Foundation.IWidget", name.getterStaticCallTarget)
         assertEquals("Sample.Foundation.IWidgetMutable", name.setterStaticCallTarget)
+        // A loaded WinMD stores accessors on properties, not in the ordinary
+        // method list. CsWinRT's MethodSemantics merge must stay identical.
+        val normalized = model.copy(namespaces = model.namespaces.map { namespace ->
+            namespace.copy(types = namespace.types.map { type ->
+                if (type in listOf(widgetInterface, widgetMutableInterface)) type.copy(methods = emptyList()) else type
+            })
+        })
+        assertEquals(merge, normalized.semanticHelpers().classMemberMergeDescriptor(widget, context))
     }
 
     @Test
