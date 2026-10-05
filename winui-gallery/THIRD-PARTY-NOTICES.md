@@ -39,7 +39,10 @@ The Microsoft Gallery application icon and tile files are not reused. The
 top-level `AppList*`, `BadgeLogo*`, `StoreLogo*`, `SmallTile*`, `MedTile*`,
 `LargeTile*`, `WideTile*`, and `SplashScreen*` files under
 `src/winuiMain/appxResources/Assets` come from the user-supplied
-`kt-winrt-Gallery-Assets.zip`. `GalleryHeaderImage.png` and
+`kt-winrt-Gallery-Assets.zip`.
+`Assets/Tiles/GalleryIcon.ico` packages the existing `AppList.targetsize-*_altform-unplated.png`
+images from that same asset set as a multi-size ICO, without using Microsoft's application icon.
+`GalleryHeaderImage.png` and
 `HomeHeaderTiles/*` are separate MIT-licensed Gallery illustrations covered by
 the attribution above.
 

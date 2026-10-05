@@ -24,7 +24,7 @@
             IsBackButtonVisible="False"
             IsPaneToggleButtonVisible="True">
             <TitleBar.IconSource>
-                <ImageIconSource ImageSource="/Assets/AppList.png" />
+                <ImageIconSource ImageSource="/Assets/Tiles/GalleryIcon.ico" />
             </TitleBar.IconSource>
             <TitleBar.Content>
                 <AutoSuggestBox

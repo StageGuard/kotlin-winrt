@@ -107,6 +107,7 @@ internal class MainWindow : winui3package.WindowEx() {
         }
         extendsContentIntoTitleBar = true
         setTitleBar(titleBar)
+        appWindow?.setIcon("Assets/Tiles/GalleryIcon.ico")
         fun captionTheme() {
             val dark = root.actualTheme == ElementTheme.Dark
             appWindow?.titleBar?.apply {

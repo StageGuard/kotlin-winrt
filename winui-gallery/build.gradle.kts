@@ -113,6 +113,7 @@ tasks.named<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>("compileKotlinWinui
 windows {
     application {
         mainClass = "io.github.composefluent.winrt.gallery.MainKt"
+        launcherIcon = layout.projectDirectory.file("src/winuiMain/appxResources/Assets/Tiles/GalleryIcon.ico")
         minWindowsVersion = "10.0.19041.0"
         if (!gallerySigningCertificateThumbprint.isNullOrBlank()) {
             signPackage.set(true)
