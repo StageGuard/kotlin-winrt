@@ -29,15 +29,17 @@ internal fun writeXamlBindingSupportSource(root: Path, assemblyName: String? = n
             private var dataContextHandlerRemoved = false
 
             init {
-                connect(scopeId, target)
+                // GetBindingConnector sets the source without initializing it:
+                // the SDK has not connected the template children yet.
+                scope.setDataRoot(if (controlTemplate) root else root.dataContext)
                 if (!controlTemplate) {
+                    connect(scopeId, target)
                     root.dataContextChanged.add(::dataContextChanged)
                     DataTemplate.setExtensionInstance(root, this)
                 }
                 XamlBindingHelper.setDataTemplateComponent(root, this)
                 // CSharpPagePass2 subscribes Loading only for the file root.
                 // Template instances are initialized and recycled by the SDK.
-                scope.initialize(if (isControlTemplate) target else root.dataContext)
             }
 
             private fun dataContextChanged(sender: FrameworkElement, args: DataContextChangedEventArgs) {
@@ -45,7 +47,11 @@ internal fun writeXamlBindingSupportSource(root: Path, assemblyName: String? = n
             }
 
             override fun connect(connectionId: Int, target: Any?) {
-                scope.connect(connectionId, target)
+                // CSharpPagePass2.Connect uses the ControlTemplate connection
+                // as the signal that its children have finished connecting.
+                val complete = isControlTemplate && connectionId == scope.scopeId
+                scope.connect(connectionId, if (complete) root else target)
+                if (complete) scope.initialize(root)
                 if (scope.phaseOf(connectionId) != 0) XamlBindingHelper.suspendRendering(requireNotNull(target).asWinRT<UIElement>())
             }
             override fun getBindingConnector(connectionId: Int, target: Any?): IComponentConnector? =

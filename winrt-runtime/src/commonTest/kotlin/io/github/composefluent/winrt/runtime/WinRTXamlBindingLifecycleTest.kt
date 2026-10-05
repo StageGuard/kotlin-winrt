@@ -140,6 +140,11 @@ class WinRTXamlBindingLifecycleTest {
         for (scope in listOf(first, second)) { scope.registerPhase(1, 0); scope.registerPhase(2, 2) }
         val item = Any()
         val other = Any()
+        first.setDataRoot(item)
+        assertSame(item, first.dataRoot)
+        assertTrue(calls.isEmpty())
+        first.changed(null, null)
+        assertTrue(calls.isEmpty())
         assertEquals(2, first.processBindings(item, 0))
         assertEquals(-1, first.processBindings(item, 2))
         assertEquals(setOf(0, 2), active.getValue(first).toSet())

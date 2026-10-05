@@ -51,7 +51,8 @@ class WinRTXamlBindingScope(owner: WinRTXamlBindingScopeOwner, val scopeId: Int)
     fun createConnector(connectionId: Int, target: Any?): Any? =
         owner.tryGetTarget()?._kotlinXamlCreateScopeConnector(connectionId, target)
 
-    private fun replaceDataRoot(data: Any?) {
+    /** CSharpPagePass2.SetDataRoot prepares the source before template children connect. */
+    fun setDataRoot(data: Any?) {
         if (dataRoot !== data) {
             state.stopTracking()
             dataRoot = data
@@ -60,7 +61,7 @@ class WinRTXamlBindingScope(owner: WinRTXamlBindingScopeOwner, val scopeId: Int)
     }
 
     fun initialize(data: Any?) {
-        replaceDataRoot(data)
+        setDataRoot(data)
         if (data != null) {
             completedPhases = completedPhases or 1
             updatingPhases = if (phases.values.any { it != 0 }) 1 else -1
@@ -71,7 +72,7 @@ class WinRTXamlBindingScope(owner: WinRTXamlBindingScopeOwner, val scopeId: Int)
     /** Mirrors CSharpPagePass2.ProcessBindings and its phase bitmask. */
     fun processBindings(data: Any?, phase: Int): Int {
         require(phase in 0..31) { "Invalid XAML binding phase $phase" }
-        replaceDataRoot(data)
+        setDataRoot(data)
         // CSharpPagePass2 updates every requested phase, including phase 0
         // when a container still holds the same item. Initialize's one-shot
         // guard must not suppress that refresh of OneTime bindings.
