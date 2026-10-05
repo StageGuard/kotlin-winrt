@@ -247,6 +247,13 @@ internal class XamlCompiledBindingBodies(
                 for ((id, connections) in groups) branches += irBranch(irEquals(irCall(scopeId.symbol).apply {
                     dispatchReceiver = irGet(scope)
                 }, irInt(id)), irBlock {
+                    val scopeRoot = connections.first { it.isScopeRoot }
+                    // ControlTemplate's scope connection receives its templated
+                    // parent. Its realized visual root owns the template namescope,
+                    // just as a DataTemplate's root does in CSharpPagePass2.
+                    val nameScopeRoot = if (scopeRoot.isControlTemplateScope() && connections.any { it.bindings.any { binding -> binding.isLoad } })
+                        connections.first { it.id in scopeRoot.children }
+                    else scopeRoot
                     val named: (String, IrBuilderWithScope) -> IrExpression? = { name, builder ->
                         connections.firstOrNull { it.elementName == name || it.fieldName == name }?.let { connection ->
                             convert(builder.irCall(getOptionalTarget.symbol).apply {
@@ -272,7 +279,7 @@ internal class XamlCompiledBindingBodies(
                                 irNotEquals(irCall(getOptionalTarget.symbol).apply { dispatchReceiver = irGet(scope); arguments[1] = irInt(connection.id) }, irNull())
                             } },
                             loadAssignment = { nested, value -> loadElement(nested, connection, value,
-                                { nested.target(scope, connections.first { it.isScopeRoot }) },
+                                { nested.target(scope, nameScopeRoot) },
                                 { nested.irCall(getOptionalTarget.symbol).apply { dispatchReceiver = nested.irGet(scope); arguments[1] = nested.irInt(connection.id) } }) { cleanup ->
                                 for (element in connections.filter { it.id == connection.id || it.id in connection.children }) with(cleanup) {
                                     preserveDeferredBindings(this, element,

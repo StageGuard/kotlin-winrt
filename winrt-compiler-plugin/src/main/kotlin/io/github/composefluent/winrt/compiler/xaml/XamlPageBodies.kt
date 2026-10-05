@@ -195,7 +195,7 @@ internal class XamlPageBodies(private val index: WinRTXamlDeclarationIndex, priv
                                 irCallConstructor(connector.constructors.single().symbol, emptyList()).apply {
                                     arguments[0] = irGet(requireNotNull(binding.dispatchReceiverParameter))
                                     arguments[1] = irInt(root.scopeId); arguments[2] = irGet(target)
-                                    arguments[3] = irBoolean(root.typeName == "Microsoft.UI.Xaml.ControlTemplate")
+                                    arguments[3] = irBoolean(root.isControlTemplateScope())
                                 })
                         }
                     }

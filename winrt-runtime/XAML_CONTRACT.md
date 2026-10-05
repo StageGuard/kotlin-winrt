@@ -61,6 +61,9 @@ Template connector construction prepares the data root without updating child
 targets. DataTemplate updates run through the SDK's processing/context callbacks;
 ControlTemplate initialization waits for the template's completion connection,
 as in `CSharpPagePass2.GetBindingConnector` and `Connect`.
+ControlTemplate scopes use the SDK's `Microsoft.UI.Xaml.Controls.ControlTemplate`
+identity. Their data source is the templated parent, while deferred element
+lookups use the realized template visual root's namescope.
 Replaying a deferred target value is a source update and suppresses TwoWay
 write-back, matching XamlCompiler's assignment-before-listener connection order.
 A failed update, deferred setter or write-back stops tracking, discards pending

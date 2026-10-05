@@ -43,6 +43,8 @@ internal val xamlScopeWriteBackName = Name.identifier("_kotlinXamlWriteBackScope
 internal val xamlScopeCreateName = Name.identifier("_kotlinXamlCreateScopeConnector")
 internal val xamlScopeNames = setOf(xamlScopeUpdateName, xamlScopeConnectName, xamlScopeWriteBackName, xamlScopeCreateName)
 internal fun WinRTXamlPageDeclaration.hasTemplateScopes() = connections.any { it.isTemplateChild && it.isScopeRoot }
+internal fun WinRTXamlConnectionDeclaration.isControlTemplateScope() =
+    isScopeRoot && isTemplateChild && typeName == "Microsoft.UI.Xaml.Controls.ControlTemplate"
 
 internal fun WinRTXamlPageDeclaration.hasCompiledBindings() = connections.any { it.bindings.isNotEmpty() }
 internal fun WinRTXamlPageDeclaration.bindBackNames(): Set<Name> = connections.flatMap { connection ->
