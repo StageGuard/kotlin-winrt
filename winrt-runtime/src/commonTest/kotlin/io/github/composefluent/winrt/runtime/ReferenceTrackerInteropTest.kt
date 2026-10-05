@@ -8,6 +8,32 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class ReferenceTrackerInteropTest {
+    @Test
+    fun aggregated_native_owner_balances_borrowed_tracker_and_releases_inner_after_disconnect() {
+        // CsWinRT Init immediately releases aggregated tracker QI, while the
+        // CLR native wrapper owns one tracker-source reference and the inner.
+        FakeReferenceTrackerHost.create().use { host ->
+            var cleanupCalls = 0
+            val lifetime = WinRTNativeObjectLifetime.create(host.objectPointer.asRawComPtr()) { cleanupCalls++ }
+            val borrowed = ComPtr.create(host.objectPointer.asRawComPtr(), IID.IInspectable,
+                ownershipMode = ComOwnershipMode.Borrowed, isAggregated = true, trackContext = false,
+                nativeObjectLifetime = lifetime)
+            assertTrue(lifetime.initializeReferenceTracker(borrowed))
+            assertEquals(1, host.trackerAddRefFromSourceCalls)
+            assertEquals(1, host.trackerReleaseCalls)
+            lifetime.close()
+            assertEquals(0, host.objectReleaseCalls)
+            borrowed.close()
+            assertEquals(1, host.trackerDisconnectCalls)
+            assertEquals(0, cleanupCalls)
+            host.releaseDisconnectedReferenceSources()
+            assertEquals(1, host.trackerReleaseFromSourceCalls)
+            assertEquals(1, host.trackerReleaseCalls)
+            assertEquals(1, host.objectReleaseCalls)
+            assertEquals(1, cleanupCalls)
+        }
+    }
+
     // CsWinRT ObjectReference.cs: AsValue(Guid) borrows the parent's tracker registration;
     // ObjectReferenceValue.Dispose balances the temporary source reference before COM Release.
     @Test

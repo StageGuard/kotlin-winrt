@@ -7,6 +7,121 @@ import kotlin.test.assertTrue
 
 /** ABI prerequisite only. The actual WinUI IID and LoadComponent integration are tested by Gallery. */
 class XamlConnectorIdentityTest {
+    // CsWinRT ComWrappersSupport.Init balances a delegating factory reference,
+    // while CLR's NativeObjectWrapper owns the nondelegating inner. Verify both
+    // collection and a borrowed QI lease against that same ownership boundary.
+    @Test
+    fun aggregated_page_and_its_inner_are_reclaimed_without_explicit_close() {
+        ComWrappersSupport.clearRegistriesForTests()
+        val nativeId = Guid("82297301-90b2-48da-9ac4-3b4d147aeda4")
+        val overrideId = registerPageForLifetimeTest()
+        WinRTInspectableComObject(
+            interfaceDefinitions = listOf(WinRTInspectableInterfaceDefinition(nativeId, emptyList())),
+            defaultInterfaceId = nativeId,
+        ).use { native ->
+            val abandoned = abandonAggregatedPage(native, overrideId)
+            awaitPageCollection(abandoned)
+            assertEquals(1u, WinRTInspectableComObject.tryProbeReferenceCount(native.borrowCachedInterfacePointer(nativeId)))
+        }
+        ComWrappersSupport.clearRegistriesForTests()
+    }
+
+    @Test
+    fun borrowed_aggregate_interface_keeps_inner_alive_after_owner_close() {
+        ComWrappersSupport.clearRegistriesForTests()
+        val nativeId = Guid("82297301-90b2-48da-9ac4-3b4d147aeda5")
+        val overrideId = registerPageForLifetimeTest()
+        WinRTInspectableComObject(
+            interfaceDefinitions = listOf(WinRTInspectableInterfaceDefinition(nativeId, emptyList())),
+            defaultInterfaceId = nativeId,
+        ).use { native ->
+            val page = createAggregatedPage(native, overrideId)
+            val borrowed = requireNotNull(page.reference).instance.queryInterface(nativeId).getOrThrow()
+            requireNotNull(page.reference).close()
+            assertEquals(2u, WinRTInspectableComObject.tryProbeReferenceCount(native.borrowCachedInterfacePointer(nativeId)))
+            borrowed.queryInterface(IID.IInspectable).getOrThrow().close()
+            borrowed.close()
+            assertEquals(1u, WinRTInspectableComObject.tryProbeReferenceCount(native.borrowCachedInterfacePointer(nativeId)))
+        }
+        ComWrappersSupport.clearRegistriesForTests()
+    }
+
+    @Test
+    fun external_com_reference_keeps_aggregated_page_alive_until_release() {
+        ComWrappersSupport.clearRegistriesForTests()
+        val nativeId = Guid("82297301-90b2-48da-9ac4-3b4d147aeda6")
+        val overrideId = registerPageForLifetimeTest()
+        WinRTInspectableComObject(
+            interfaceDefinitions = listOf(WinRTInspectableInterfaceDefinition(nativeId, emptyList())),
+            defaultInterfaceId = nativeId,
+        ).use { native ->
+            val (abandoned, external) = abandonExternallyReferencedPage(native, overrideId)
+            PlatformFinalization.drain()
+            verifyExternalReferenceAndRelease(abandoned, external)
+            awaitPageCollection(abandoned)
+            assertEquals(1u, WinRTInspectableComObject.tryProbeReferenceCount(native.borrowCachedInterfacePointer(nativeId)))
+        }
+        ComWrappersSupport.clearRegistriesForTests()
+    }
+
+    private fun registerPageForLifetimeTest(): Guid {
+        val overrideId = Guid("82297301-90b2-48da-9ac4-3b4d147aeda7")
+        ComWrappersSupport.registerStaticCcwDefinition(Page::class, WinRTCcwDefinition(
+            interfaceDefinitions = listOf(WinRTInspectableInterfaceDefinition(overrideId, emptyList())),
+            defaultInterfaceId = overrideId, runtimeClassName = "test.AggregatedXamlPage",
+        ))
+        return overrideId
+    }
+
+    private fun createAggregatedPage(native: WinRTInspectableComObject, overrideId: Guid): Page {
+        val page = Page()
+        val nativePointer = native.borrowCachedInterfacePointer(native.primaryInterfaceId)
+        assertEquals(1u, WinRTInspectableComObject.tryProbeReferenceCount(nativePointer), "Native host baseline")
+        page.reference = ComWrappersSupport.createComposableCCWForObject(page, overrideId) { outer, innerOut, instanceOut ->
+            PlatformAbi.writePointer(innerOut, native.acquireReference(IID.IInspectable))
+            // A real aggregation returns a delegating interface with the outer's
+            // IUnknown. The separate nondelegating inner owns the native object.
+            WinRTPlatformApi.addRefRaw(outer)
+            PlatformAbi.writePointer(instanceOut, outer)
+            KnownHResults.S_OK.value
+        }
+        kotlin.test.assertNotNull(page.reference!!.instance.comPtr.support.nativeObjectLifetime)
+        assertEquals(2u, WinRTInspectableComObject.tryProbeReferenceCount(nativePointer), "Owned nondelegating inner")
+        return page
+    }
+
+    private fun abandonAggregatedPage(native: WinRTInspectableComObject, overrideId: Guid): PlatformManagedWeakReference<Page> =
+        PlatformManagedWeakReference(createAggregatedPage(native, overrideId))
+
+    private fun abandonExternallyReferencedPage(native: WinRTInspectableComObject, overrideId: Guid):
+        Pair<PlatformManagedWeakReference<Page>, ComObjectReference> {
+        val page = createAggregatedPage(native, overrideId)
+        val external = requireNotNull(page.reference).outer.queryInterface(overrideId).getOrThrow()
+        return PlatformManagedWeakReference(page) to external
+    }
+
+    // Native debug GC keeps the result of a weak read until its stack frame
+    // returns. Prove the external reference's root in a separate frame.
+    private fun verifyExternalReferenceAndRelease(page: PlatformManagedWeakReference<Page>, external: ComObjectReference) {
+        kotlin.test.assertNotNull(page.get())
+        external.close()
+    }
+
+    private fun awaitPageCollection(page: PlatformManagedWeakReference<Page>) {
+        repeat(30) {
+            PlatformFinalization.drain()
+            if (page.get() == null) {
+                // The page and its resource wrapper can be collected in separate
+                // cycles. Drain native-only cleanup after proving the page is gone.
+                repeat(3) { PlatformFinalization.drain() }
+                return
+            }
+            val pressure = List(128) { ByteArray(1024) }
+            assertEquals(128, pressure.size)
+        }
+        kotlin.test.assertNull(page.get())
+    }
+
     @Test
     fun connector_shares_composed_outer_identity_and_receives_borrowed_target() {
         // CsWinRT ComWrappersSupport.GetInterfaceTableEntries and code_writers.h

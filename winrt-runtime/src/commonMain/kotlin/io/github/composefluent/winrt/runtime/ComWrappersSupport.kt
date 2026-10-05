@@ -784,12 +784,14 @@ object ComWrappersSupport {
     // so they cannot own independent native identities. Decode these values on
     // each call instead of caching a pointer after its reference was released.
     internal fun canCacheRcwIdentity(value: Any): Boolean = value is IWinRTObject || value is ComObjectReference ||
+        (value is WinRTComposableObject && value.winRTComposableObjectReference != null) ||
         registeredRcwReferences[value] != null
 
     internal fun hasLiveRcwIdentity(value: Any): Boolean = when (value) {
         is WinRTObjectBase<*> -> value.tryGetInitializedNativeObject()?.isDisposed == false
         is IWinRTObject -> !value.nativeObject.isDisposed
         is ComObjectReference -> !value.isDisposed
+        is WinRTComposableObject -> value.winRTComposableObjectReference?.instance?.isDisposed == false
         else -> registeredRcwReferences[value]?.isDisposed == false
     }
 
@@ -853,11 +855,12 @@ object ComWrappersSupport {
     internal fun registerObjectForComInterface(
         value: Any,
         pointer: RawAddress,
+        retainUnownedReference: Boolean = true,
     ) {
         if (PlatformAbi.isNull(pointer)) {
             return
         }
-        if (!canCacheRcwIdentity(value)) {
+        if (retainUnownedReference && !canCacheRcwIdentity(value)) {
             val reference = requireNotNull(wrapInspectable(pointer))
             val retained = registeredRcwReferences.getOrPut(value) { reference }
             if (retained !== reference) reference.close()
@@ -1335,6 +1338,9 @@ object ComWrappersSupport {
         platformEnsureInspectableProjectionInteropRegistered()
         val definition = createCcwDefinition(value)
         var innerReference: IInspectableReference? = null
+        var composedReference: IInspectableReference? = null
+        var nativeLifetime: WinRTNativeObjectLifetime? = null
+        var factoryInstanceToRelease = RawAddress.Null
         lateinit var host: WinRTInspectableComObject
         host = WinRTInspectableComObject(
             interfaceDefinitions = definition.interfaceDefinitions,
@@ -1342,9 +1348,14 @@ object ComWrappersSupport {
             defaultInterfaceId = definition.defaultInterfaceId,
             runtimeClassName = definition.runtimeClassName,
             managedValue = value,
+            weakManagedValue = true,
+            // This outer is published to native code without a borrowed-call
+            // boundary. Its first external AddRef must pin the managed page.
+            borrowReady = false,
             queryInterfaceFallback = definition.queryInterfaceFallback?.let { fallback ->
                 { requestedInterfaceId ->
-                    fallback(value, requestedInterfaceId)?.takeUnless(PlatformAbi::isNull)
+                    host.managedValue?.let { managed -> fallback(managed, requestedInterfaceId) }
+                        ?.takeUnless(PlatformAbi::isNull)
                 }
             },
             shapeCacheKey = definition,
@@ -1361,7 +1372,7 @@ object ComWrappersSupport {
             val innerPointer = PlatformAbi.fromRawComPtr(factoryResult.inner)
             if (!PlatformAbi.isNull(innerPointer)) {
                 host.registerExternalPointerAlias(innerPointer)
-                registerObjectForComInterface(value, innerPointer)
+                registerObjectForComInterface(value, innerPointer, retainUnownedReference = false)
             }
             val instancePointer = PlatformAbi.fromRawComPtr(factoryResult.instance)
             if (PlatformAbi.isNull(instancePointer)) {
@@ -1371,7 +1382,15 @@ object ComWrappersSupport {
                 )
             }
             host.registerExternalPointerAlias(instancePointer)
-            registerObjectForComInterface(value, instancePointer)
+            registerObjectForComInterface(value, instancePointer, retainUnownedReference = false)
+            val aggregatesManagedOuter = isAggregation && factoryInstanceUsesManagedOuter(
+                instancePointer, host.borrowCachedInterfacePointer(host.primaryInterfaceId),
+            )
+            if (aggregatesManagedOuter) {
+                factoryInstanceToRelease = instancePointer
+                require(!PlatformAbi.isNull(innerPointer)) { "Composable aggregation requires a non-null inner pointer." }
+                nativeLifetime = WinRTNativeObjectLifetime.create(innerPointer.asRawComPtr(), host::close)
+            }
             val requestedInstanceInterfaceId = instanceInterfaceId ?: definition.defaultInterfaceId
             val projectedInstancePointer =
                 if (isAggregation) {
@@ -1381,7 +1400,7 @@ object ComWrappersSupport {
                 }
             if (projectedInstancePointer != instancePointer) {
                 host.registerExternalPointerAlias(projectedInstancePointer)
-                registerObjectForComInterface(value, projectedInstancePointer)
+                registerObjectForComInterface(value, projectedInstancePointer, retainUnownedReference = false)
             }
             val referenceTrackerProbePointer =
                 if (!PlatformAbi.isNull(innerPointer)) innerPointer else projectedInstancePointer
@@ -1390,6 +1409,12 @@ object ComWrappersSupport {
                 !PlatformAbi.isNull(innerPointer) && isReferenceTrackerObject
             innerReference = if (PlatformAbi.isNull(innerPointer)) {
                 null
+            } else if (nativeLifetime != null) {
+                IInspectableReference(ComPtr.create(
+                    raw = innerPointer.asRawComPtr(), interfaceId = IID.IInspectable,
+                    ownershipMode = ComOwnershipMode.Borrowed, isAggregated = true,
+                    nativeObjectLifetime = nativeLifetime,
+                ))
             } else {
                 IInspectableReference(
                     PlatformAbi.toRawComPtr(innerPointer),
@@ -1398,10 +1423,25 @@ object ComWrappersSupport {
                     isAggregated = isAggregation,
                 )
             }
-            host.setQueryInterfaceForwardTarget(innerReference)
-            outerReference = host.createReference(definition.defaultInterfaceId)
-            val composedReference = try {
-                val reference = IInspectableReference(
+            if (nativeLifetime != null && isReferenceTrackerObject) {
+                nativeLifetime.initializeReferenceTracker(requireNotNull(innerReference).comPtr)
+            }
+            host.setQueryInterfaceForwardTarget(innerReference, weak = true)
+            // The page borrows its own CCW; only references crossing the ABI own
+            // an AddRef on the outer. A self-owned outer would keep the page alive.
+            outerReference = ComObjectReference(ComPtr.create(
+                raw = host.borrowCachedInterfacePointer(host.primaryInterfaceId).asRawComPtr(),
+                interfaceId = host.primaryInterfaceId, ownershipMode = ComOwnershipMode.Borrowed,
+                trackContext = false, nativeObjectLifetime = nativeLifetime,
+            ))
+            composedReference = try {
+                val reference = if (nativeLifetime != null) {
+                    IInspectableReference(ComPtr.create(
+                        raw = projectedInstancePointer.asRawComPtr(), interfaceId = requestedInstanceInterfaceId,
+                        ownershipMode = ComOwnershipMode.Borrowed, isAggregated = true,
+                        nativeObjectLifetime = nativeLifetime,
+                    ))
+                } else IInspectableReference(
                     PlatformAbi.toRawComPtr(projectedInstancePointer),
                     requestedInstanceInterfaceId,
                     preventReleaseOnDispose = isAggregation || isAggregatedReferenceTrackerObject,
@@ -1420,26 +1460,62 @@ object ComWrappersSupport {
                     WinRTPlatformApi.releaseRaw(instancePointer)
                 }
             }
+            val completedComposedReference = requireNotNull(composedReference)
             val projectedReference = if (isAggregation) {
                 requireNotNull(innerReference) {
                     "Composable aggregation requires the factory to return a non-null inner pointer."
                 }
             } else {
-                composedReference
+                completedComposedReference
             }
             WinRTComposableObjectReference(
                 instance = projectedReference,
                 inner = innerReference,
-                composed = composedReference.takeUnless { it === projectedReference },
+                composed = completedComposedReference.takeUnless { it === projectedReference },
                 outer = requireNotNull(outerReference),
                 isAggregatedReferenceTrackerObject = isAggregatedReferenceTrackerObject,
                 outerHost = host,
-                cleanup = host::releaseManagedReference,
+                // The native owner's release callback closes the CCW after the
+                // inner and tracker are released in their original apartment.
+                cleanup = if (nativeLifetime == null) host::close else ({}),
+                managedValue = value,
             )
         } catch (failure: Throwable) {
-            outerReference?.close()
-            host.releaseManagedReference()
+            try {
+                closeAllAutoCloseables(listOfNotNull(composedReference, innerReference, outerReference))
+            } catch (cleanupFailure: Throwable) {
+                failure.addSuppressed(cleanupFailure)
+            }
+            if (nativeLifetime == null) {
+                try { host.close() } catch (cleanupFailure: Throwable) { failure.addSuppressed(cleanupFailure) }
+            }
             throw failure
+        } finally {
+            try {
+                if (!PlatformAbi.isNull(factoryInstanceToRelease)) WinRTPlatformApi.releaseRaw(factoryInstanceToRelease)
+            } finally {
+                nativeLifetime?.close()
+                winRTKeepAlive(value)
+            }
+        }
+    }
+
+    // Synthetic factories may return a separate IUnknown even with an outer
+    // argument. Only balance a delegating factory reference after identity proves
+    // it belongs to this managed CCW, matching CsWinRT Init's aggregation contract.
+    private fun factoryInstanceUsesManagedOuter(instance: RawAddress, outer: RawAddress): Boolean {
+        val instanceIdentity = WinRTPlatformApi.queryInterfaceRaw(instance, IID.IUnknown)
+        if (instanceIdentity.hResultValue != KnownHResults.S_OK.value || PlatformAbi.isNull(instanceIdentity.pointer)) return false
+        return try {
+            val outerIdentity = WinRTPlatformApi.queryInterfaceRaw(outer, IID.IUnknown)
+            if (outerIdentity.hResultValue != KnownHResults.S_OK.value || PlatformAbi.isNull(outerIdentity.pointer)) return false
+            try {
+                instanceIdentity.pointer == outerIdentity.pointer
+            } finally {
+                WinRTPlatformApi.releaseRaw(outerIdentity.pointer)
+            }
+        } finally {
+            WinRTPlatformApi.releaseRaw(instanceIdentity.pointer)
         }
     }
 

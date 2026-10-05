@@ -106,6 +106,7 @@ internal class ComPtr private constructor(
                     },
                 referenceTrackerPointer = referenceTrackerHandle,
                 isAggregated = isAggregated,
+                nativeObjectLifetime = support.nativeObjectLifetime,
             )
         } catch (error: Throwable) {
             release()
@@ -272,6 +273,7 @@ internal class ComPtr private constructor(
                 },
             referenceTrackerPointer = trackerHandle,
             isAggregated = queriedIsAggregated,
+            nativeObjectLifetime = support.nativeObjectLifetime,
         )
 
     companion object {
@@ -286,6 +288,7 @@ internal class ComPtr private constructor(
             isAggregated: Boolean = false,
             trackContext: Boolean = true,
             managedCcwReleaseIdentity: RawAddress = RawAddress.Null,
+            nativeObjectLifetime: WinRTNativeObjectLifetime? = null,
         ): ComPtr = create(
             raw = raw,
             interfaceIdLowBits = interfaceId.abiLowBits,
@@ -296,6 +299,7 @@ internal class ComPtr private constructor(
             isAggregated = isAggregated,
             trackContext = trackContext,
             managedCcwReleaseIdentity = managedCcwReleaseIdentity,
+            nativeObjectLifetime = nativeObjectLifetime,
         )
 
         internal fun create(
@@ -307,6 +311,7 @@ internal class ComPtr private constructor(
             isAggregated: Boolean = false,
             trackContext: Boolean = true,
             managedCcwReleaseIdentity: RawAddress = RawAddress.Null,
+            nativeObjectLifetime: WinRTNativeObjectLifetime? = null,
         ): ComPtr = create(
             raw = raw,
             interfaceIdLowBits = interfaceIdLowBits,
@@ -317,6 +322,7 @@ internal class ComPtr private constructor(
             isAggregated = isAggregated,
             trackContext = trackContext,
             managedCcwReleaseIdentity = managedCcwReleaseIdentity,
+            nativeObjectLifetime = nativeObjectLifetime,
         )
 
         /**
@@ -334,6 +340,7 @@ internal class ComPtr private constructor(
             isAggregated = false,
             trackContext = true,
             managedCcwReleaseIdentity = RawAddress.Null,
+            nativeObjectLifetime = null,
             consumeOnFailure = true,
         )
 
@@ -347,6 +354,7 @@ internal class ComPtr private constructor(
             isAggregated: Boolean,
             trackContext: Boolean,
             managedCcwReleaseIdentity: RawAddress,
+            nativeObjectLifetime: WinRTNativeObjectLifetime?,
             consumeOnFailure: Boolean = false,
         ): ComPtr {
             require(!PlatformAbi.isNull(raw)) {
@@ -363,6 +371,7 @@ internal class ComPtr private constructor(
                     isAggregated = isAggregated,
                     trackContext = trackContext,
                     managedCcwReleaseIdentity = managedCcwReleaseIdentity,
+                    nativeObjectLifetime = nativeObjectLifetime,
                 )
                 createdSupport = support
                 return ComPtr(
@@ -370,12 +379,12 @@ internal class ComPtr private constructor(
                     support = support,
                 )
             } catch (error: Throwable) {
-                if (consumeOnFailure) {
+                if (consumeOnFailure || nativeObjectLifetime != null) {
                     try {
                         val support = createdSupport
                         if (support == null) {
                             // Construction has not published a support/cleaner owner yet.
-                            WinRTPlatformApi.releaseRaw(raw.asRawAddress())
+                            if (consumeOnFailure) WinRTPlatformApi.releaseRaw(raw.asRawAddress())
                         } else {
                             // The constructor may already have registered its cleaner. Both
                             // paths share support's dispose-once guard, so do not raw-Release.
