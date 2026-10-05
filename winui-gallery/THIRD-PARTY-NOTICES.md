@@ -1,6 +1,6 @@
 # Third-party notices
 
-WinUI Essential 1.8.0 supplies SettingsCard, SettingsExpander, WindowEx and TenMica:
+WinUI Essential 1.8.2 supplies SettingsCard, SettingsExpander, WindowEx and TenMica:
 https://github.com/HO-COOH/WinUIEssentials
 Distributed under the MIT license. The complete copyright and permission notice
 is included in `licenses/WinUI-Essential-LICENSE.txt`.

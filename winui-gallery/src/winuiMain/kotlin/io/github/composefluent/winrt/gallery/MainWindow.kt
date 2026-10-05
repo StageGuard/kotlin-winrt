@@ -35,10 +35,6 @@ internal class MainWindow : winui3package.WindowEx() {
         super.initializeComponent()
         GalleryWindows.track(checkNotNull(window))
         title = checkNotNull(GalleryTitle)
-        systemBackdrop = winui3package.MicaBackdropWithFallback().apply {
-            fallback = winui3package.TenMicaBackdrop().apply { bindThemeTo = root }
-        }
-        contextMenu = winui3package.ModernStandardWindowContextMenu()
         GalleryNavigationHost.navigate = ::navigate
         root.requestedTheme = theme
         GalleryTheme.attach(root, checkNotNull(window))
@@ -108,16 +104,7 @@ internal class MainWindow : winui3package.WindowEx() {
         extendsContentIntoTitleBar = true
         setTitleBar(titleBar)
         appWindow?.setIcon("Assets/Tiles/GalleryIcon.ico")
-        fun captionTheme() {
-            val dark = root.actualTheme == ElementTheme.Dark
-            appWindow?.titleBar?.apply {
-                buttonForegroundColor = rgb(if (dark) 0xFFFFFFu else 0x000000u)
-                buttonBackgroundColor = windows.ui.Color(0u, 0u, 0u, 0u)
-                buttonInactiveBackgroundColor = windows.ui.Color(0u, 0u, 0u, 0u)
-            }
-        }
-        root.actualThemeChanged.add { _, _ -> captionTheme() }
-        root.loaded.add { _, _ -> captionTheme(); updateJumpList() }
+        root.loaded.add { _, _ -> updateJumpList() }
         show("Home")
     }
 

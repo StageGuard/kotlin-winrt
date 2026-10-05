@@ -129,7 +129,7 @@ windows {
         // Match the installed WinUI 3 Gallery's Windows App SDK 2.5 runtime.
         nugetPackage("Microsoft.WindowsAppSDK", "2.5.1")
         nugetPackage("Microsoft.Graphics.Win2D", "1.4.0")
-        nugetPackage("WinUIEssential.WinUI3", "1.8.0")
+        nugetPackage("WinUIEssential.WinUI3", "1.8.2")
         // Gallery covers the control families, including programmatic templates,
         // layout overrides and composition animations. Generate these namespaces
         // directly rather than maintaining a second, incomplete control catalog.
@@ -186,6 +186,7 @@ windows {
             "WinUI3Package.SettingsCard", "WinUI3Package.SettingsExpander",
             "WinUI3Package.WindowEx", "WinUI3Package.TenMicaBackdrop",
             "WinUI3Package.MicaBackdropWithFallback", "WinUI3Package.ModernStandardWindowContextMenu",
+            "WinUI3Package.WindowCaptionButtonThemeWorkaround", "WinUI3Package.ModernWindowCaptionButtonToolTip",
         ).forEach(::type)
     }
 }

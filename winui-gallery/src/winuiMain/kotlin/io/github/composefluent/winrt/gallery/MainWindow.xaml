@@ -9,15 +9,28 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:pages="using:io.github.composefluent.winrt.gallery.pages"
     Title="Kotlin WinUI Gallery"
+    ContextMenu="{x:Bind WindowMenu}"
     mc:Ignorable="d">
     <x:Properties>
         <x:Property Name="GalleryTitle" Type="x:String" DefaultValue="Kotlin WinUI Gallery" />
     </x:Properties>
-<Grid x:Name="RootGrid">
+    <winui:WindowEx.SystemBackdrop>
+        <winui:MicaBackdropWithFallback>
+            <winui:MicaBackdropWithFallback.Fallback>
+                <winui:TenMicaBackdrop BindThemeTo="{x:Bind RootGrid}" />
+            </winui:MicaBackdropWithFallback.Fallback>
+        </winui:MicaBackdropWithFallback>
+    </winui:WindowEx.SystemBackdrop>
+    <Grid x:Name="RootGrid">
+        <Grid.Resources>
+            <winui:ModernStandardWindowContextMenu x:Name="WindowMenu" Window="{x:Bind Window}" />
+        </Grid.Resources>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
+        <winui:WindowCaptionButtonThemeWorkaround Window="{x:Bind Window}" />
+        <winui:ModernWindowCaptionButtonToolTip Window="{x:Bind Window}" />
         <TitleBar
             x:Name="titleBar"
             Title="{x:Bind GalleryTitle, Mode=OneWay}"
@@ -44,7 +57,7 @@
                 </AutoSuggestBox>
             </TitleBar.Content>
         </TitleBar>
-<NavigationView
+        <NavigationView
             x:Name="NavigationViewControl"
             Grid.Row="1"
             Canvas.ZIndex="0"
