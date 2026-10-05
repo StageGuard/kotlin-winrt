@@ -66,6 +66,26 @@ class ResolveWinRTXamlCompilerTaskTest {
         assertTrue(runCatching { task.resolve() }.exceptionOrNull()?.message.orEmpty().contains("offline"))
     }
 
+    @Test fun protocol_three_requires_property_capability_and_retains_the_executable_contract() {
+        val root = Files.createTempDirectory("xaml-tool-properties-")
+        extractXamlCompiler(packageFile(root), root.resolve("installed"), "1.0.0")
+        val manifestPath = root.resolve("installed/kotlin-xamlc.json")
+        val original = Json.parseToJsonElement(Files.readString(manifestPath)).jsonObject
+        val contract = buildJsonObject {
+            original.forEach { (name, value) -> put(name, value) }
+            put("protocolVersion", 3)
+            put("execution", buildJsonObject { put("kind", "executable"); put("arguments", JsonArray(listOf("input.json", "output.json").map(::JsonPrimitive))) })
+            put("runtime", buildJsonObject { put("kind", "net-framework"); put("minimumRelease", 461808) })
+            put("compatibility", buildJsonObject {})
+            put("features", JsonArray(listOf(JsonPrimitive("properties"))))
+        }
+        Files.writeString(manifestPath, contract.toString())
+        assertEquals(3, validateXamlCompilerPackage(root.resolve("installed"))["protocolVersion"]!!.jsonPrimitive.int)
+        Files.writeString(manifestPath, JsonObject(contract + ("features" to JsonArray(emptyList()))).toString())
+        assertTrue(runCatching { validateXamlCompilerPackage(root.resolve("installed")) }.exceptionOrNull()?.message.orEmpty()
+            .contains("x:Properties"))
+    }
+
     @Test fun resolution_waits_for_another_project_holding_the_shared_cache_entry() {
         val root = Files.createTempDirectory("xaml-tool-shared-")
         val archive = packageFile(root)
