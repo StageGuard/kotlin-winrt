@@ -6,6 +6,22 @@ import org.junit.Test
 
 class ProjectionSourceOwnershipTest {
     @Test
+    fun inactive_projection_outputs_do_not_enter_classpaths_or_archives() {
+        // CsWinRT targets include only the active projection's generated files.
+        val project = ProjectBuilder.builder().build()
+        val directory = project.layout.buildDirectory.dir("classes/projection")
+        val staleClass = directory.get().file("OldSdkType.class").asFile
+        staleClass.parentFile.mkdirs()
+        staleClass.writeText("old projection output")
+        val required = project.objects.property(Boolean::class.java).convention(true)
+        val outputs = project.files(winRTJvmProjectionOutputFiles(directory, required)).asFileTree
+
+        assertEquals(setOf(staleClass), outputs.files)
+        required.set(false)
+        assertEquals(emptySet<java.io.File>(), outputs.files)
+    }
+
+    @Test
     fun compilation_sources_follow_regenerated_shards_and_ownership() {
         // Gradle owns compilation input discovery (.cswinrt/build responsibility).
         // A new SDK may split a namespace into different generated shard files.

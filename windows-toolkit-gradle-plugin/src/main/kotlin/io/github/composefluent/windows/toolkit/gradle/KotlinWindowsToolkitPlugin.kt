@@ -2665,10 +2665,12 @@ private fun configureStandaloneWinRTJvmProjectionCompilation(
             task.description = "Compiles generated WinRT projections independently from business sources."
             task.source(
                 generatedProjectionSources.map { directory ->
-                    project.files(generatedWinRTProjectionSourceFiles(project, directory))
+                    if (localGenerationRequired.get()) project.files(generatedWinRTProjectionSourceFiles(project, directory))
+                    else project.files()
                 },
                 mergedCompilerSupportSources.map { directory ->
-                    project.files(generatedWinRTProjectionSourceFiles(project, directory))
+                    if (localGenerationRequired.get()) project.files(generatedWinRTProjectionSourceFiles(project, directory))
+                    else project.files()
                 },
             )
             task.destinationDirectory.set(projectionOutput)
@@ -2699,9 +2701,8 @@ private fun configureStandaloneWinRTJvmProjectionCompilation(
             task.multiPlatformEnabled.set(false)
             task.dependsOn(generateTask)
             task.dependsOn(mergeCompilerSupportTask)
-            task.onlyIf {
-                localGenerationRequired.get()
-            }
+            // Empty sources let Gradle clean previous compiler outputs (NO-SOURCE).
+            // onlyIf would preserve classes from a formerly owned SDK projection.
         })
 
         businessTask.exclude { element ->
@@ -2711,8 +2712,11 @@ private fun configureStandaloneWinRTJvmProjectionCompilation(
                     path.startsWith(mergedCompilerSupportSources.get().asFile.toPath().toAbsolutePath().normalize())
                 ) && isGeneratedWinRTProjectionSource(element.file)
         }
-        businessTask.libraries.from(projectionTask.flatMap { it.destinationDirectory })
-        businessTask.friendPaths.from(projectionTask.flatMap { it.destinationDirectory })
+        val projectionClasses = winRTJvmProjectionOutputFiles(
+            projectionTask.flatMap { it.destinationDirectory }, localGenerationRequired,
+        )
+        businessTask.libraries.from(projectionClasses)
+        businessTask.friendPaths.from(projectionClasses)
         businessTask.dependsOn(projectionTask)
 
         val jarTaskNames = if (!isMultiplatformProject && businessTask.name == "compileKotlin") {
@@ -2727,7 +2731,7 @@ private fun configureStandaloneWinRTJvmProjectionCompilation(
                 // the projection compilation contributes only its fixed class files to the
                 // published JVM artifact. Keeping these resource families out avoids duplicate
                 // paths while preserving the static projection bytecode.
-                jar.from(projectionTask.flatMap { it.destinationDirectory }) { spec ->
+                jar.from(projectionClasses) { spec ->
                     spec.include("**/*.class")
                     spec.include("META-INF/*-winrt-projection.kotlin_module")
                 }
@@ -2770,8 +2774,11 @@ private fun configureStandaloneWinRTJvmProjectionCompilation(
                     return@forEach
                 }
                 val projectionTask = project.tasks.named(projectionTaskName, KotlinJvmCompile::class.java)
-                testTask.libraries.from(projectionTask.flatMap { it.destinationDirectory })
-                testTask.friendPaths.from(projectionTask.flatMap { it.destinationDirectory })
+                val projectionClasses = winRTJvmProjectionOutputFiles(
+                    projectionTask.flatMap { it.destinationDirectory }, localGenerationRequired,
+                )
+                testTask.libraries.from(projectionClasses)
+                testTask.friendPaths.from(projectionClasses)
                 testTask.dependsOn(projectionTask)
             }
         project.tasks.withType(Test::class.java)
@@ -2783,7 +2790,9 @@ private fun configureStandaloneWinRTJvmProjectionCompilation(
                 val projectionTask = project.tasks.named(projectionTaskName, KotlinJvmCompile::class.java)
                 testTask.setClasspath(
                     testTask.classpath.plus(
-                        project.files(projectionTask.flatMap { it.destinationDirectory }),
+                        project.files(winRTJvmProjectionOutputFiles(
+                            projectionTask.flatMap { it.destinationDirectory }, localGenerationRequired,
+                        )),
                     ),
                 )
                 testTask.dependsOn(projectionTask)
@@ -5088,6 +5097,14 @@ private fun filterPluginOwnedAuthoringSourceRoots(
         }
         .distinctBy { (path, _) -> path }
         .map { (_, sourceRoot) -> sourceRoot }
+}
+
+/** CsWinRT includes only the current projection's compile inputs; stale outputs have no ownership. */
+internal fun winRTJvmProjectionOutputFiles(
+    directory: Provider<Directory>,
+    localGenerationRequired: Provider<Boolean>,
+): Provider<List<File>> = directory.map { output ->
+    if (localGenerationRequired.get()) listOf(output.asFile) else emptyList()
 }
 
 private fun containsKotlinSourceFile(sourceDir: File): Boolean {
