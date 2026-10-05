@@ -61,10 +61,11 @@ defaults. Numeric function arguments and indexes become constants of their
 declared parameter type, preserving unsigned bits and floating precision on
 both targets without parsing strings during binding updates.
 
-The semantic compilation now exports declared public/internal instance
-properties into the application-only `KotlinXaml.winmd`. It uses Kotlin IR
-types and accessor visibility, excludes generated `x:Name` properties and
-private state, and preserves nullable value types as `IReference<T>`. This
+The semantic compilation exports representable instance properties into the
+application-only `KotlinXaml.winmd`. It uses Kotlin IR types and accessor
+visibility, excludes generated `x:Name` properties, and preserves nullable value
+types as `IReference<T>`. Private binding inputs remain in this compiler-only
+schema and are excluded from runtime member registration and component ABI export. This
 schema is separate from authored component ABI export. The metadata writer
 owns Property/MethodSemantics encoding, following CsWinRT
 `WinRTTypeWriter.AddPropertyDefinition`. The initial XAML analysis consumes
