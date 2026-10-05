@@ -601,10 +601,26 @@ class KotlinProjectionRenderer(
                 addReadOnlyCollectionForwardMembers(builder, nativeBinding)
             }
         if (plan.usesMappedDisposableAugmentation || plan.hasDirectMappedDisposableSuperinterface) {
+            // CsWinRT ABI.System.IDisposable.Dispose takes the IClosable reference
+            // (GetObjectReferenceForType) before calling Close: a required interface has its
+            // own vtable, so slot 6 of this interface is one of its own members.
+            builder.addObjectReferenceCacheProperty(
+                name = NATIVE_PROJECTION_CLOSABLE_REFERENCE_NAME,
+                type = IUNKNOWN_REFERENCE_CLASS_NAME,
+                createReference = CodeBlock.builder()
+                    .addStatement(
+                        // Qualified: inside NativeProjection, the IID property of the
+                        // interface's Metadata companion shadows the runtime IID object.
+                        "%M(nativeObject, %L.IDisposable)",
+                        ACQUIRE_INTERFACE_REFERENCE_FUNCTION_NAME,
+                        IID_CLASS_NAME.canonicalName,
+                    )
+                    .build(),
+            )
             builder.addFunction(
                 FunSpec.builder("close")
                     .addModifiers(KModifier.OVERRIDE)
-                    .addCode("%L", renderNativeProjectionCloseInvocation())
+                    .addCode("%L", renderNativeProjectionCloseInvocation(NATIVE_PROJECTION_CLOSABLE_REFERENCE_NAME))
                     .build(),
             )
         }
@@ -2464,7 +2480,7 @@ class KotlinProjectionRenderer(
             .mapNotNull(::mappedTypeByAbiName)
             .any { it.descriptionName == "IClosable" }
 
-    internal fun renderNativeProjectionCloseInvocation(): CodeBlock {
+    internal fun renderNativeProjectionCloseInvocation(closableReferenceExpression: String): CodeBlock {
         val callPlan = requireAbiCallPlan(
             bindingName = "Windows.Foundation.IClosable.Close",
             returnBinding = KotlinProjectionAbiTypeBinding(KotlinProjectionAbiValueKind.Unit, "Unit"),
@@ -2472,7 +2488,7 @@ class KotlinProjectionRenderer(
         )
         return requireNotNull(
             renderInlineAbiInvocation(
-                invokeTargetExpression = "nativeObject",
+                invokeTargetExpression = closableReferenceExpression,
                 slotExpression = CodeBlock.of("6"),
                 callPlan = callPlan,
             ),

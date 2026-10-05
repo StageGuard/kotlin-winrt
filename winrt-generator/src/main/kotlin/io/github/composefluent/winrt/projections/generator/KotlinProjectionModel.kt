@@ -339,6 +339,9 @@ internal val WINRT_EVENT_SOURCE_CLASS_NAME = EventSource::class.asClassName()
 internal val WINRT_EVENT_PROJECTION_HELPERS_CLASS_NAME =
     ClassName("io.github.composefluent.winrt.projections.support", "WinRTEventProjectionHelpers")
 internal val WINRT_CLOSABLE_OBJECT_CLASS_NAME = ClassName("windows.foundation", "WinRTClosableObject")
+
+// The IClosable reference of an interface native projection; owner caches use one underscore.
+internal const val NATIVE_PROJECTION_CLOSABLE_REFERENCE_NAME = "__iClosable"
 internal val WINRT_COMPOSABLE_OBJECT_CLASS_NAME = WinRTComposableObject::class.asClassName()
 internal val WINRT_COMPOSABLE_OBJECT_REFERENCE_CLASS_NAME = WinRTComposableObjectReference::class.asClassName()
 internal val WINRT_COMPOSABLE_FACTORY_RESULT_CLASS_NAME = WinRTComposableFactoryResult::class.asClassName()

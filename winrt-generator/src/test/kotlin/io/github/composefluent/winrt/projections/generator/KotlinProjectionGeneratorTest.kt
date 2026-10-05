@@ -7663,8 +7663,21 @@ class KotlinProjectionGeneratorTest {
         assertTrue(interfaceContents, interfaceContents.contains("private class NativeProjection("))
         assertTrue(interfaceContents, interfaceContents.contains("override fun close()"))
         assertTrue(interfaceContents, interfaceContents.projectionCallSiteCount() > 0)
-        assertTrue(interfaceContents, interfaceContents.contains("val __winrtCallSiteArgument0: ComObjectReference = nativeObject"))
-        assertTrue(interfaceContents, interfaceContents.contains("val __winrtCallSiteArgument1: Int = 6"))
+        // IClosable is a required interface with its own vtable: Close is slot 6 of the IClosable
+        // reference, not of IWidget, whose slot 6 is get_Child.
+        // Qualified, because the interface's own Metadata.IID is in scope there.
+        assertTrue(
+            interfaceContents,
+            interfaceContents.replace(Regex("\\s+"), "").contains(
+                "acquireInterfaceReference(nativeObject,io.github.composefluent.winrt.runtime.IID.IDisposable)",
+            ),
+        )
+        val closeBody = interfaceContents
+            .substringAfter("override fun close()")
+            .substringBefore("\n    }")
+        assertTrue(closeBody, closeBody.contains("val __winrtCallSiteArgument0: ComObjectReference = __iClosable"))
+        assertFalse(closeBody, closeBody.contains("= nativeObject"))
+        assertTrue(closeBody, closeBody.contains("val __winrtCallSiteArgument1: Int = 6"))
         assertTrue(interfaceContents, interfaceContents.contains("winRTProjectionCallSiteArguments"))
         assertFalse(interfaceContents, interfaceContents.contains("WinRTProjectionIntrinsic.callUnit("))
         assertFalse(interfaceContents, interfaceContents.contains("ComVtableInvoker.invoke(instance = nativeObject.pointer"))
