@@ -86,7 +86,7 @@ internal fun extractXamlCompiler(archive: Path, target: Path, version: String) {
 
 internal fun validateXamlCompilerPackage(root: Path, version: String? = null): JsonObject {
     val manifest = Json.parseToJsonElement(Files.readString(root.resolve("kotlin-xamlc.json")).removePrefix("\uFEFF")).jsonObject
-    require(manifest["schemaVersion"]?.jsonPrimitive?.int == 1 && manifest["protocolVersion"]?.jsonPrimitive?.int in 1..2) {
+    require(manifest["schemaVersion"]?.jsonPrimitive?.int == 1 && manifest["protocolVersion"]?.jsonPrimitive?.int in 1..3) {
         "Unsupported Kotlin XamlCompiler package or protocol version."
     }
     require((version == null || manifest["version"]?.jsonPrimitive?.content == version) && manifest["host"]?.jsonPrimitive?.content == "win-x64") {
@@ -101,7 +101,7 @@ internal fun validateXamlCompilerPackage(root: Path, version: String? = null): J
             "XamlCompiler package file checksum mismatch: $name"
         }
     }
-    if (manifest["protocolVersion"]?.jsonPrimitive?.int == 2) {
+    if (manifest["protocolVersion"]?.jsonPrimitive?.int in 2..3) {
         val execution = manifest.getValue("execution").jsonObject
         require(execution["kind"]?.jsonPrimitive?.content == "executable" &&
             execution["arguments"]?.jsonArray?.map { it.jsonPrimitive.content } == listOf("input.json", "output.json")) {
@@ -113,7 +113,11 @@ internal fun validateXamlCompilerPackage(root: Path, version: String? = null): J
             "Unsupported Kotlin XamlCompiler runtime contract."
         }
         require(manifest["compatibility"] is JsonObject && manifest["features"] is JsonArray) {
-            "XamlCompiler protocol 2 requires compatibility and feature declarations."
+            "XamlCompiler protocol requires compatibility and feature declarations."
+        }
+        require(manifest["protocolVersion"]?.jsonPrimitive?.int != 3 ||
+            manifest.getValue("features").jsonArray.any { it.jsonPrimitive.content == "properties" }) {
+            "XamlCompiler protocol 3 requires x:Properties support."
         }
     }
     return manifest

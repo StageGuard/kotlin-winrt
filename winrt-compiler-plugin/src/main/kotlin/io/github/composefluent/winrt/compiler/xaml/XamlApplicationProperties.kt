@@ -26,9 +26,12 @@ internal fun xamlApplicationTypeReference(type: IrType, types: Map<String, Index
     val primitive = winRTFundamentalTypeForName(name.removePrefix("kotlin."))
     val indexed = resolveIndexedWinRTTypeByProjectedName(name, types)
     val collection = winRTCollectionAbiNameForKotlinType(name)
+    val mapped = winRTMappedTypeForKotlinName(name)
     val metadataName = when {
         primitive != null -> primitive.toKotlinProjectionTypeName()
         name == "kotlin.Any" -> "System.Object"
+        isWinRTGuidTypeName(name.substringAfterLast('.')) && name == "io.github.composefluent.winrt.runtime.Guid" -> "System.Guid"
+        mapped != null -> mapped.abiQualifiedName
         name in applicationTypes -> name
         collection != null -> "$collection`${arguments.size}"
         indexed != null -> indexed.qualifiedName.substringBefore('`') + if (arguments.isEmpty()) "" else "`${arguments.size}"
@@ -52,22 +55,33 @@ internal fun xamlApplicationProperties(
     applicationTypes: Set<String>,
     strictPublicProperties: Boolean = true,
     includeInternal: Boolean = true,
+    accessible: (IrDeclaration) -> Boolean = { true },
+    xamlProperties: List<WinRTXamlPropertyDeclaration> = emptyList(),
 ): WinRTXamlApplicationTypeMembers {
     if (klass.kind == org.jetbrains.kotlin.descriptors.ClassKind.ENUM_CLASS) return WinRTXamlApplicationTypeMembers()
-    fun visible(function: IrSimpleFunction?) = function != null &&
+    fun visible(function: IrSimpleFunction?) = function != null && accessible(function) &&
         (function.visibility == DescriptorVisibilities.PUBLIC || (includeInternal && function.visibility == DescriptorVisibilities.INTERNAL))
 
-    fun resolve(type: IrType): WinRTTypeRef = xamlApplicationTypeReference(type, types, applicationTypes)
+    fun resolve(type: IrType): WinRTTypeRef {
+        fun available(type: IrType): Boolean =
+            (type.classOrNull?.owner?.let(accessible) != false) &&
+                (type as? IrSimpleType)?.arguments.orEmpty().all { it.typeOrNull?.let(::available) != false }
+        require(available(type)) { "XAML signature refers to an unavailable Kotlin type: $type" }
+        return xamlApplicationTypeReference(type, types, applicationTypes)
+    }
 
-    val owners = listOf(klass) + listOfNotNull(klass.companionObject())
+    val owners = (listOf(klass) + listOfNotNull(klass.companionObject())).filter(accessible)
     fun visibleOwner(owner: IrClass) = owner === klass || owner.visibility == DescriptorVisibilities.PUBLIC ||
         (includeInternal && owner.visibility == DescriptorVisibilities.INTERNAL)
     val dependencyPropertyNames = owners.filter { it.kind == org.jetbrains.kotlin.descriptors.ClassKind.OBJECT }
         .flatMap { it.declarations.filterIsInstance<IrProperty>() }
-        .filter { it.getter?.returnType?.classFqName?.asString() == "microsoft.ui.xaml.DependencyProperty" }
+        .filter { accessible(it) && it.getter?.let(accessible) == true &&
+            it.getter?.returnType?.classFqName?.asString() == "microsoft.ui.xaml.DependencyProperty" }
         .mapTo(mutableSetOf()) { it.name.asString() }
     val properties = owners.flatMap { owner -> owner.declarations.filterIsInstance<IrProperty>().map { owner to it } }
-        .filter { (_, property) -> property.origin == IrDeclarationOrigin.DEFINED && property.getter != null &&
+        .filter { (_, property) -> accessible(property) && property.getter?.let(accessible) == true &&
+            (property.origin == IrDeclarationOrigin.DEFINED ||
+                xamlProperties.any { it.name == property.name.asString() }) && property.getter != null &&
             property.getter?.dispatchReceiverParameter != null &&
             property.getter!!.parameters.none { parameter ->
                 parameter.kind == IrParameterKind.ExtensionReceiver || parameter.kind == IrParameterKind.Context
@@ -84,9 +98,18 @@ internal fun xamlApplicationProperties(
                 isStatic = static,
                 isDependencyProperty = owner === klass && "${property.name.asString()}Property" in dependencyPropertyNames)
         }
+    // CSharpPagePass1.tt emits these as PropertyChangedEventHandler events.
+    // Kotlin expands that alias to EventHandler<PropertyChangedEventArgs?>;
+    // infer only source events here, preserving the XAML declaration's named
+    // delegate instead of exporting the generated pair a second time.
+    val declaredEvents = xamlProperties.mapNotNull { property -> property.changedHandler?.let {
+        WinRTXamlApplicationEvent(it, WinRTTypeRef.named("Microsoft.UI.Xaml.Data.PropertyChangedEventHandler"))
+    } }
+    val declaredEventNames = declaredEvents.mapTo(mutableSetOf()) { it.name }
     val events = klass.declarations.filterIsInstance<IrSimpleFunction>()
         .filter { visible(it) && it.overriddenSymbols.isEmpty() && it.name.asString().startsWith("add") &&
-            it.name.asString().length > 3 && it.name.asString()[3].isUpperCase() }
+            it.name.asString().length > 3 && it.name.asString()[3].isUpperCase() &&
+            it.name.asString().removePrefix("add") !in declaredEventNames }
         .mapNotNull { add ->
             val name = add.name.asString().removePrefix("add")
             val parameter = add.parameters.singleOrNull { it.kind == IrParameterKind.Regular } ?: return@mapNotNull null
@@ -97,10 +120,10 @@ internal fun xamlApplicationProperties(
             val handlerType = runCatching { resolve(parameter.type) }.getOrNull() ?: return@mapNotNull null
             if (types[handlerType.qualifiedName?.substringBefore('`')]?.kind != WinRTTypeKind.Delegate.name) return@mapNotNull null
             WinRTXamlApplicationEvent(name, handlerType)
-        }
+        } + declaredEvents
     val methods = owners.flatMap { owner ->
         owner.declarations.filterIsInstance<IrSimpleFunction>()
-            .filter { it.origin == IrDeclarationOrigin.DEFINED && it.overriddenSymbols.isEmpty() &&
+            .filter { accessible(it) && it.origin == IrDeclarationOrigin.DEFINED && it.overriddenSymbols.isEmpty() &&
                 !it.isSuspend && it.typeParameters.isEmpty() &&
                 it.parameters.none { parameter -> parameter.kind == IrParameterKind.ExtensionReceiver ||
                     parameter.kind == IrParameterKind.Context || parameter.varargElementType != null } &&

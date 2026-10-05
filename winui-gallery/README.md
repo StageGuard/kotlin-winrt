@@ -27,10 +27,10 @@ The semantic JAR or KLIB is not an application dependency. JVM and Native final
 outputs have separate directories.
 
 The toolkit pins the CI Release
-[`kotlin-xamlc-v0.1.0-preview.5`](https://github.com/compose-fluent/microsoft-ui-xaml/releases/tag/kotlin-xamlc-v0.1.0-preview.5),
-protocol 2, from fork commit `d601a4c4dcf8c7ec3a0897f45bbb9570febe92b1`.
+[`kotlin-xamlc-v0.1.0-preview.6`](https://github.com/compose-fluent/microsoft-ui-xaml/releases/tag/kotlin-xamlc-v0.1.0-preview.6),
+protocol 3, from fork commit `089179eeecac14b587981afe05cf8686c9da0923`.
 Its archive SHA-256 is
-`6f0d4e9738ed435edeb16519c15dc6472f9c83dcbc1cea0c3127c4986a3d69da`.
+`7718088e70e1d4e95446e0b1e6891fcce09ab70c82ba3ae6027d6aaa43fbc628`.
 Download and package checks run in Gradle, not the Kotlin compiler. GenXbf comes
 from the selected Windows App SDK package. Building the application does not
 require the XamlCompiler checkout or a local tool override.
@@ -38,7 +38,10 @@ require the XamlCompiler checkout or a local tool override.
 The compiler supports named elements, ordinary and compiled-binding events,
 compiled bindings, template scopes, collection notifications, converters,
 phased bindings, deferred elements, application resources and custom Kotlin
-XAML types. Unsupported forms produce build errors.
+XAML types. `x:Properties` adds typed Kotlin properties, literal or complex
+defaults, read-only declarations and property change events. The main window
+uses its XAML-declared `GalleryTitle` in Kotlin and a OneWay compiled binding.
+Unsupported forms produce build errors.
 
 The `models` library supplies the plain Kotlin Recipe model and its inferred XAML
 schema. The `resources` library supplies the shared grid and text dictionaries

@@ -10,6 +10,9 @@
     xmlns:pages="using:io.github.composefluent.winrt.gallery.pages"
     Title="Kotlin WinUI Gallery"
     mc:Ignorable="d">
+    <x:Properties>
+        <x:Property Name="GalleryTitle" Type="x:String" DefaultValue="Kotlin WinUI Gallery" />
+    </x:Properties>
 <Grid x:Name="RootGrid">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -17,7 +20,7 @@
         </Grid.RowDefinitions>
         <TitleBar
             x:Name="titleBar"
-            Title="Kotlin WinUI Gallery"
+            Title="{x:Bind GalleryTitle, Mode=OneWay}"
             IsBackButtonVisible="False"
             IsPaneToggleButtonVisible="True">
             <TitleBar.IconSource>

@@ -14,11 +14,14 @@ internal class RawComObjectReferenceSupport(
     val isAggregated: Boolean = false,
     trackContext: Boolean = true,
     internal val managedCcwReleaseIdentity: RawAddress = RawAddress.Null,
+    internal val nativeObjectLifetime: WinRTNativeObjectLifetime? = null,
+    private val afterRelease: (() -> Unit)? = null,
 ) {
     private val disposed = AtomicInt(0)
     private var referenceTrackerPointer: RawComPtr = PlatformAbi.nullComPtr
     private var referenceTrackerRegistrationKey: Long = 0L
     private var releaseTrackerSourceOnDispose: Boolean = false
+    private var ownsTrackerPointer = true
     // Retain the existing agility/FTM probe result; a null context alone does not prove agility.
     private val callsAreFreeThreaded = trackContext && ComThreadingSupport.isFreeThreaded(pointer)
     private var objectContext =
@@ -33,6 +36,7 @@ internal class RawComObjectReferenceSupport(
         } else {
             null
         }
+    private val nativeLifetimeLease = nativeObjectLifetime?.retain()
 
     internal val canUseScopedQueryInterfaceLease: Boolean
         get() = callsAreFreeThreaded && objectContext == null && !hasReferenceTracker && !isAggregated
@@ -63,6 +67,7 @@ internal class RawComObjectReferenceSupport(
         releaseTrackerSourceOnDispose: Boolean,
         retainTrackerPointer: (RawComPtr) -> Unit,
         addRefFromTrackerSourceCallback: (RawComPtr) -> Unit,
+        ownsTrackerPointer: Boolean = true,
     ) {
         if (hasReferenceTracker) {
             return
@@ -80,6 +85,7 @@ internal class RawComObjectReferenceSupport(
             trackerSource.weakReference,
         )
         referenceTrackerPointer = trackerPointer
+        this.ownsTrackerPointer = ownsTrackerPointer
         retainTrackerPointer(trackerPointer)
         addRefFromTrackerSourceCallback(trackerPointer)
         if (addRefForObjectReference) {
@@ -151,6 +157,7 @@ internal class RawComObjectReferenceSupport(
         addRefFromTrackerSource: Boolean,
         retainTrackerPointer: (RawComPtr) -> Unit,
         addRefFromTrackerSourceCallback: (RawComPtr) -> Unit,
+        ownsTrackerPointer: Boolean = true,
     ): Boolean {
         if (hasReferenceTracker) {
             return true
@@ -170,6 +177,7 @@ internal class RawComObjectReferenceSupport(
                 releaseTrackerSourceOnDispose = addRefFromTrackerSource,
                 retainTrackerPointer = retainTrackerPointer,
                 addRefFromTrackerSourceCallback = addRefFromTrackerSourceCallback,
+                ownsTrackerPointer = ownsTrackerPointer,
             )
         } finally {
             WinRTPlatformApi.releaseRaw(result.pointer)
@@ -217,7 +225,15 @@ internal class RawComObjectReferenceSupport(
                 try {
                     context?.callInOriginalContext(releaseReferences, releaseReferences) ?: releaseReferences()
                 } finally {
-                    context?.close()
+                    try {
+                        nativeLifetimeLease?.release(deferContextRelease)
+                    } finally {
+                        try {
+                            context?.close()
+                        } finally {
+                            afterRelease?.invoke()
+                        }
+                    }
                 }
             }
             val disconnectAndRelease = {
@@ -275,7 +291,7 @@ internal class RawComObjectReferenceSupport(
         if (releaseTrackerSourceOnDispose) {
             releaseFromTrackerSource(releaseFromTrackerSourceCallback)
         }
-        releaseTrackerPointer(referenceTrackerPointer)
+        if (ownsTrackerPointer) releaseTrackerPointer(referenceTrackerPointer)
         referenceTrackerPointer = PlatformAbi.nullComPtr
         releaseTrackerSourceOnDispose = false
     }

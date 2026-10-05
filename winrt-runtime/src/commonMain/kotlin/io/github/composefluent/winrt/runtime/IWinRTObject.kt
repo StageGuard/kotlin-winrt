@@ -16,10 +16,10 @@ interface IWinRTObject {
         get() = true
 
     val queryInterfaceCache: ConcurrentCacheMap<WinRTTypeHandle, ComObjectReference>
-        get() = winRTObjectSupport.queryInterfaceCache(this)
+        get() = nativeObject.projectedObjectState.queryInterfaceCache
 
     val additionalTypeData: ConcurrentCacheMap<WinRTTypeHandle, Any>
-        get() = winRTObjectSupport.additionalTypeData(this)
+        get() = nativeObject.projectedObjectState.additionalTypeData
 
     fun isInterfaceImplemented(
         interfaceType: WinRTTypeHandle,
@@ -67,6 +67,20 @@ abstract class WinRTObjectBase<T : ComObjectReference>(
     nativeObject: T?,
     primaryTypeHandle: WinRTTypeHandle?,
 ) : IWinRTObject {
+    @kotlin.concurrent.Volatile
+    private var objectState: WinRTObjectState<ComObjectReference>? = null
+
+    private fun objectState(): WinRTObjectState<ComObjectReference> =
+        objectState ?: WinRTObjectStateInitialization.lock.withLock {
+            objectState ?: WinRTObjectState<ComObjectReference>().also { objectState = it }
+        }
+
+    final override val queryInterfaceCache: ConcurrentCacheMap<WinRTTypeHandle, ComObjectReference>
+        get() = objectState().queryInterfaceCache
+
+    final override val additionalTypeData: ConcurrentCacheMap<WinRTTypeHandle, Any>
+        get() = objectState().additionalTypeData
+
     final override lateinit var nativeObject: T
         protected set
 
@@ -87,9 +101,11 @@ abstract class WinRTObjectBase<T : ComObjectReference>(
 }
 
 private val winRTObjectSupport =
-    WinRTObjectSupport<IWinRTObject, ComObjectReference> { reference ->
-        reference.close()
-    }
+    WinRTObjectSupport<IWinRTObject, ComObjectReference>(
+        queryInterfaceCacheFor = IWinRTObject::queryInterfaceCache,
+        additionalTypeDataFor = IWinRTObject::additionalTypeData,
+        closeReference = ComObjectReference::close,
+    )
 
 private fun missingInterfaceError(interfaceType: WinRTTypeHandle): Throwable =
     WinRTUnsupportedOperationException(

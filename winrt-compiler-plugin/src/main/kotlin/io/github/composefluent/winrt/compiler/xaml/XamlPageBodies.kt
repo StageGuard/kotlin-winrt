@@ -9,6 +9,7 @@ import org.jetbrains.kotlin.ir.builders.*
 import org.jetbrains.kotlin.ir.declarations.*
 import org.jetbrains.kotlin.ir.expressions.IrExpression
 import org.jetbrains.kotlin.ir.expressions.IrGetField
+import org.jetbrains.kotlin.ir.expressions.IrSetField
 import org.jetbrains.kotlin.ir.expressions.impl.IrFunctionReferenceImpl
 import org.jetbrains.kotlin.ir.symbols.UnsafeDuringIrConstructionAPI
 import org.jetbrains.kotlin.ir.types.*
@@ -24,6 +25,7 @@ internal class XamlPageBodies(private val index: WinRTXamlDeclarationIndex, priv
     override fun generate(moduleFragment: IrModuleFragment, pluginContext: IrPluginContext) {
         val classes = moduleFragment.files.flatMap { it.declarations }.filterIsInstance<IrClass>()
             .associateBy { it.fqNameWhenAvailable?.asString() }
+        val pages = index.pages.associateBy { it.className }
         for (page in index.pages) {
             val klass = requireNotNull(classes[page.className]) { "Missing Kotlin XAML class ${page.className}" }
             fun function(name: Name) = klass.declarations.filterIsInstance<IrSimpleFunction>().single { it.name == name }.also {
@@ -53,17 +55,18 @@ internal class XamlPageBodies(private val index: WinRTXamlDeclarationIndex, priv
                 }
             }
             val functions = (listOf(xamlInitializeName, xamlConstructionName, xamlLoadName, xamlConnectName, xamlBindingName) +
+                page.properties.flatMap { it.eventFunctions() } +
                 if (page.hasCompiledBindings()) listOf(xamlUpdateBindingsName, xamlBindingsChangedName, xamlBindingsLoadingName,
                     xamlBindingsUnloadedName, xamlRefreshBindingsName) + page.bindBackNames() +
                     (if (page.hasTemplateScopes()) xamlScopeNames else emptySet()) else emptyList()).map(::function)
             if (semanticOnly) {
                 val error = pluginContext.referenceFunctions(CallableId(FqName("kotlin"), Name.identifier("error"))).single()
-                for (method in functions + properties.values.mapNotNull { it.getter }) {
+                for (method in functions + properties.values.flatMap { listOfNotNull(it.getter, it.setter) }) {
                     method.body = DeclarationIrBuilder(pluginContext, method.symbol).irBlockBody {
                         +irCall(error).apply { arguments[0] = irString("XAML semantic-only artifact must not be executed") }
                     }
                 }
-                if (page.hasCompiledBindings()) XamlCompiledBindingBodies(pluginContext, classes).generate(klass, page, properties)
+                if (page.hasCompiledBindings()) XamlCompiledBindingBodies(pluginContext, classes, pages).generate(klass, page, properties)
                 continue
             }
             fun runtime(name: String) = pluginContext.referenceFunctions(
@@ -72,6 +75,8 @@ internal class XamlPageBodies(private val index: WinRTXamlDeclarationIndex, priv
                 "XAML requires generated projection $name"
             }.owner
             val requireElement = runtime("requireXamlNamedElement")
+            val propertyBodies = XamlPropertyBodies(pluginContext, classes)
+            propertyBodies.generate(klass, page, properties)
             for (connection in page.connections.filter { it.storageName() != null }) {
                 val property = properties.getValue(connection.storageName()!!)
                 val field = requireNotNull(property.backingField)
@@ -99,7 +104,7 @@ internal class XamlPageBodies(private val index: WinRTXamlDeclarationIndex, priv
                 getter.body = DeclarationIrBuilder(pluginContext, getter.symbol).irBlockBody {
                     +irReturn(irGetField(irGet(requireNotNull(getter.dispatchReceiverParameter)), bindingField))
                 }
-                XamlCompiledBindingBodies(pluginContext, classes).generate(klass, page, properties)
+                XamlCompiledBindingBodies(pluginContext, classes, pages).generate(klass, page, properties)
             }
             val state = requireNotNull(properties.getValue(xamlStateName.asString()).backingField)
             val stateClass = requireNotNull(pluginContext.referenceClass(xamlStateId)).owner
@@ -140,6 +145,9 @@ internal class XamlPageBodies(private val index: WinRTXamlDeclarationIndex, priv
                         dispatchReceiver = irGetObject(registrar.symbol)
                     }
                 }
+                propertyBodies.defaults(this, page, properties) {
+                    irGet(requireNotNull(load.dispatchReceiverParameter))
+                }.forEach { +it }
                 +irCall(loadComponent.symbol).apply {
                     dispatchReceiver = irGetObject(applicationMetadata.symbol)
                     arguments[1] = irGet(requireNotNull(load.dispatchReceiverParameter))
@@ -148,7 +156,7 @@ internal class XamlPageBodies(private val index: WinRTXamlDeclarationIndex, priv
                     }
                 }
                 if (page.hasCompiledBindings()) {
-                    val bindings = XamlCompiledBindingBodies(pluginContext, classes)
+                    val bindings = XamlCompiledBindingBodies(pluginContext, classes, pages)
                     +bindings.lifecycleSubscription(this, klass, page, function(xamlBindingsLoadingName), irGet(requireNotNull(load.dispatchReceiverParameter)), true)
                     +bindings.lifecycleSubscription(this, klass, page, function(xamlBindingsUnloadedName), irGet(requireNotNull(load.dispatchReceiverParameter)), false)
                 }
@@ -252,7 +260,7 @@ internal class XamlPageBodies(private val index: WinRTXamlDeclarationIndex, priv
                                 }
                             }
                             for (event in connection.bindings.filter { it.isEvent && !connection.isTemplateChild }) {
-                                +XamlCompiledBindingBodies(pluginContext, classes).eventSubscription(this, klass, event,
+                                +XamlCompiledBindingBodies(pluginContext, classes, pages).eventSubscription(this, klass, event,
                                     irGet(requireNotNull(connect.dispatchReceiverParameter)), irGet(target))
                             }
                             if (connection.canBeInstantiatedLater && !connection.isTemplateChild && page.hasCompiledBindings()) {
@@ -284,6 +292,11 @@ internal class XamlPageBodies(private val index: WinRTXamlDeclarationIndex, priv
                     requireNotNull(property.backingField).symbol to requireNotNull(property.getter)
                 }
             }.toMap()
+            val propertySetters = page.properties.mapNotNull { declaration ->
+                properties.getValue(declaration.name).let { property ->
+                    property.setter?.let { requireNotNull(property.backingField).symbol to it }
+                }
+            }.toMap()
             val guardReads = object : IrElementTransformerVoidWithContext() {
                 override fun visitGetField(expression: IrGetField): IrExpression {
                     val value = super.visitGetField(expression) as IrGetField
@@ -291,6 +304,14 @@ internal class XamlPageBodies(private val index: WinRTXamlDeclarationIndex, priv
                     val scope = currentScope?.scope?.scopeOwnerSymbol ?: return value
                     return DeclarationIrBuilder(pluginContext, scope, value.startOffset, value.endOffset).irCall(getter.symbol).apply {
                         dispatchReceiver = value.receiver
+                    }
+                }
+                override fun visitSetField(expression: IrSetField): IrExpression {
+                    val value = super.visitSetField(expression) as IrSetField
+                    val setter = propertySetters[value.symbol] ?: return value
+                    val scope = currentScope?.scope?.scopeOwnerSymbol ?: return value
+                    return DeclarationIrBuilder(pluginContext, scope, value.startOffset, value.endOffset).irCall(setter.symbol).apply {
+                        dispatchReceiver = value.receiver; arguments[1] = value.value
                     }
                 }
             }

@@ -111,7 +111,7 @@
                         Description="© 2026 Kotlin/WinRT contributors."
                         Header="{x:Bind AboutTitle}">
                         <toolkit:SettingsExpander.HeaderIcon>
-                            <BitmapIcon ShowAsMonochrome="False" UriSource="/Assets/Tiles/BadgeLogo.png" />
+                            <BitmapIcon ShowAsMonochrome="False" UriSource="/Assets/AppList.png" />
                         </toolkit:SettingsExpander.HeaderIcon>
                         <TextBlock
                             Foreground="{ThemeResource TextFillColorSecondaryBrush}"

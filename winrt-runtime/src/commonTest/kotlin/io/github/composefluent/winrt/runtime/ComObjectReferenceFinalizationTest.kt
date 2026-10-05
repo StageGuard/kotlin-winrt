@@ -8,6 +8,31 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNull
 
 class ComObjectReferenceFinalizationTest {
+    // CsWinRT keeps additional type data on the RCW. A cache value may refer
+    // back to its owner; this must remain a collectible managed cycle.
+    @Test
+    fun abandoned_wrapper_with_self_referencing_type_data_is_reclaimed() {
+        FakeOwnedReferenceHost.create().use { host ->
+            val abandoned = abandonSelfReferencingWrapper(host)
+            repeat(20) {
+                PlatformFinalization.drain()
+                if (abandoned.get() == null && host.releaseCalls == 1) return@use
+                val pressure = List(128) { ByteArray(1024) }
+                assertEquals(128, pressure.size)
+            }
+            assertNull(abandoned.get())
+            assertEquals(1, host.releaseCalls)
+        }
+    }
+
+    private fun abandonSelfReferencingWrapper(
+        host: FakeOwnedReferenceHost,
+    ): PlatformManagedWeakReference<ProjectedInspectableObject> {
+        val value = ProjectedInspectableObject(host.createReference())
+        value.additionalTypeData[WinRTTypeHandle("test.Owner", IID.IInspectable)] = value
+        return PlatformManagedWeakReference(value)
+    }
+
     @Test
     fun abandoned_owned_reference_releases_its_com_pointer() {
         FakeOwnedReferenceHost.create().use { host ->

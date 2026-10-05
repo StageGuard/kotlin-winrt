@@ -52,6 +52,12 @@ internal class XamlNameCheckers(session: FirSession, pages: Map<ClassId, WinRTXa
                         "${page.resourcePath}:${connection.location.line}:${connection.location.column}: " +
                             "XAML x:Name '${connection.fieldName}' conflicts with existing property '${owner.asSingleFqName()}.${connection.fieldName}'. Rename the XAML element explicitly.")
                 }
+                page.properties.forEach { property ->
+                    val owner = inherited[property.name] ?: return@forEach
+                    reporter.reportOn(declaration.source, FirErrors.UNSUPPORTED,
+                        "${page.resourcePath}:${property.location.line}:${property.location.column}: " +
+                            "XAML x:Property '${property.name}' conflicts with existing property '${owner.asSingleFqName()}.${property.name}'. Rename the XAML property explicitly.")
+                }
             }
         })
     }

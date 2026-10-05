@@ -115,6 +115,7 @@ internal class WinRTInspectableComObject(
     private val trustLevel: Int = 0,
     managedValue: Any? = null,
     weakManagedValue: Boolean = false,
+    borrowReady: Boolean = weakManagedValue,
     private val queryInterfaceFallback: ((Guid) -> RawAddress?)? = null,
     initialQueryInterfaceForwardTarget: ComObjectReference? = null,
     private val cleanupAction: (() -> Unit)? = null,
@@ -149,7 +150,7 @@ internal class WinRTInspectableComObject(
     internal val state = ManagedComHostState(
         rootReference = inboundBinding,
         cleanup = ::cleanup,
-        borrowReady = weakManagedValue,
+        borrowReady = borrowReady,
         referenceCounterStorage = referenceCounterStorage,
         referenceCounterStorageView = hostOwnedMemory.memory,
         referenceCounterStorageOffsetBytes = referenceCounterStorageOffsetBytes,
@@ -161,6 +162,7 @@ internal class WinRTInspectableComObject(
     private var lastStaticCallLease: StaticCallLeaseEntry? = null
     @kotlin.concurrent.Volatile
     private var queryInterfaceForwardTarget = initialQueryInterfaceForwardTarget
+    private var weakQueryInterfaceForwardTarget: PlatformManagedWeakReference<ComObjectReference>? = null
     private var queryInterfaceTablePublisher: ManagedComQueryInterfaceTablePublisher? = null
 
     init {
@@ -368,8 +370,11 @@ internal class WinRTInspectableComObject(
         incrementExternalPointerAliasCount()
     }
 
-    internal fun setQueryInterfaceForwardTarget(reference: ComObjectReference?) {
-        queryInterfaceForwardTarget = reference
+    internal fun setQueryInterfaceForwardTarget(reference: ComObjectReference?, weak: Boolean = false) {
+        // The resource owner retains the inner. The CCW must not retain its RCW's
+        // managed tracker graph through a forwarding wrapper.
+        queryInterfaceForwardTarget = reference.takeUnless { weak }
+        weakQueryInterfaceForwardTarget = reference?.takeIf { weak }?.let(::PlatformManagedWeakReference)
         val publisher = queryInterfaceTablePublisher
             ?: ManagedComQueryInterfaceTablePublisher(
                 shape = ccwShape.queryInterfaceTableShape,
@@ -451,7 +456,7 @@ internal class WinRTInspectableComObject(
                 registerExternalPointerAlias(pointer)
                 return NativePointerResult(KnownHResults.S_OK.value, pointer)
             }
-        val forwardTarget = queryInterfaceForwardTarget
+        val forwardTarget = queryInterfaceForwardReference()
             ?: return NativePointerResult(KnownHResults.E_NOINTERFACE.value, PlatformAbi.nullPointer)
         return WinRTPlatformApi.queryInterfaceRaw(
             PlatformAbi.fromRawComPtr(forwardTarget.pointer),
@@ -459,11 +464,14 @@ internal class WinRTInspectableComObject(
         )
     }
 
+    private fun queryInterfaceForwardReference(): ComObjectReference? =
+        (queryInterfaceForwardTarget ?: weakQueryInterfaceForwardTarget?.get())?.takeUnless { it.isDisposed }
+
     private fun directQueryInterfaceForwardTarget(): RawAddress {
         if (queryInterfaceFallback != null) {
             return PlatformAbi.nullPointer
         }
-        return queryInterfaceForwardTarget
+        return queryInterfaceForwardReference()
             ?.let { reference -> PlatformAbi.fromRawComPtr(reference.pointer) }
             ?: PlatformAbi.nullPointer
     }

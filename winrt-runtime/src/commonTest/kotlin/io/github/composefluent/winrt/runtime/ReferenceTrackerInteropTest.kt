@@ -8,6 +8,78 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class ReferenceTrackerInteropTest {
+    @Test
+    fun tracking_completion_releases_apartment_bound_borrowed_wrappers_and_native_owners() {
+        // CsWinRT ObjectReferenceWithContext releases in its original apartment. Kotlin
+        // defers Native cleaners until the XAML tracking graph has been unlocked.
+        RuntimeScope.initializeSingleThreaded().use {
+            for (failCompletion in listOf(false, true)) {
+                FakeReferenceTrackerHost.create().use { host ->
+                    IInspectableReference(host.objectPointer.asRawComPtr(), IID.IInspectable).use { reference ->
+                        assertTrue(reference.tryInitializeReferenceTracker())
+                        var cleanupCalls = 0
+                        val lifetime = WinRTNativeObjectLifetime.create(host.objectPointer.asRawComPtr()) {
+                            assertEquals(1, host.managerTrackingCompletedCalls)
+                            cleanupCalls++
+                        }
+                        val borrowed = RawComObjectReferenceSupport(
+                            pointer = host.objectPointer.asRawComPtr(),
+                            interfaceIdLowBits = IID.IInspectable.abiLowBits,
+                            interfaceIdHighBits = IID.IInspectable.abiHighBits,
+                            knownInterfaceId = IID.IInspectable,
+                            preventReleaseOnDispose = true,
+                            isAggregated = true,
+                            nativeObjectLifetime = lifetime,
+                        )
+                        lifetime.close()
+                        host.failFindTrackerTargetsCompleted = failCompletion
+                        host.onReferenceTrackingStarted = { closeComPtrSupportFromFinalizer(borrowed) }
+                        try {
+                            val result = ComVtableInvoker.invokeArgs(
+                                host.referenceTrackerHostPointer.asRawComPtr(),
+                                ReferenceTrackerHostVftblSlots.DisconnectUnusedReferenceSources,
+                                0,
+                            )
+                            if (failCompletion) assertTrue(result < 0)
+                            else assertEquals(KnownHResults.S_OK.value, result)
+                            assertEquals(1, host.objectReleaseCalls)
+                            assertEquals(1, cleanupCalls)
+                        } finally {
+                            closeComPtrSupport(borrowed)
+                            host.onReferenceTrackingStarted = null
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    fun aggregated_native_owner_balances_borrowed_tracker_and_releases_inner_after_disconnect() {
+        // CsWinRT Init immediately releases aggregated tracker QI, while the
+        // CLR native wrapper owns one tracker-source reference and the inner.
+        FakeReferenceTrackerHost.create().use { host ->
+            var cleanupCalls = 0
+            val lifetime = WinRTNativeObjectLifetime.create(host.objectPointer.asRawComPtr()) { cleanupCalls++ }
+            val borrowed = ComPtr.create(host.objectPointer.asRawComPtr(), IID.IInspectable,
+                ownershipMode = ComOwnershipMode.Borrowed, isAggregated = true, trackContext = false,
+                nativeObjectLifetime = lifetime)
+            assertTrue(lifetime.initializeReferenceTracker(borrowed))
+            assertEquals(1, host.trackerAddRefFromSourceCalls)
+            assertEquals(1, host.trackerReleaseCalls)
+            lifetime.close()
+            assertEquals(0, host.objectReleaseCalls)
+            borrowed.close()
+            assertEquals(1, host.trackerDisconnectCalls)
+            assertEquals(0, cleanupCalls)
+            host.releaseDisconnectedReferenceSources()
+            assertEquals(1, host.trackerReleaseFromSourceCalls)
+            assertEquals(1, host.trackerReleaseCalls)
+            assertEquals(1, host.objectReleaseCalls)
+            assertEquals(1, cleanupCalls)
+        }
+    }
+
     // CsWinRT ObjectReference.cs: AsValue(Guid) borrows the parent's tracker registration;
     // ObjectReferenceValue.Dispose balances the temporary source reference before COM Release.
     @Test
@@ -323,6 +395,7 @@ class ReferenceTrackerInteropTest {
         var failFindTrackerTargetsCompleted: Boolean = false
         var forcedQueryHResult: Int? = null
         var releaseDisconnectedOnDisconnect: Boolean = false
+        var onReferenceTrackingStarted: (() -> Unit)? = null
 
         fun releaseDisconnectedReferenceSources() {
             assertEquals(
@@ -431,6 +504,7 @@ class ReferenceTrackerInteropTest {
         private fun referenceTrackingStarted(args: List<Any?>): Int {
             args.single()
             managerTrackingStartedCalls++
+            onReferenceTrackingStarted?.invoke()
             return KnownHResults.S_OK.value
         }
 

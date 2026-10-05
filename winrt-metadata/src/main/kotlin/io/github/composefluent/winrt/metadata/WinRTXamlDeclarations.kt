@@ -24,6 +24,19 @@ data class WinRTXamlPageDeclaration(
     @SerialName("IsApplication") val isApplication: Boolean,
     @SerialName("Features") val features: List<String>,
     @SerialName("Connections") val connections: List<WinRTXamlConnectionDeclaration>,
+    @SerialName("Properties") val properties: List<WinRTXamlPropertyDeclaration> = emptyList(),
+)
+
+@Serializable
+data class WinRTXamlPropertyDeclaration(
+    @SerialName("Name") val name: String,
+    @SerialName("TypeName") val typeName: String,
+    @SerialName("IsReadOnly") val isReadOnly: Boolean,
+    @SerialName("IsValueType") val isValueType: Boolean,
+    @SerialName("ChangedHandler") val changedHandler: String?,
+    @SerialName("DefaultValue") val defaultValue: String?,
+    @SerialName("DefaultValueMarkup") val defaultValueMarkup: String?,
+    @SerialName("Location") val location: WinRTXamlSourceLocation,
 )
 
 @Serializable
@@ -93,9 +106,9 @@ data class WinRTXamlSourceLocation(
 )
 
 object WinRTXamlDeclarations {
-    const val SCHEMA_VERSION = 2
+    const val SCHEMA_VERSION = 3
     private val json = Json { encodeDefaults = true }
-    private val supportedFeatures = setOf("named-elements", "events", "compiled-bindings", "templates", "phased-bindings", "deferred-elements")
+    private val supportedFeatures = setOf("named-elements", "events", "compiled-bindings", "templates", "phased-bindings", "deferred-elements", "properties")
 
     /** Never accept a partial/stale index from a compiler invocation that reported an error. */
     fun readCompilerOutput(path: Path): WinRTXamlDeclarationIndex {
@@ -125,6 +138,7 @@ object WinRTXamlDeclarations {
             resources = index.resources.sorted(),
             pages = index.pages.sortedBy { it.className }.map { page -> page.copy(
                 features = page.features.sorted(),
+                properties = page.properties.sortedBy { it.name },
                 connections = page.connections.sortedBy { it.id }.map { connection -> connection.copy(
                     events = connection.events.sortedBy { it.name },
                     bindings = connection.bindings.sortedBy { it.name },
@@ -150,6 +164,17 @@ object WinRTXamlDeclarations {
             require(page.connections.map { it.id }.distinct().size == page.connections.size) { "Duplicate connection ID in ${page.resourcePath}." }
             val fields = page.connections.filterNot { it.isTemplateChild }.mapNotNull { it.fieldName }
             require(fields.distinct().size == fields.size) { "Duplicate x:Name in ${page.resourcePath}." }
+            val propertyNames = page.properties.map { it.name }
+            require(propertyNames.distinct().size == propertyNames.size) { "Duplicate x:Property in ${page.resourcePath}." }
+            require(propertyNames.none { it in fields }) { "x:Property conflicts with x:Name in ${page.resourcePath}." }
+            require(page.properties.isEmpty() || (index.schemaVersion >= 3 && "properties" in page.features)) { "Missing properties feature." }
+            require(page.properties.mapNotNull { it.changedHandler }.distinct().size == page.properties.count { it.changedHandler != null }) { "Duplicate x:Property ChangedHandler." }
+            for (property in page.properties) {
+                require(property.name.isNotBlank() && property.typeName.isNotBlank()) { "Incomplete x:Property in ${page.resourcePath}." }
+                require(property.isReadOnly == (property.changedHandler == null) && property.changedHandler?.isNotBlank() != false) { "Invalid x:Property ChangedHandler." }
+                require(property.defaultValue == null || property.defaultValueMarkup == null) { "Conflicting x:Property defaults." }
+                validateLocation(property.location)
+            }
             require(fields.isEmpty() || "named-elements" in page.features) { "Missing named-elements feature." }
             require(page.connections.all { it.events.isEmpty() } || "events" in page.features) { "Missing events feature." }
             require(page.connections.all { it.bindings.isEmpty() } ||

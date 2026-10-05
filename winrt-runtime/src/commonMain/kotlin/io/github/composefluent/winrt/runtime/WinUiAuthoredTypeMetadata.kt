@@ -23,6 +23,11 @@ internal object WinUiAuthoredTypeMetadata {
         enumTypes.putIfAbsent(name, EnumType(type, parse))
     }
 
+    /** CSharpPagePass2.GetStringToThing invokes application CreateFromString
+     * factories and enum parsers before falling back to the SDK converter. */
+    fun literalParser(type: KClass<*>): ((String) -> Any)? =
+        definitionsByType[type]?.createFromString ?: enumTypes.values.firstOrNull { it.type == type }?.parse
+
     fun registerDefinition(definition: WinRTXamlTypeDefinition) {
         definitions.putIfAbsent(definition.name, definition)
         definitionsByType.putIfAbsent(definition.type, definition)

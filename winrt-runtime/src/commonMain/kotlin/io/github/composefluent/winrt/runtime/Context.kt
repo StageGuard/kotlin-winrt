@@ -369,10 +369,16 @@ private object DeferredContextActions {
         if (result.hResultValue < 0 || PlatformAbi.isNull(result.pointer)) {
             return
         }
-        val actions = lock.withLock {
-            actionsByContext.remove(PlatformAbi.pointerKey(result.pointer))?.toList().orEmpty()
+        val contextKey = PlatformAbi.pointerKey(result.pointer)
+        while (true) {
+            val actions = lock.withLock {
+                actionsByContext.remove(contextKey)?.toList().orEmpty()
+            }
+            if (actions.isEmpty()) return
+            // Releasing a borrowed wrapper may enqueue its native lifetime owner.
+            // Drain that owner too, without waiting for another GC or application exit.
+            actions.forEach { action -> action() }
         }
-        actions.forEach { action -> action() }
     }
 }
 

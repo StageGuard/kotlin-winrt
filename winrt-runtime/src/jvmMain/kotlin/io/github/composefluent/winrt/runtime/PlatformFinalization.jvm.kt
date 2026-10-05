@@ -8,6 +8,9 @@ internal actual object PlatformFinalization {
     actual fun drain() {
         System.gc()
         System.runFinalization()
+        // Cleaner releases return non-agile objects to their owning apartment,
+        // matching the Native drain and ObjectReferenceWithContext's contract.
+        drainDeferredComReleasesForCurrentContext()
         System.gc()
         System.runFinalization()
     }

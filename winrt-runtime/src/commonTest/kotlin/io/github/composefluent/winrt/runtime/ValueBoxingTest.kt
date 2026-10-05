@@ -14,6 +14,20 @@ class ValueBoxingTest {
     private val boxedReferenceGenericInterface = "61C17706-2D65-11E0-9AE8-D48564015472"
 
     @Test
+    fun xaml_value_defaults_use_registered_struct_and_enum_abi_readers() {
+        // xProperty.cs declares a typed zero-initialized field. Struct decoding
+        // stays with the WinRT value adapter, as in CsWinRT's generated marshalers.
+        ComWrappersSupport.clearRegistriesForTests()
+        registerProjectedPointBoxing()
+        registerEnumDescriptors()
+        assertEquals(0u, defaultWinRTXamlValue(UInt::class))
+        assertEquals(Guid("00000000-0000-0000-0000-000000000000"), defaultWinRTXamlValue(Guid::class))
+        assertEquals(kotlin.time.Duration.ZERO, defaultWinRTXamlValue(kotlin.time.Duration::class))
+        assertEquals(ProjectedPoint(0f, 0f), defaultWinRTXamlValue(ProjectedPoint::class))
+        assertEquals(TestPriority.entries.first { it.abiValue == 0 }, defaultWinRTXamlValue(TestPriority::class))
+    }
+
+    @Test
     fun reference_array_classification_uses_explicit_or_conservative_dynamic_metadata() {
         ComWrappersSupport.clearRegistriesForTests()
 
