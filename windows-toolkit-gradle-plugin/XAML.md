@@ -27,6 +27,11 @@ private event handlers are checked against the actual WinRT delegate signature.
 An `x:Name` that conflicts with an existing property produces a source diagnostic;
 it is never silently renamed.
 
+Aggregated XAML pages use the WinRT composition and reference-tracking lifetime
+contract on both targets. External COM references retain the Kotlin page, and
+borrowed interface wrappers keep the native object alive until those wrappers
+are released.
+
 The build first analyzes declarations, then compiles isolated Kotlin semantic
 symbols, generates XBF, and finally compiles application classes. Semantic
 classes are never placed on the application's runtime classpath. XBF enters the
@@ -99,7 +104,8 @@ event name; OneWay and TwoWay compiled bindings subscribe to that event.
 `IsReadOnly="True"` generates a `val` without a change event.
 
 Default values are assigned inside the guarded `initializeComponent()` load,
-before loading XBF. Repeated initialization preserves the property's current
-value. Literals use registered application enum and `CreateFromString` factories
-or the existing SDK conversion. Explicit complex defaults use the upstream
+before loading XBF. Like the upstream `InitializeXProperties`, this initializes
+backing fields without raising change events. Repeated initialization preserves
+the property's current value. Literals use registered application enum and
+`CreateFromString` factories or the existing SDK conversion. Explicit complex defaults use the upstream
 `XamlReader.Load` fragment path with the page's namespaces preserved.
