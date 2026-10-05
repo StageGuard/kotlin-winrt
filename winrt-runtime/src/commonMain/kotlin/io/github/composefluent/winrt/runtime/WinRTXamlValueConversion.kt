@@ -7,7 +7,8 @@ fun convertWinRTXamlLiteral(
     type: KClass<*>,
     text: String,
     sdkConvert: (KClass<*>, String) -> Any?,
-): Any? = WinRTTypeClassifier.classify(type)?.xamlLiteralParser?.invoke(text) ?: sdkConvert(type, text)
+): Any? = WinUiAuthoredTypeMetadata.literalParser(type)?.invoke(text)
+    ?: WinRTTypeClassifier.classify(type)?.xamlLiteralParser?.invoke(text) ?: sdkConvert(type, text)
 
 /** Zero-initialized WinRT value fields for generated x:Property declarations. Reuse the same enum
  * and struct adapters that already own ABI decoding; never classify them here.
