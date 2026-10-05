@@ -124,6 +124,10 @@ Resource-only XAML libraries use the same resource variants without exporting
 authored types or SDK projections. An empty semantic schema records their
 identity; no binding converter or template connector is emitted. Consumer PRI
 staging merges the XBF files at their original package-relative dictionary paths.
+Compiled converters in a dictionary's templates use that owning dictionary
+directly, following `CSharpPagePass2.SetConverterLookupRoot`. Other roots use
+their own `Resources` accessor. Both paths check the local dictionary before
+falling back to `Application.Current.Resources`.
 The Gallery's `resources` module owns its shared grid and text styles, while its
 `models` module owns the plain Kotlin Recipe model used by ItemsRepeater.
 

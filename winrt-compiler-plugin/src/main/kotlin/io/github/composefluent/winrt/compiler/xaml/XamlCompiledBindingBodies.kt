@@ -605,9 +605,21 @@ internal class XamlCompiledBindingBodies(
     private fun converter(builder: IrBuilderWithScope, klass: IrClass, receiver: IrExpression,
         binding: WinRTXamlBindingDeclaration, value: IrExpression, targetType: IrType,
         back: Boolean = false): IrExpression = with(builder) {
-        val framework = projection("Microsoft.UI.Xaml.FrameworkElement")
-        val resources = requireNotNull(property(framework, "Resources")?.getter)
         val dictionary = projection("Microsoft.UI.Xaml.ResourceDictionary")
+        val applicationType = projection("Microsoft.UI.Xaml.Application")
+        // CSharpPagePass2.SetConverterLookupRoot takes a ResourceDictionary
+        // directly for dictionary files; UI/application roots expose Resources.
+        // Use the actual root's accessor so a dictionary template never calls
+        // FrameworkElement.get_Resources on a ResourceDictionary instance.
+        val resources = if (receiver.type.isSubtypeOfClass(dictionary.symbol)) receiver else {
+            val owner = if (receiver.type.isSubtypeOfClass(applicationType.symbol)) applicationType
+                else projection("Microsoft.UI.Xaml.FrameworkElement")
+            require(receiver.type.isSubtypeOfClass(owner.symbol)) {
+                "${binding.location.line}:${binding.location.column}: compiled XAML converter lookup requires a ResourceDictionary or a root with Resources"
+            }
+            val getter = requireNotNull(property(owner, "Resources")?.getter)
+            irCall(getter.symbol).apply { dispatchReceiver = receiver }
+        }
         // ResourceDictionary is projected as MutableMap, as in CsWinRT's
         // IDictionary mapping. Its Kotlin surface uses get/containsKey.
         val lookup = dictionary.functions.single { it.name.asString() == "get" }
@@ -615,10 +627,10 @@ internal class XamlCompiledBindingBodies(
         val converters = projection("Microsoft.UI.Xaml.Data.IValueConverter")
         val call = converters.functions.single { it.name.asString() == if (back) "convertBack" else "convert" }
         irBlock(resultType = call.returnType) {
-            val local = irTemporary(irCall(resources.symbol).apply { dispatchReceiver = receiver })
-            val application = requireNotNull(projection("Microsoft.UI.Xaml.Application").companionObject())
+            val local = irTemporary(resources)
+            val application = requireNotNull(applicationType.companionObject())
             val current = requireNotNull(property(application, "Current")?.getter)
-            val appResources = requireNotNull(property(projection("Microsoft.UI.Xaml.Application"), "Resources")?.getter)
+            val appResources = requireNotNull(property(applicationType, "Resources")?.getter)
             val found = irTemporary(irIfThenElse(pluginContext.irBuiltIns.anyNType,
                 irCall(hasKey.symbol).apply { dispatchReceiver = irGet(local); arguments[1] = irString(requireNotNull(binding.converter)) },
                 irCall(lookup.symbol).apply { dispatchReceiver = irGet(local); arguments[1] = irString(requireNotNull(binding.converter)) },
