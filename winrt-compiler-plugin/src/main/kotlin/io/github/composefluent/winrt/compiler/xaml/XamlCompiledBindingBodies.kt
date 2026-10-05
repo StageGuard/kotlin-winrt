@@ -138,7 +138,7 @@ internal class XamlCompiledBindingBodies(
                 val alternate = binding.targetNullValue
                 val value = if (alternate != null && converted.type.isNullable()) irIfThenElse(targetType,
                     irEquals(irGet(converted), irNull(converted.type)),
-                    bindingValue(evaluate(alternate, this, klass, root, targetType, namedTargets), targetType, this, location),
+                    bindingValue(alternativeValue(alternate, targetType, this, location), targetType, this, location),
                     bindingValue(irGet(converted), targetType, this, location)) else
                     bindingValue(irGet(converted), targetType, this, location)
                 val skipNull = converted.type.isNullable() && !targetType.isNullable() && !targetType.isString() &&
@@ -151,7 +151,7 @@ internal class XamlCompiledBindingBodies(
             }
             val fallback = binding.fallbackValue?.let { alternate -> irBlock {
                 val assignedValue = irTemporary(bindingValue(
-                    evaluate(alternate, this, klass, root, targetType, namedTargets), targetType, this, location))
+                    alternativeValue(alternate, targetType, this, location), targetType, this, location))
                 +assignment(assignedValue)
                 +irUnit()
             } }
@@ -806,6 +806,21 @@ internal class XamlCompiledBindingBodies(
                     pathAvailable?.let { +irSet(it, irBoolean(false)) }
                     +irNull(resultType.makeNullable())
                 })
+        }
+    }
+
+    private fun alternativeValue(expression: WinRTXamlBindingExpression, expected: IrType,
+        builder: IrBuilderWithScope, location: String): IrExpression = with(builder) {
+        require(expression.kind == "literal") { "$location: compiled binding alternatives require a XAML literal" }
+        if (expression.typeName == "null") return@with irNull(expected.makeNullable())
+        // BindAssignment.FallbackValueExpression and CSharpPagePass2's setters
+        // convert option text to the target member type. Reuse the same literal
+        // bridge as x:Property defaults; function arguments stay in evaluate().
+        val convert = pluginContext.referenceFunctions(CallableId(FqName("io.github.composefluent.winrt.generated.xaml"),
+            Name.identifier("kotlinWinRTXamlMemberValue"))).single()
+        irCall(convert).apply {
+            type = expected; typeArguments[0] = expected
+            arguments[0] = irString(requireNotNull(expression.value) { "$location: missing binding alternative literal" })
         }
     }
 

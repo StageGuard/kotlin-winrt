@@ -55,6 +55,9 @@ compilation, final XAML compilation, and main Kotlin compilation stages.
 Compiled bindings use generated calls with template scopes, phase tracking,
 deferred elements, converters and binding updates. JVM and Native execution
 remain separate integration checks, recorded in the Gallery migration inventory.
+`FallbackValue` and `TargetNullValue` literals use the target member type and the
+same SDK, mapped-type and `CreateFromString` conversion bridge as `x:Property`
+defaults. Function-call arguments retain their typed constant semantics.
 
 The semantic compilation now exports declared public/internal instance
 properties into the application-only `KotlinXaml.winmd`. It uses Kotlin IR
