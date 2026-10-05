@@ -2534,39 +2534,54 @@ private fun configureWinRTGeneration(
 
     // Published identity artifacts are fixed inputs; project-produced identities stay on the
     // IDE preparation task path so a clean import does not consume stale build outputs.
-    project.afterEvaluate {
-        val prepared = runCatching {
-            prepareWinRTStaticProjectionSources(
-                project = project,
-                extension = extension.packageReferences,
-                dependencyIdentityFiles = configurationTimeDependencyIdentityFiles(
-                    generateTask.get().dependencyIdentityFiles,
-                ),
-                generatedOutputDirectory = generateTask.flatMap { it.outputDirectory },
-                supportOwnerIdentity = if (project.extensions.findByType(KotlinMultiplatformExtension::class.java) == null) {
-                    authoringTargetArtifactName.get()
-                } else {
-                    kotlinWinRTNativeAuthoringTargetArtifactName(project).get()
-                },
-                windowsSdkRegistryRoots = windowsSdkRegistryRoots.get(),
-            )
-        }.getOrElse { error ->
-            if (error is StaticPreparationUnavailable) {
-                project.logger.info("Skipping configuration-time WinRT static preparation: ${error.message}")
+    // The preparation resolves the identities and the generator classpath, so it waits until
+    // the projects are configured (see isBeingConfigured). It still runs in every invocation,
+    // an IDE import included, and before any task does.
+    project.gradle.projectsEvaluated {
+        project.withMutableState {
+            val prepared = try {
+                prepareWinRTStaticProjectionSources(
+                    project = project,
+                    extension = extension.packageReferences,
+                    dependencyIdentityFiles = configurationTimeDependencyIdentityFiles(
+                        generateTask.get().dependencyIdentityFiles,
+                    ),
+                    generatedOutputDirectory = generateTask.flatMap { it.outputDirectory },
+                    supportOwnerIdentity = if (project.extensions.findByType(KotlinMultiplatformExtension::class.java) == null) {
+                        authoringTargetArtifactName.get()
+                    } else {
+                        kotlinWinRTNativeAuthoringTargetArtifactName(project).get()
+                    },
+                    windowsSdkRegistryRoots = windowsSdkRegistryRoots.get(),
+                )
+            } catch (unavailable: StaticPreparationUnavailable) {
+                project.logger.info("Skipping configuration-time WinRT static preparation: ${unavailable.message}")
                 // Deferred generation is not removal of the projection selection. A later
                 // IDE model pass must not delete sources produced by its preparation tasks.
-                return@afterEvaluate
+                return@withMutableState
+            }
+            if (prepared != null) {
+                generateTask.configure { task ->
+                    task.preparedStaticSourceDirectory.set(prepared.toFile())
+                }
             } else {
-                throw error
+                clearPreparedStaticSources(generateTask.flatMap { it.outputDirectory }.get().asFile.toPath())
             }
         }
-        if (prepared != null) {
-            generateTask.configure { task ->
-                task.preparedStaticSourceDirectory.set(prepared.toFile())
-            }
-        } else {
-            clearPreparedStaticSources(generateTask.flatMap { it.outputDirectory }.get().asFile.toPath())
-        }
+    }
+}
+
+/**
+ * Runs [action] with the lock that resolving a configuration of this project takes.
+ *
+ * Build-wide callbacks such as `projectsEvaluated` run without the lock of any one project.
+ */
+private fun Project.withMutableState(action: () -> Unit) {
+    val owner = (this as? org.gradle.api.internal.project.ProjectInternal)?.owner
+    if (owner == null || owner.hasMutableState()) {
+        action()
+    } else {
+        owner.applyToMutableState { action() }
     }
 }
 
@@ -2829,8 +2844,7 @@ private fun configureWinRTJvmProjectionClasspath(
 
     val observed = linkedSetOf<String>()
     fun addWinRTProjectDependency(dependency: ProjectDependency) {
-        val dependencyProject = project.findProject(dependency.path) ?: return
-        if (!dependencyProject.plugins.hasPlugin(KotlinWindowsToolkitPlugin::class.java)) return
+        if (!project.dependsOnWindowsToolkitProject(dependency)) return
         if (!observed.add("project:${dependency.path}")) return
         configuration.dependencies.add(dependency.copy())
     }
@@ -2926,8 +2940,7 @@ private fun configureStandaloneWinRTNativeProjectionCompilation(
                         .flatMap { it.dependencies.toList() }
                         .filterIsInstance<ProjectDependency>()
                         .filter { dependency ->
-                            project.findProject(dependency.path)?.plugins?.hasPlugin(KotlinWindowsToolkitPlugin::class.java) == true &&
-                                seen.add(dependency.path)
+                            project.dependsOnWindowsToolkitProject(dependency) && seen.add(dependency.path)
                         }.forEach { dependency -> dependencies.add(dependency.copy()) }
                     winRTProjectionExternalLibraryDependencies(project, target.compilations.getByName("main"))
                         .forEach { dependency -> dependencies.add(dependency.copy()) }
@@ -3822,30 +3835,61 @@ private fun kotlinWinRTLocalGenerationRequired(
     extension: PackageReferencesConfiguration,
     dependencyIdentityFiles: org.gradle.api.file.FileCollection,
     windowsSdkRegistryRoots: Provider<List<String>>,
-): Provider<Boolean> =
-    memoizedBooleanProvider(project) {
+): Provider<Boolean> {
+    // The answers that need no dependency; null when the dependency identities decide.
+    fun decidedByDeclarations(): Boolean? {
+        // Package metadata belongs to the restore/generator task boundary. Keep the
+        // generation edge without walking restored packages during configuration.
+        if (projectionNuGetPackageSpecs(extension).isNotEmpty() ||
+            metadataNuGetPackageSpecs(extension).isNotEmpty()
+        ) {
+            return true
+        }
+        return if (kotlinWinRTLocalGenerationMetadataPlan(extension, emptySet()).hasLocalProjectionSelection) {
+            null
+        } else {
+            false
+        }
+    }
+    val decided = memoizedBooleanProvider(project) {
         try {
-            // Package metadata belongs to the restore/generator task boundary. Keep the
-            // generation edge without walking restored packages during configuration.
-            if (projectionNuGetPackageSpecs(extension).isNotEmpty() ||
-                metadataNuGetPackageSpecs(extension).isNotEmpty()
-            ) {
-                return@memoizedBooleanProvider true
-            }
-            val initialPlan = kotlinWinRTLocalGenerationMetadataPlan(extension, emptySet())
-            if (!initialPlan.hasLocalProjectionSelection) {
-                false
-            } else {
-                kotlinWinRTCombinedProjectionHasLocalOutput(
-                    extension = extension,
-                    dependencyIdentityFiles = dependencyIdentityFiles.files,
-                    registryRoots = windowsSdkRegistryRoots.get().orNullIfEmpty().orEmpty(),
-                )
-            }
+            decidedByDeclarations() ?: kotlinWinRTCombinedProjectionHasLocalOutput(
+                extension = extension,
+                dependencyIdentityFiles = dependencyIdentityFiles.files,
+                registryRoots = windowsSdkRegistryRoots.get().orNullIfEmpty().orEmpty(),
+            )
         } catch (_: Exception) {
             true
         }
     }
+    return project.provider {
+        if (project.isBeingConfigured()) {
+            // Reading the identities would resolve a configuration of a project that is not
+            // complete yet. Until it is, a projection that the dependencies may own counts as
+            // local, which is also the answer when the identities cannot be read at all. The
+            // answer of this stage is not kept: the declarations may still change.
+            runCatching { decidedByDeclarations() }.getOrNull() ?: true
+        } else {
+            decided.get()
+        }
+    }
+}
+
+/**
+ * Whether the project is still being configured, its `afterEvaluate` callbacks included.
+ *
+ * The first resolution of any configuration of a project makes Gradle observe every consumable
+ * configuration of that project as a variant, with the attributes and artifacts it has at that
+ * moment. The Kotlin plugin completes its configurations over several `afterEvaluate` stages,
+ * so a resolution during the configuration of the project leaves it with unfinished variants:
+ * the C interop elements of two Native targets are then identical, and no project can depend on
+ * this one. The toolkit therefore resolves nothing before the project is configured.
+ *
+ * [org.gradle.api.ProjectState.getExecuted] is already true inside `afterEvaluate`, so the
+ * public state cannot tell the two apart.
+ */
+internal fun Project.isBeingConfigured(): Boolean =
+    (state as? org.gradle.api.internal.project.ProjectStateInternal)?.isConfiguring ?: !state.executed
 
 @Suppress("UNCHECKED_CAST")
 private fun kotlinWinRTLocalGenerationRequired(project: Project): Provider<Boolean> =
@@ -4323,7 +4367,9 @@ private fun configureAppxResourceDependencies(
 
 /**
  * Configuration on demand leaves a producer unconfigured, and its plugins unknown, until a
- * dependency on it is resolved.
+ * dependency on it is resolved. Nothing of this project is resolved while it is configured
+ * (see [isBeingConfigured]), so a classpath that is collected right before its own resolution
+ * can be the first to ask.
  */
 private fun Project.dependsOnWindowsToolkitProject(dependency: ProjectDependency): Boolean {
     val dependencyProject = findProject(dependency.path) ?: return false

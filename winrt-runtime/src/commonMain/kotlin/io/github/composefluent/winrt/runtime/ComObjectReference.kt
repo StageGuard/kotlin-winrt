@@ -42,6 +42,13 @@ open class ComObjectReference internal constructor(
     val isDisposed: Boolean
         get() = comPtr.isDisposed
 
+    /**
+     * Whether a call through this reference runs on the calling thread instead of entering the
+     * apartment that the reference was created in.
+     */
+    internal val isCallableInCurrentContext: Boolean
+        get() = comPtr.isCallableInCurrentContext
+
     val hasReferenceTracker: Boolean
         get() = comPtr.hasReferenceTracker
 

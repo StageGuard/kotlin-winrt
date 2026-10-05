@@ -232,6 +232,19 @@ internal class ObjectReferenceContext private constructor(
         return resolved.pointer
     }
 
+    /**
+     * Whether a call through the reference runs on the calling thread. Any other call, the
+     * final release included, enters the original context and waits for it to answer.
+     */
+    fun isCallableInCurrentContext(): Boolean {
+        if (callsAreFreeThreaded) {
+            return true
+        }
+        val current = WinRTPlatformApi.coGetContextTokenRaw()
+        return current.hResultValue >= 0 &&
+            PlatformAbi.pointerKey(current.pointer) == PlatformAbi.pointerKey(token)
+    }
+
     fun callInOriginalContext(
         callbackAction: () -> Unit,
         fallbackAction: () -> Unit = callbackAction,

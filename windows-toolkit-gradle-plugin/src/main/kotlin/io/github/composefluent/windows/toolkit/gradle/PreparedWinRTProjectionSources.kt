@@ -24,7 +24,8 @@ internal class StaticPreparationUnavailable(message: String) : RuntimeException(
 /**
  * The dependency identities a configuration-time preparation may read: published ones only.
  *
- * Reading them resolves the identity configuration while the build is configured. A build can
+ * Reading them resolves the identity configuration while the build is configured, so the caller
+ * waits for the projects to be configured (see [isBeingConfigured]). A build can still
  * forbid that; the Android Gradle plugin does when
  * `android.dependencyResolutionAtConfigurationTime.disallow` is set. The generation task resolves
  * the same identities when it runs, so the preparation is left to it instead of failing the

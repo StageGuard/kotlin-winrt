@@ -56,6 +56,10 @@ internal class RawComObjectReferenceSupport(
     fun pointerForCurrentContext(): RawComPtr =
         objectContext?.pointerForCurrentContext() ?: pointer
 
+    /** See [ObjectReferenceContext.isCallableInCurrentContext]. */
+    val isCallableInCurrentContext: Boolean
+        get() = objectContext?.isCallableInCurrentContext() ?: true
+
     fun attachReferenceTracker(
         trackerPointer: RawComPtr,
         trackerSource: ReferenceTrackerSource,

@@ -852,6 +852,42 @@ class ComWrappersSupportTest {
         IUnknownReference(defaultPointer.asRawComPtr(), defaultInterfaceId).close()
     }
 
+    // An object that Kotlin composes over a WinRT base class is registered under the pointers of
+    // its creation. A member that returns it hands out another interface of the same object, and
+    // the generated `wrap` asks findObject with that pointer before it constructs a wrapper.
+    @Test
+    fun find_object_follows_another_interface_pointer_to_the_registered_identity() {
+        ComWrappersSupport.clearRegistriesForTests()
+        val defaultInterfaceId = Guid("48484848-4848-4848-4848-484848484848")
+        val secondaryInterfaceId = Guid("49494949-4949-4949-4949-494949494949")
+        val composed = TestManagedType("composed")
+        val host = WinRTInspectableComObject(
+            interfaceDefinitions = listOf(
+                WinRTInspectableInterfaceDefinition(defaultInterfaceId, methods = emptyList()),
+                WinRTInspectableInterfaceDefinition(secondaryInterfaceId, methods = emptyList()),
+            ),
+            runtimeClassName = "test.Composed",
+        )
+        val defaultPointer = host.detachReference(defaultInterfaceId)
+        val secondaryPointer = IUnknownReference(defaultPointer.asRawComPtr(), defaultInterfaceId, preventReleaseOnDispose = true)
+            .queryInterface(secondaryInterfaceId)
+            .getOrThrow()
+
+        try {
+            ComWrappersSupport.registerObjectForComInterface(composed, defaultPointer)
+            val secondaryAbi = PlatformAbi.fromRawComPtr(secondaryPointer.pointer)
+
+            assertNotEquals(defaultPointer, secondaryAbi)
+            assertSame(composed, ComWrappersSupport.findObject(secondaryAbi, TestManagedType::class))
+            // Another class than the registered object's is still not found.
+            assertNull(ComWrappersSupport.findObject(secondaryAbi, DetachedManagedValue::class))
+        } finally {
+            secondaryPointer.close()
+            IUnknownReference(defaultPointer.asRawComPtr(), defaultInterfaceId).close()
+            ComWrappersSupport.clearRegistriesForTests()
+        }
+    }
+
     @Test
     fun detach_ccw_for_object_returns_owned_abi_pointer() {
         val managed = TestManagedType("detached")

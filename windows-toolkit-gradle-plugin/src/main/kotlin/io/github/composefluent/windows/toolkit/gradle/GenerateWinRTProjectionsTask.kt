@@ -326,7 +326,11 @@ internal abstract class GenerateWinRTProjectionsWorkAction : WorkAction<Generate
             cleanDirectory(generatedRoot)
         }
         val metadataCache = metadataCache()
-        val sources = metadataCache.files.map(WinRTMetadataSource::path)
+        // The resolved files carry the metadata; the declared SDK source carries the fact that
+        // this projection has a Windows SDK and its UniversalApiContract, which select the
+        // SDK source additions (WinRT.Interop and the COM interop helpers), as in the prepared
+        // path of PreparedProjectionGeneratorMain. The resolver de-duplicates the files.
+        val sources = metadataCache.files.map(WinRTMetadataSource::path) + declaredWindowsSdkSources()
         val effectiveExcludeTypes = parameters.excludeTypes.get()
         val unfilteredModel = metadataCache.load(parameters.metadataModelCacheDirectory.get().asFile.toPath())
         val effectiveIncludeTypes = parameters.includeTypes.get() +
@@ -557,6 +561,21 @@ internal abstract class GenerateWinRTProjectionsWorkAction : WorkAction<Generate
                 if (suffix.firstOrNull()?.isDigit() == true) "_$suffix" else suffix
             }
 
+    private fun declaredWindowsSdkSources(): List<WinRTMetadataSource> {
+        if (!parameters.windowsSdkDeclared.get()) {
+            return emptyList()
+        }
+        return listOf(
+            WinRTMetadataSource.windowsSdk(
+                version = parameters.windowsSdkVersion.orNull,
+                includeExtensions = parameters.includeWindowsSdkExtensions.get(),
+                registryRoots = parameters.windowsSdkRegistryRoots.orNull
+                    ?.orNullIfEmpty()
+                    ?.map(Path::of),
+            ),
+        )
+    }
+
     private fun metadataSources(): List<WinRTMetadataSource> {
         val registryRoots = parameters.windowsSdkRegistryRoots.orNull
             ?.orNullIfEmpty()
@@ -567,17 +586,7 @@ internal abstract class GenerateWinRTProjectionsWorkAction : WorkAction<Generate
         val packageSpecs = (parameters.nugetPackages.get() + parameters.dependencyIdentityFiles.files.flatMap(::readNuGetPackages))
             .distinct()
             .sorted()
-        val sdkSource = if (parameters.windowsSdkDeclared.get()) {
-            listOf(
-                WinRTMetadataSource.windowsSdk(
-                    version = parameters.windowsSdkVersion.orNull,
-                    includeExtensions = parameters.includeWindowsSdkExtensions.get(),
-                    registryRoots = registryRoots,
-                ),
-            )
-        } else {
-            emptyList()
-        }
+        val sdkSource = declaredWindowsSdkSources()
         val dependencyRecords = parameters.dependencyIdentityFiles.files.flatMap(::readDependencyAuthoredMetadataRecords)
         val dependencyAuthoredMetadataSources = writeDependencyAuthoredMetadataRecords(
             records = dependencyRecords,

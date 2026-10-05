@@ -64,6 +64,15 @@ internal object EventSourceCache {
             caches[objectPointerKey]?.resolveTarget(interfaceId)
         }
 
+    /**
+     * Whether the cached publisher of [objectPointerKey] can be resolved, and released, on the
+     * calling thread. A publisher without an entry needs no call at all.
+     */
+    fun isTargetCallableInCurrentContext(objectPointerKey: Long): Boolean =
+        lock.withLock {
+            caches[objectPointerKey]?.isTargetCallableInCurrentContext ?: true
+        }
+
     fun remove(
         objectPointerKey: Long,
         index: Int,
@@ -115,6 +124,9 @@ internal object EventSourceCache {
                 states.remove(index)
             }
         }
+
+        val isTargetCallableInCurrentContext: Boolean
+            get() = target.isCallableInCurrentContext
 
         fun isTargetAlive(): Boolean = target.resolve(IID.IUnknown)?.use { true } ?: false
 
