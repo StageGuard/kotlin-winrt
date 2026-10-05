@@ -35,6 +35,8 @@ Activation completes the two-phase XAML construction contract before publishing
 the owned inspectable result. Getter outputs are owned by the caller; setter
 inputs are borrowed. Members not declared on the type delegate to its base.
 Identity-only registrations retain their existing nonconstructible behavior.
+Unsupported activation/member lookup and failed literal parsing leave their
+ABI result pointers null, following CsWinRT's `write_out_initialize` rule.
 
 The Kotlin source scanner now emits an application-only WinMD before
 XamlCompiler pass 1. It recognizes adjacent same-basename Kotlin/XAML classes,

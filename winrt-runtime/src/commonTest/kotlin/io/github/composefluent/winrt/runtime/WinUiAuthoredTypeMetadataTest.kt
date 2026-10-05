@@ -2,10 +2,127 @@ package io.github.composefluent.winrt.runtime
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class WinUiAuthoredTypeMetadataTest {
     private class DerivedControl
+    private open class Model(var title: String = "initial") { val readOnly: String get() = "fixed" }
+    private class DerivedModel : Model()
+    private enum class Choice { First }
+
+    @Test
+    fun ordinary_models_expose_inherited_members_content_and_factories_without_component_authoring() {
+        // XamlCompiler XamlUserType/XamlMember delegates and CsWinRT's ICustomPropertyProvider.
+        registerWinRTXamlTypeDefinition(WinRTXamlTypeDefinition(
+            Model::class, "Test.XamlModel", "System.Object", baseType = Any::class,
+            contentProperty = "Title", isWinRTComponent = false,
+            members = listOf(
+                WinRTXamlMemberDefinition("Title", "String", String::class,
+                    get = { (it as Model).title }, set = { instance, value -> (instance as Model).title = value as String }),
+                WinRTXamlMemberDefinition("ReadOnly", "String", String::class, get = { (it as Model).readOnly }),
+            ),
+        ))
+        var initialized = 0
+        registerWinRTXamlTypeDefinition(WinRTXamlTypeDefinition(
+            DerivedModel::class, "Test.DerivedXamlModel", "Test.XamlModel", baseType = Model::class,
+            activate = { DerivedModel() }, createFromString = { text -> DerivedModel().apply { title = text } },
+            initializer = { initialized++ }, isWinRTComponent = false,
+        ))
+        try {
+            assertFalse(Projections.isTypeWindowsRuntimeType(DerivedModel::class))
+            val pointer = WinUiAuthoredTypeMetadata.tryCreate("Test.DerivedXamlModel") { PlatformAbi.nullPointer }
+            IUnknownReference(pointer.asRawComPtr(), WinUiXamlInterfaceIds.IXamlType).use { type ->
+                PlatformAbi.confinedScope().use { scope ->
+                    val result = PlatformAbi.allocatePointerSlot(scope)
+                    for (slot in listOf(11, 14)) {
+                        HResult(ComVtableInvoker.invokeArgs(type.pointer, slot, result)).requireSuccess()
+                        assertEquals(1, PlatformAbi.readInt8(result).toInt())
+                    }
+                    HResult(ComVtableInvoker.invoke(type.pointer, 24)).requireSuccess()
+                    assertEquals(1, initialized)
+                    HResult(ComVtableInvoker.invokeArgs(type.pointer, 19, result)).requireSuccess()
+                    IUnknownReference(PlatformAbi.readPointer(result).asRawComPtr()).use { instance ->
+                        val model = WinRTObjectMarshaller.fromAbi(instance.pointer.asRawAddress()) as DerivedModel
+                        HResult(ComVtableInvoker.invokeArgs(type.pointer, 7, result)).requireSuccess()
+                        IUnknownReference(PlatformAbi.readPointer(result).asRawComPtr(), WinUiXamlInterfaceIds.IXamlMember).use { member ->
+                            HResult(ComVtableInvoker.invokeArgs(member.pointer, 9, result)).requireSuccess()
+                            HString.fromHandle(PlatformAbi.readPointer(result), owner = true).use { assertEquals("Title", it.toKString()) }
+                            for ((slot, expected) in listOf(10 to "Test.XamlModel", 11 to "String")) {
+                                HResult(ComVtableInvoker.invokeArgs(member.pointer, slot, result)).requireSuccess()
+                                IUnknownReference(PlatformAbi.readPointer(result).asRawComPtr(), WinUiXamlInterfaceIds.IXamlType).use { memberType ->
+                                    HResult(ComVtableInvoker.invokeArgs(memberType.pointer, 8, result)).requireSuccess()
+                                    HString.fromHandle(PlatformAbi.readPointer(result), owner = true).use { assertEquals(expected, it.toKString()) }
+                                }
+                            }
+                            HResult(ComVtableInvoker.invokeArgs(member.pointer, 12, instance.pointer.asRawAddress(), result)).requireSuccess()
+                            IUnknownReference(PlatformAbi.readPointer(result).asRawComPtr()).use { value ->
+                                assertEquals("initial", WinRTObjectMarshaller.fromAbi(value.pointer.asRawAddress()))
+                            }
+                            WinRTObjectMarshaller.createMarshaler("updated").use { value ->
+                                HResult(ComVtableInvoker.invokeArgs(member.pointer, 13, instance.pointer.asRawAddress(), value.abi)).requireSuccess()
+                            }
+                            assertEquals("updated", model.title)
+                        }
+                        // Binding uses the same inherited accessors as IXamlMember.
+                        val custom = requireNotNull(WinUiAuthoredTypeMetadata.customProperty(model, "Title"))
+                        assertEquals("updated", custom.getValue(model))
+                        custom.setValue(model, "bindable")
+                        assertEquals("bindable", model.title)
+                        HString.create("ReadOnly").use { name ->
+                            HResult(ComVtableInvoker.invokeArgs(type.pointer, 21, name.handle, result)).requireSuccess()
+                            IUnknownReference(PlatformAbi.readPointer(result).asRawComPtr(), WinUiXamlInterfaceIds.IXamlMember).use { member ->
+                                HResult(ComVtableInvoker.invokeArgs(member.pointer, 8, result)).requireSuccess()
+                                assertEquals(1, PlatformAbi.readInt8(result).toInt())
+                                assertEquals(KnownHResults.E_NOTIMPL.value,
+                                    ComVtableInvoker.invokeArgs(member.pointer, 13, instance.pointer.asRawAddress(), PlatformAbi.nullPointer))
+                            }
+                        }
+                        HString.create("Missing").use { name ->
+                            HResult(ComVtableInvoker.invokeArgs(type.pointer, 21, name.handle, result)).requireSuccess()
+                            assertTrue(PlatformAbi.isNull(PlatformAbi.readPointer(result)))
+                        }
+                    }
+                    HString.create("parsed").use { input ->
+                        HResult(ComVtableInvoker.invokeArgs(type.pointer, 20, input.handle, result)).requireSuccess()
+                        IUnknownReference(PlatformAbi.readPointer(result).asRawComPtr()).use { value ->
+                            assertEquals("parsed", (WinRTObjectMarshaller.fromAbi(value.pointer.asRawAddress()) as DerivedModel).title)
+                        }
+                    }
+                }
+            }
+        } finally {
+            WinUiAuthoredTypeMetadata.clearForTests()
+        }
+    }
+
+    @Test
+    fun system_type_failures_clear_abi_outputs_even_when_the_parser_throws() {
+        // CsWinRT write_out_initialize initializes the result before managed dispatch.
+        WinUiAuthoredTypeMetadata.registerEnum(Choice::class, "Test.XamlChoice") { throw IllegalArgumentException("parse") }
+        try {
+            val pointer = WinUiAuthoredTypeMetadata.tryCreate("Test.XamlChoice") { PlatformAbi.nullPointer }
+            IUnknownReference(pointer.asRawComPtr(), WinUiXamlInterfaceIds.IXamlType).use { type ->
+                PlatformAbi.confinedScope().use { scope ->
+                    val result = PlatformAbi.allocatePointerSlot(scope)
+                    PlatformAbi.writePointer(result, type.pointer.asRawAddress())
+                    assertEquals(KnownHResults.E_NOTIMPL.value, ComVtableInvoker.invokeArgs(type.pointer, 19, result))
+                    assertTrue(PlatformAbi.isNull(PlatformAbi.readPointer(result)))
+                    HString.create("unused").use { input ->
+                        PlatformAbi.writePointer(result, type.pointer.asRawAddress())
+                        assertEquals(KnownHResults.E_NOTIMPL.value,
+                            ComVtableInvoker.invokeArgs(type.pointer, 21, input.handle, result))
+                        assertTrue(PlatformAbi.isNull(PlatformAbi.readPointer(result)))
+                        PlatformAbi.writePointer(result, type.pointer.asRawAddress())
+                        assertFalse(HResult(ComVtableInvoker.invokeArgs(type.pointer, 20, input.handle, result)).isSuccess)
+                        assertTrue(PlatformAbi.isNull(PlatformAbi.readPointer(result)))
+                    }
+                }
+            }
+        } finally {
+            WinUiAuthoredTypeMetadata.clearForTests()
+        }
+    }
 
     @Test
     fun closed_types_expose_key_item_and_boxed_types_and_typed_operations_through_the_abi() {
@@ -69,13 +186,23 @@ class WinUiAuthoredTypeMetadataTest {
                         }
                         if (slot == 17) HString.create("42").use { input ->
                             // CSharp XamlSystemBaseType leaves primitive parsing to the SDK provider.
+                            PlatformAbi.writePointer(result, type.pointer.asRawAddress())
                             assertEquals(KnownHResults.E_NOTIMPL.value,
                                 ComVtableInvoker.invokeArgs(type.pointer, 20, input.handle, result))
                             assertTrue(PlatformAbi.isNull(PlatformAbi.readPointer(result)))
                         } else {
                             HResult(ComVtableInvoker.invokeArgs(type.pointer, 9, result)).requireSuccess()
                             assertEquals(1, PlatformAbi.readInt8(result).toInt())
+                            HString.create("unused").use { input ->
+                                PlatformAbi.writePointer(result, type.pointer.asRawAddress())
+                                assertEquals(KnownHResults.E_NOTIMPL.value,
+                                    ComVtableInvoker.invokeArgs(type.pointer, 20, input.handle, result))
+                                assertTrue(PlatformAbi.isNull(PlatformAbi.readPointer(result)))
+                            }
                         }
+                        PlatformAbi.writePointer(result, type.pointer.asRawAddress())
+                        assertEquals(KnownHResults.E_NOTIMPL.value, ComVtableInvoker.invokeArgs(type.pointer, 19, result))
+                        assertTrue(PlatformAbi.isNull(PlatformAbi.readPointer(result)))
                     }
                 }
             }

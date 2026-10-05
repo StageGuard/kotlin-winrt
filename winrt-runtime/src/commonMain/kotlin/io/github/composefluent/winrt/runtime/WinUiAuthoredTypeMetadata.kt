@@ -278,7 +278,6 @@ internal object WinUiAuthoredTypeMetadata {
         }
         fun pointer(value: () -> RawAddress) = output { PlatformAbi.writePointer(it, value()) }
         fun boolean(value: Boolean = false) = output { PlatformAbi.writeInt8(it, if (value) 1 else 0) }
-        fun unavailable(signature: ComMethodSignature) = WinRTInspectableMethodDefinition(signature) { KnownHResults.E_NOTIMPL.value }
         val marshaler = MarshalInspectable.any()
         val host = WinRTInspectableComObject(interfaceDefinitions = listOf(WinRTInspectableInterfaceDefinition(
             interfaceId = WinUiXamlInterfaceIds.IXamlType,
@@ -291,7 +290,7 @@ internal object WinUiAuthoredTypeMetadata {
                 pointer { value.keyTypeName?.let { resolve(it, value.keyType, resolveType) } ?: PlatformAbi.nullPointer },
                 pointer { value.boxedTypeName?.let { resolve(it, value.boxedType, resolveType) } ?: PlatformAbi.nullPointer },
                 output { TypeProjection.copyMetadataNameTo(name, it) },
-                unavailable(ComMethodSignatures.HResult_Ptr), // ActivateInstance
+                unavailable(ComMethodSignatures.HResult_Ptr, 0), // ActivateInstance
                 value.boxedTypeName?.let { boxedName -> WinRTInspectableMethodDefinition(ComMethodSignatures.HResult_Ptr_Ptr) { args ->
                     // Nullable<T> has the same boxed inspectable as T, as in CsWinRT Marshaler<T?>.
                     PlatformAbi.writePointer(args[1] as RawAddress, PlatformAbi.nullPointer)
@@ -300,7 +299,7 @@ internal object WinUiAuthoredTypeMetadata {
                         IUnknownReference(boxed.asRawComPtr(), WinUiXamlInterfaceIds.IXamlType).use {
                             ComVtableInvoker.invokeArgs(it.pointer, 20, args[0] as RawAddress, args[1] as RawAddress)
                         }
-                } } ?: unavailable(ComMethodSignatures.HResult_Ptr_Ptr),
+                } } ?: unavailable(ComMethodSignatures.HResult_Ptr_Ptr, 1),
                 WinRTInspectableMethodDefinition(ComMethodSignatures.HResult_Ptr_Ptr) {
                     PlatformAbi.writePointer(it[1] as RawAddress, PlatformAbi.nullPointer); KnownHResults.S_OK.value
                 }, // No members on a closed array, nullable or collection type.
@@ -330,9 +329,6 @@ internal object WinUiAuthoredTypeMetadata {
         fun boolean(value: Boolean = false) = WinRTInspectableMethodDefinition(ComMethodSignatures.HResult_Ptr) {
             PlatformAbi.writeInt8(it[0] as RawAddress, if (value) 1 else 0); KnownHResults.S_OK.value
         }
-        fun unavailable(signature: ComMethodSignature) = WinRTInspectableMethodDefinition(signature) {
-            KnownHResults.E_NOTIMPL.value
-        }
         val host = WinRTInspectableComObject(
             interfaceDefinitions = listOf(WinRTInspectableInterfaceDefinition(
                 interfaceId = WinUiXamlInterfaceIds.IXamlType,
@@ -352,13 +348,14 @@ internal object WinUiAuthoredTypeMetadata {
                     WinRTInspectableMethodDefinition(ComMethodSignatures.HResult_Ptr) {
                         TypeProjection.copyTo(type, it[0] as RawAddress); KnownHResults.S_OK.value
                     }, // UnderlyingType
-                    unavailable(ComMethodSignatures.HResult_Ptr), // ActivateInstance
+                    unavailable(ComMethodSignatures.HResult_Ptr, 0), // ActivateInstance
                     parse?.let { parser -> WinRTInspectableMethodDefinition(ComMethodSignatures.HResult_Ptr_Ptr) { args ->
+                        PlatformAbi.writePointer(args[1] as RawAddress, PlatformAbi.nullPointer)
                         val input = HString.fromHandle(args[0] as RawAddress, owner = false).use { it.toKString() }
                         PlatformAbi.writePointer(args[1] as RawAddress, WinRTObjectMarshaller.fromManaged(parser(input)))
                         KnownHResults.S_OK.value
-                    } } ?: unavailable(ComMethodSignatures.HResult_Ptr_Ptr), // CreateFromString
-                    unavailable(ComMethodSignatures.HResult_Ptr_Ptr), // GetMember
+                    } } ?: unavailable(ComMethodSignatures.HResult_Ptr_Ptr, 1), // CreateFromString
+                    unavailable(ComMethodSignatures.HResult_Ptr_Ptr, 1), // GetMember
                     unavailable(ComMethodSignatures.HResult_Ptr_Ptr), // AddToVector
                     unavailable(ComMethodSignature.of(ComAbiValueKind.Pointer, ComAbiValueKind.Pointer, ComAbiValueKind.Pointer)), // AddToMap
                     unavailable(ComMethodSignature.of()), // RunInitializer
@@ -368,4 +365,12 @@ internal object WinUiAuthoredTypeMetadata {
         )
         return host.detachReference(WinUiXamlInterfaceIds.IXamlType)
     }
+
+    // CsWinRT code_writers.h write_out_initialize clears ABI results before
+    // dispatch, including methods which fail or have no managed implementation.
+    private fun unavailable(signature: ComMethodSignature, outputIndex: Int? = null) =
+        WinRTInspectableMethodDefinition(signature) { args ->
+            if (outputIndex != null) PlatformAbi.writePointer(args[outputIndex] as RawAddress, PlatformAbi.nullPointer)
+            KnownHResults.E_NOTIMPL.value
+        }
 }
