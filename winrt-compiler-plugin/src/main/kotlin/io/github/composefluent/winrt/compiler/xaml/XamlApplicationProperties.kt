@@ -98,9 +98,18 @@ internal fun xamlApplicationProperties(
                 isStatic = static,
                 isDependencyProperty = owner === klass && "${property.name.asString()}Property" in dependencyPropertyNames)
         }
+    // CSharpPagePass1.tt emits these as PropertyChangedEventHandler events.
+    // Kotlin expands that alias to EventHandler<PropertyChangedEventArgs?>;
+    // infer only source events here, preserving the XAML declaration's named
+    // delegate instead of exporting the generated pair a second time.
+    val declaredEvents = xamlProperties.mapNotNull { property -> property.changedHandler?.let {
+        WinRTXamlApplicationEvent(it, WinRTTypeRef.named("Microsoft.UI.Xaml.Data.PropertyChangedEventHandler"))
+    } }
+    val declaredEventNames = declaredEvents.mapTo(mutableSetOf()) { it.name }
     val events = klass.declarations.filterIsInstance<IrSimpleFunction>()
         .filter { visible(it) && it.overriddenSymbols.isEmpty() && it.name.asString().startsWith("add") &&
-            it.name.asString().length > 3 && it.name.asString()[3].isUpperCase() }
+            it.name.asString().length > 3 && it.name.asString()[3].isUpperCase() &&
+            it.name.asString().removePrefix("add") !in declaredEventNames }
         .mapNotNull { add ->
             val name = add.name.asString().removePrefix("add")
             val parameter = add.parameters.singleOrNull { it.kind == IrParameterKind.Regular } ?: return@mapNotNull null
@@ -111,9 +120,7 @@ internal fun xamlApplicationProperties(
             val handlerType = runCatching { resolve(parameter.type) }.getOrNull() ?: return@mapNotNull null
             if (types[handlerType.qualifiedName?.substringBefore('`')]?.kind != WinRTTypeKind.Delegate.name) return@mapNotNull null
             WinRTXamlApplicationEvent(name, handlerType)
-        } + xamlProperties.mapNotNull { property -> property.changedHandler?.let {
-            WinRTXamlApplicationEvent(it, WinRTTypeRef.named("Microsoft.UI.Xaml.Data.PropertyChangedEventHandler"))
-        } }
+        } + declaredEvents
     val methods = owners.flatMap { owner ->
         owner.declarations.filterIsInstance<IrSimpleFunction>()
             .filter { accessible(it) && it.origin == IrDeclarationOrigin.DEFINED && it.overriddenSymbols.isEmpty() &&

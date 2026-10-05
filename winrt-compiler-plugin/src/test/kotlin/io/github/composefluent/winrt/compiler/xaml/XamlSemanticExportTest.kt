@@ -195,7 +195,10 @@ class XamlSemanticExportTest {
         val index = File(root, "metadata.tsv").apply { writeText(
             "Microsoft.UI.Xaml.Controls.Page\tRuntimeClass\t\tSystem.Object\n" +
                 "Microsoft.UI.Xaml.Controls.Button\tRuntimeClass\t\tSystem.Object\n" +
-                "Microsoft.UI.Xaml.RoutedEventArgs\tRuntimeClass\t\tSystem.Object\n") }
+                "Microsoft.UI.Xaml.RoutedEventArgs\tRuntimeClass\t\tSystem.Object\n" +
+                "Microsoft.UI.Xaml.Data.PropertyChangedEventArgs\tRuntimeClass\t\tSystem.Object\n" +
+                // A real SDK index also recognizes the expanded delegate alias.
+                "Windows.Foundation.EventHandler`1\tDelegate\t\tSystem.MulticastDelegate\n") }
         val source = File(root, "MainPage.kt").apply { writeText("""
             package probe
             enum class Choice { Zero, One }
@@ -359,7 +362,7 @@ class XamlSemanticExportTest {
         assertEquals(setOf("Counter", "ReadOnlyCount", "Title", "DefaultButton"), page.properties
             .filter { it.name in setOf("Counter", "ReadOnlyCount", "Title", "DefaultButton") }.map { it.name }.toSet())
         assertTrue(page.properties.single { it.name == "ReadOnlyCount" }.isReadOnly)
-        assertTrue(page.events.any { it.name == "TitleUpdated" })
+        assertEquals(1, page.events.count { it.name == "TitleUpdated" })
         val finalOutput = invokeXaml("final", JsonObject(compilerInput + mapOf(
             "IsPass1" to JsonPrimitive(false), "KotlinSymbols" to output,
             "LocalAssembly" to JsonArray(listOf(item(File(root, "KotlinXaml.winmd")))),
