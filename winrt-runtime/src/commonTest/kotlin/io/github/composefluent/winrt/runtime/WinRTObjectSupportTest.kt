@@ -8,7 +8,10 @@ import kotlin.test.assertTrue
 import kotlin.test.fail
 
 class WinRTObjectSupportTest {
-    private val support = WinRTObjectSupport<TestOwner, TestReference> { reference ->
+    private val support = WinRTObjectSupport<TestOwner, TestReference>(
+        queryInterfaceCacheFor = { it.state.queryInterfaceCache },
+        additionalTypeDataFor = { it.state.additionalTypeData },
+    ) { reference ->
         reference.close()
     }
 
@@ -152,7 +155,9 @@ class WinRTObjectSupportTest {
     }
 }
 
-private class TestOwner
+private class TestOwner {
+    val state = WinRTObjectState<TestReference>()
+}
 
 private class TestReference(
     val interfaceId: Guid,

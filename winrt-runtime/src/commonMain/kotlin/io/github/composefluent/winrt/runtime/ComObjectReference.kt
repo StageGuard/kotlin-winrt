@@ -4,6 +4,14 @@ open class ComObjectReference internal constructor(
     @PublishedApi
     internal val comPtr: ComPtr,
 ) : AutoCloseable {
+    @kotlin.concurrent.Volatile
+    private var objectState: WinRTObjectState<ComObjectReference>? = null
+
+    internal val projectedObjectState: WinRTObjectState<ComObjectReference>
+        get() = objectState ?: WinRTObjectStateInitialization.lock.withLock {
+            objectState ?: WinRTObjectState<ComObjectReference>().also { objectState = it }
+        }
+
     constructor(
         pointer: RawComPtr,
         interfaceId: Guid,
