@@ -59,6 +59,46 @@ import kotlin.io.path.isRegularFile
 
 class KotlinProjectionGeneratorTest {
     @Test
+    fun generator_emits_struct_field_equality_and_consistent_hashes() {
+        // CsWinRT code_writers.h: write_struct's field equality and XOR hash.
+        fun struct(name: String, vararg fields: WinRTFieldDefinition) = WinRTTypeDefinition(
+            namespace = "Sample.Values", name = name, kind = WinRTTypeKind.Struct,
+            fields = fields.toList(),
+        )
+        val model = WinRTMetadataModel(namespaces = listOf(WinRTNamespace("Sample.Values", listOf(
+            struct("Value", WinRTFieldDefinition("Other", "Int32")),
+            struct("Nested", WinRTFieldDefinition("Value", "Sample.Values.Value")),
+            struct("Floating", WinRTFieldDefinition("Single", "Single"), WinRTFieldDefinition("Double", "Double")),
+            struct("LongFields",
+                WinRTFieldDefinition("AFieldNameLongEnoughToWrapTheGeneratedComparisonAndHash", "Double"),
+                WinRTFieldDefinition("ZFieldNameLongEnoughToWrapTheGeneratedComparisonAndHash", "Int32")),
+            struct("Empty"),
+        ))))
+        val files = KotlinProjectionGenerator().generate(model).associateBy { it.relativePath.substringAfterLast('/') }
+        val value = files.getValue("Value.kt").contents.normalizedSource()
+        val nested = files.getValue("Nested.kt").contents.normalizedSource()
+        val floating = files.getValue("Floating.kt").contents.normalizedSource()
+        val longFields = files.getValue("LongFields.kt").contents.normalizedSource()
+        val empty = files.getValue("Empty.kt").contents.normalizedSource()
+        assertTrue(value, value.contains("override fun equals(other: Any?): Boolean = (other is Value && this.other == other.other)"))
+        assertTrue(value, value.contains("override fun hashCode(): Int = (this.other.hashCode())"))
+        assertTrue(nested, nested.contains("this.`value` == other.`value`"))
+        assertTrue(nested, nested.contains("this.`value`.hashCode()"))
+        assertTrue(floating, floating.contains("this.single == other.single"))
+        assertTrue(floating, floating.contains("this.double == other.double"))
+        assertTrue(floating, floating.contains("(if (this.single == 0f) 0 else this.single.hashCode())"))
+        assertTrue(floating, floating.contains("(if (this.double == 0.0) 0 else this.double.hashCode())"))
+        assertTrue(floating, floating.contains(" xor "))
+        assertFalse(floating, floating.contains("this === other"))
+        assertTrue(longFields, longFields.contains("override fun equals(other: Any?): Boolean = (other is LongFields"))
+        assertTrue(longFields, longFields.contains("== other.zFieldNameLongEnoughToWrapTheGeneratedComparisonAndHash)"))
+        assertTrue(longFields, longFields.contains("override fun hashCode(): Int = ((if"))
+        assertTrue(longFields, longFields.contains("xor this.zFieldNameLongEnoughToWrapTheGeneratedComparisonAndHash.hashCode())"))
+        assertTrue(empty, empty.contains("override fun equals(other: Any?): Boolean = (other is Empty)"))
+        assertTrue(empty, empty.contains("override fun hashCode(): Int = (0)"))
+    }
+
+    @Test
     fun generator_rolls_back_owned_struct_writes() {
         // CsWinRT code_writers.h: struct CreateMarshaler's partial-initialization rollback.
         fun struct(name: String, vararg fields: WinRTFieldDefinition) = WinRTTypeDefinition(

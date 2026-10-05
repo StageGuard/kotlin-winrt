@@ -3248,35 +3248,71 @@ class KotlinProjectionRenderer(
             else -> null
         }
 
-    internal fun renderStruct(plan: KotlinTypeProjectionPlan): TypeSpec =
-        TypeSpec.classBuilder(plan.type.name)
+    internal fun renderStruct(plan: KotlinTypeProjectionPlan): TypeSpec {
+        val fields = plan.type.fields.filterNot { it.isStatic || it.isLiteral }
+        // CsWinRT code_writers.h: write_struct compares fields and XORs their hashes.
+        // Keep wrapped operators inside an expression, including KotlinPoet line breaks.
+        val equality = CodeBlock.builder().add("return (other is %T", resolveTypeName(plan.type.qualifiedName))
+        val hash = CodeBlock.builder().add("return (")
+        fields.forEachIndexed { index, field ->
+            val name = field.name.replaceFirstChar(Char::lowercase)
+            equality.add(" && this.%N == other.%N", name, name)
+            if (index > 0) hash.add(" xor ")
+            // Kotlin floating hashes distinguish signed zero; primitive == does not.
+            val zero = when (winRTFundamentalTypeForName(field.typeName)) {
+                WinRTFundamentalType.Float -> "0f"
+                WinRTFundamentalType.Double -> "0.0"
+                else -> null
+            }
+            if (zero == null) {
+                hash.add("this.%N.hashCode()", name)
+            } else {
+                hash.add("(if (this.%N == %L) 0 else this.%N.hashCode())", name, zero, name)
+            }
+        }
+        if (fields.isEmpty()) hash.add("0")
+        equality.add(")\n")
+        hash.add(")\n")
+        return TypeSpec.classBuilder(plan.type.name)
             .primaryConstructor(
                 FunSpec.constructorBuilder()
                     .addParameters(
-                        plan.type.fields
-                            .filterNot { it.isStatic || it.isLiteral }
-                            .map { field ->
-                                ParameterSpec.builder(field.name.replaceFirstChar(Char::lowercase), resolveStructFieldTypeName(plan, field.typeName)).build()
-                            },
+                        fields.map { field ->
+                            ParameterSpec.builder(field.name.replaceFirstChar(Char::lowercase), resolveStructFieldTypeName(plan, field.typeName)).build()
+                        },
                     )
                     .build(),
             )
             .apply { applyCommonTypeShape(this, plan, addModifiers = false) }
             .apply {
-                plan.type.fields
-                    .filterNot { it.isStatic || it.isLiteral }
-                    .forEach { field ->
-                        addProperty(
-                            PropertySpec.builder(field.name.replaceFirstChar(Char::lowercase), resolveStructFieldTypeName(plan, field.typeName))
-                                .initializer(field.name.replaceFirstChar(Char::lowercase))
-                                .build(),
-                        )
-                    }
+                fields.forEach { field ->
+                    addProperty(
+                        PropertySpec.builder(field.name.replaceFirstChar(Char::lowercase), resolveStructFieldTypeName(plan, field.typeName))
+                            .initializer(field.name.replaceFirstChar(Char::lowercase))
+                            .build(),
+                    )
+                }
+                addFunction(
+                    FunSpec.builder("equals")
+                        .addModifiers(KModifier.OVERRIDE)
+                        .addParameter("other", ANY.copy(nullable = true))
+                        .returns(Boolean::class)
+                        .addCode(equality.build())
+                        .build(),
+                )
+                addFunction(
+                    FunSpec.builder("hashCode")
+                        .addModifiers(KModifier.OVERRIDE)
+                        .returns(Int::class)
+                        .addCode(hash.build())
+                        .build(),
+                )
                 renderStructMetadataCompanion(plan)?.let { companion ->
                     addType(companion)
                 }
             }
             .build()
+    }
 
     internal fun renderStructMetadataCompanion(plan: KotlinTypeProjectionPlan): TypeSpec? {
         val fields = plan.type.fields.filterNot { it.isStatic || it.isLiteral }
