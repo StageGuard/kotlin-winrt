@@ -917,7 +917,8 @@ private class WinmdBuilder(
         const val TABLE_PROPERTY = 23
         const val TABLE_METHOD_SEMANTICS = 24
         const val XAML_CONTENT_PROPERTY = "Microsoft.UI.Xaml.Markup.ContentPropertyAttribute"
-        const val XAML_CREATE_FROM_STRING = "Microsoft.UI.Xaml.Markup.CreateFromStringAttribute"
+        // XamlCompiler.Core/KnownStrings.cs resolves this Windows metadata attribute.
+        const val XAML_CREATE_FROM_STRING = "Windows.Foundation.Metadata.CreateFromStringAttribute"
         const val TABLE_INTERFACE_IMPL = 9
         const val TABLE_MEMBER_REF = 10
         const val TABLE_CUSTOM_ATTRIBUTE = 12
