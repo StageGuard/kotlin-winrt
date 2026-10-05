@@ -217,12 +217,15 @@ internal object XamlSystemProjectionRuntimeHooks {
         arg0: RawAddress,
         arg1: RawAddress,
     ): Int {
+        var typeName: String? = null
         if (slot != WinUiXamlMetadataProviderSlots.GetXmlnsDefinitions) {
+            PlatformAbi.writePointer(arg1, PlatformAbi.nullPointer)
             val nameHandle = if (slot == WinUiXamlMetadataProviderSlots.GetXamlType) {
                 PlatformAbi.readPointer(arg0)
             } else arg0
             val name = HString.fromHandle(nameHandle, owner = false).use { it.toKString() }
-            val authored = WinUiAuthoredTypeMetadata.tryCreate(name, ::resolveWinUiXamlType)
+            typeName = name
+            val authored = WinUiAuthoredTypeMetadata.tryCreateAuthored(name, ::resolveWinUiXamlType)
             if (FeatureSwitches.traceCcw) {
                 println("winrt-xaml-metadata: lookup slot=$slot name=$name authored=${!PlatformAbi.isNull(authored)}")
             }
@@ -235,7 +238,7 @@ internal object XamlSystemProjectionRuntimeHooks {
             println("winrt-xaml-metadata: forward slot=$slot")
         }
         val providers = WinUiXamlMetadataProviderCache.getOrCreateAll()
-        if (providers.isEmpty()) {
+        if (providers.isEmpty() && typeName == null) {
             return KnownHResults.E_NOINTERFACE.value.also {
                 if (FeatureSwitches.traceCcw) {
                     println("winrt-xaml-metadata: provider unavailable hr=$it")
@@ -260,6 +263,15 @@ internal object XamlSystemProjectionRuntimeHooks {
                     println("winrt-xaml-metadata: forward slot=$slot hr=$hr")
                 }
                 return hr
+            }
+        }
+        // Like CSharpTypeInfoPass2, referenced types can have application-generated
+        // metadata even when their library's IXamlMetadataProvider omits them.
+        typeName?.let { name ->
+            val fallback = WinUiAuthoredTypeMetadata.tryCreate(name, ::resolveWinUiXamlType)
+            if (!PlatformAbi.isNull(fallback)) {
+                PlatformAbi.writePointer(arg1, fallback)
+                return KnownHResults.S_OK.value
             }
         }
         if (FeatureSwitches.traceCcw) {

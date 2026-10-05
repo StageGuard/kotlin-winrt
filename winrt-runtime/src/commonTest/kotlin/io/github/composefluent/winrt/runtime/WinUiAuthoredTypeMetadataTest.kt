@@ -12,6 +12,38 @@ class WinUiAuthoredTypeMetadataTest {
     private enum class Choice { First }
 
     @Test
+    fun projected_metadata_is_a_fallback_and_preserves_projection_identity() {
+        // CSharpTypeInfoPass2 keeps referenced type activators separate from
+        // component authoring and consults the library's metadata provider.
+        var constructed = 0
+        val wasWinRT = Projections.isTypeWindowsRuntimeType(Model::class)
+        registerWinRTXamlProjectedTypeDefinition(WinRTXamlTypeDefinition(
+            Model::class, "Test.ProjectedXamlModel", "System.Object", baseType = Any::class,
+            activate = { constructed++; Model() }, isBindable = false,
+        ))
+        try {
+            assertEquals(wasWinRT, Projections.isTypeWindowsRuntimeType(Model::class))
+            assertEquals(PlatformAbi.nullPointer,
+                WinUiAuthoredTypeMetadata.tryCreateAuthored("Test.ProjectedXamlModel") { PlatformAbi.nullPointer })
+            val pointer = WinUiAuthoredTypeMetadata.tryCreate("Test.ProjectedXamlModel") { PlatformAbi.nullPointer }
+            IUnknownReference(pointer.asRawComPtr(), WinUiXamlInterfaceIds.IXamlType).use { type ->
+                PlatformAbi.confinedScope().use { scope ->
+                    val result = PlatformAbi.allocatePointerSlot(scope)
+                    HResult(ComVtableInvoker.invokeArgs(type.pointer, 11, result)).requireSuccess()
+                    assertEquals(1, PlatformAbi.readInt8(result).toInt())
+                    HResult(ComVtableInvoker.invokeArgs(type.pointer, 19, result)).requireSuccess()
+                    IUnknownReference(PlatformAbi.readPointer(result).asRawComPtr()).use { instance ->
+                        assertTrue(WinRTObjectMarshaller.fromAbi(instance.pointer.asRawAddress()) is Model)
+                    }
+                    assertEquals(1, constructed)
+                }
+            }
+        } finally {
+            WinUiAuthoredTypeMetadata.clearForTests()
+        }
+    }
+
+    @Test
     fun ordinary_models_expose_inherited_members_content_and_factories_without_component_authoring() {
         // XamlCompiler XamlUserType/XamlMember delegates and CsWinRT's ICustomPropertyProvider.
         registerWinRTXamlTypeDefinition(WinRTXamlTypeDefinition(

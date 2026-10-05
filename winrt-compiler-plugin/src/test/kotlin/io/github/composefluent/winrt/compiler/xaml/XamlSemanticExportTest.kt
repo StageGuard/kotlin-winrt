@@ -18,6 +18,38 @@ import io.github.composefluent.winrt.runtime.WinRTXamlLoadState
 
 class XamlSemanticExportTest {
     @Test
+    fun referenced_winmd_activation_generates_fallback_without_a_ctor_method() {
+        // CSharpTypeInfoPass2 emits XamlUserType.Activator for referenced classes;
+        // CsWinRT's write_factory_constructors uses WinMD activation attributes.
+        val root = Files.createTempDirectory("xaml-projected-activation").toFile()
+        try {
+            val reference = root.toPath().resolve("Library.winmd")
+            WinRTPortableExecutableMetadataWriter.writeXamlSchemaWinmd("Library", listOf(
+                WinRTXamlApplicationTypeDescriptor("library.ToolTip"),
+                WinRTXamlApplicationTypeDescriptor("library.NoActivation", isActivatable = false),
+                WinRTXamlApplicationTypeDescriptor("library.Unused"),
+            ), emptyMap(), reference, mapOf(
+                "Windows.Foundation.Metadata.VersionAttribute" to "Windows.Foundation.FoundationContract",
+                "Windows.Foundation.Metadata.ActivatableAttribute" to "Windows.Foundation.FoundationContract",
+            ))
+            val type = WinRTMetadataLoader.load(reference).namespaces.flatMap { it.types }
+                .single { it.name == "ToolTip" }
+            assertTrue(type.activation.isActivatable)
+            assertFalse(type.methods.any { it.name == ".ctor" })
+            val output = root.toPath().resolve("generated")
+            assertNotNull(writeXamlProjectedTypeRegistrationSource(output, listOf(reference),
+                setOf("library.ToolTip", "library.NoActivation"), "Application"))
+            val source = output.toFile().walkTopDown().single { it.isFile && it.extension == "kt" }.readText()
+            assertTrue(source.contains("registerWinRTXamlProjectedTypeDefinition"))
+            assertTrue(source.contains("activate = { library.ToolTip() }"))
+            assertFalse(source.contains("NoActivation"))
+            assertFalse(source.contains("Unused"))
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
     fun library_schema_and_compiled_accessors_omit_unavailable_kotlin_declarations() {
         // CsWinRT WinRTTypeWriter filters public exported members. A Kotlin model
         // additionally excludes HIDDEN/ERROR declarations from compiled XAML access.

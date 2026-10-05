@@ -14,11 +14,12 @@ internal fun xamlPropertyRegistrationSource(
     property: WinRTXamlApplicationProperty,
     kotlinType: String,
     convert: (String, String) -> String,
+    accessorName: String = property.name,
 ): String = buildString {
     appendLine("${runtimePackage}WinRTXamlMemberDefinition(")
     appendLine("  name = ${literal(property.name)}, typeName = ${literal(property.type.xamlStandardTypeName())}, type = ${classLiteral(kotlinType)},")
-    appendLine("  isDependencyProperty = ${property.isDependencyProperty}, get = { (it as $owner).`${property.name}` },")
-    if (!property.isReadOnly) appendLine("  set = { instance, value -> (instance as $owner).`${property.name}` = ${convert("value", kotlinType)} },")
+    appendLine("  isDependencyProperty = ${property.isDependencyProperty}, get = { (it as $owner).`$accessorName` },")
+    if (!property.isReadOnly) appendLine("  set = { instance, value -> (instance as $owner).`$accessorName` = ${convert("value", kotlinType)} },")
     val values = xamlValueTypeRegistrationSources(property.type, kotlinType, convert)
     if (values.isNotEmpty()) appendLine("  valueTypes = listOf(${values.joinToString(",\n")}),")
     append(")")

@@ -15,6 +15,7 @@ internal object WinUiAuthoredTypeMetadata {
     private val types = ConcurrentCacheMap<String, Type>()
     private val definitions = ConcurrentCacheMap<String, WinRTXamlTypeDefinition>()
     private val definitionsByType = ConcurrentCacheMap<KClass<*>, WinRTXamlTypeDefinition>()
+    private val projectedDefinitions = ConcurrentCacheMap<String, Unit>()
     private val valueTypeDefinitions = ConcurrentCacheMap<String, WinRTXamlValueTypeDefinition>()
     private data class EnumType(val type: KClass<*>, val parse: (String) -> Any)
     private val enumTypes = ConcurrentCacheMap<String, EnumType>()
@@ -46,6 +47,15 @@ internal object WinUiAuthoredTypeMetadata {
         }
     }
 
+    fun registerProjectedDefinition(definition: WinRTXamlTypeDefinition) {
+        projectedDefinitions.putIfAbsent(definition.name, Unit)
+        register(definition.type, definition.name, definition.baseName)
+        registerDefinition(definition)
+    }
+
+    fun tryCreateAuthored(name: String, resolveType: (String) -> RawAddress): RawAddress =
+        if (projectedDefinitions[name] != null) PlatformAbi.nullPointer else tryCreate(name, resolveType)
+
     private fun registerValueType(definition: WinRTXamlValueTypeDefinition) {
         valueTypeDefinitions.putIfAbsent(definition.name, definition)
         TypeNameSupport.registerProjectionType(definition.type, definition.name)
@@ -58,6 +68,7 @@ internal object WinUiAuthoredTypeMetadata {
 
     fun clearForTests() {
         types.clear(); definitions.clear(); definitionsByType.clear(); valueTypeDefinitions.clear(); enumTypes.clear()
+        projectedDefinitions.clear()
     }
 
     /** Reuses generated accessors for CsWinRT's source-generated ICustomProperty path.
@@ -90,7 +101,7 @@ internal object WinUiAuthoredTypeMetadata {
             println("winrt-xaml-metadata: authored type=$name definition=${definition != null}")
         }
         fun resolveBase(includeSystemStub: Boolean = true): RawAddress {
-            val authored = tryCreate(baseName, resolveType)
+            val authored = tryCreateAuthored(baseName, resolveType)
             if (!PlatformAbi.isNull(authored)) return authored
             val sdkType = resolveType(baseName)
             if (!PlatformAbi.isNull(sdkType)) return sdkType

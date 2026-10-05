@@ -34,6 +34,7 @@ import io.github.composefluent.winrt.compiler.xaml.xamlAttachedRegistrationSourc
 import io.github.composefluent.winrt.compiler.xaml.xamlCollectionRegistrationSources
 import io.github.composefluent.winrt.compiler.xaml.xamlCreateFromStringMethodSource
 import io.github.composefluent.winrt.compiler.xaml.XamlStaticAccessor
+import io.github.composefluent.winrt.compiler.xaml.writeXamlProjectedTypeRegistrationSource
 import io.github.composefluent.winrt.metadata.WinRTTypeRefKind
 import io.github.composefluent.winrt.metadata.winRTArrayElementForKotlinType
 import io.github.composefluent.winrt.metadata.winRTFundamentalTypeForName
@@ -218,7 +219,8 @@ object KotlinWinRTAuthoringScannerCli {
             index.values.filter { it.kind == WinRTTypeKind.Enum.name || it.kind == WinRTTypeKind.Struct.name }
                 .mapTo(mutableSetOf()) { it.qualifiedName },
         )
-        options.xamlHeaderSources?.let { writeXamlRegistrationSources(it, applicationClasses, schemas, superInterfaces, options.xamlAssemblyName) }
+        options.xamlHeaderSources?.let { writeXamlRegistrationSources(it, applicationClasses, schemas, superInterfaces, options.xamlAssemblyName,
+            options.references, referencedXamlTypes(options.sourceRoots, index.keys)) }
     }
 
     private data class XamlHeaderClass(val source: KotlinLightSource, val klass: LighterASTNode,
@@ -296,6 +298,8 @@ object KotlinWinRTAuthoringScannerCli {
         schemas: Map<String, XamlSourceMembers>,
         superInterfaces: Map<String, List<Pair<WinRTTypeRef, String>>>,
         assemblyName: String? = null,
+        references: List<Path> = emptyList(),
+        projectedNames: Set<String> = emptySet(),
     ) {
         Files.createDirectories(root)
         val registrations = pages.map { type ->
@@ -357,6 +361,11 @@ object KotlinWinRTAuthoringScannerCli {
             }
             file.writeText(code)
             candidate.sourceSetName to "${candidate.packageName}.$registerName".removePrefix(".")
+        }.toMutableList()
+        val projectedOwner = pages.firstOrNull()?.sourceSetName
+        val projectedRoot = projectedOwner?.let { root.resolve("sourceSets/$it") } ?: root
+        if (pages.isNotEmpty()) writeXamlProjectedTypeRegistrationSource(projectedRoot, references, projectedNames, assemblyName)?.let {
+            registrations.add(projectedOwner to it)
         }
         // Resource-only KMP libraries still need a semantic compilation. Their
         // shared source root is attached even when there are no adjacent page classes.

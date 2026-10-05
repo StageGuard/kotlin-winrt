@@ -102,6 +102,13 @@ fun registerWinRTXamlTypeDefinition(definition: WinRTXamlTypeDefinition) {
     WinUiAuthoredTypeMetadata.registerDefinition(definition)
 }
 
+/** CSharpTypeInfoPass2 also supplies XamlUserType entries for referenced WinMD types.
+ * Keep their existing projection identity; a native library's metadata takes precedence.
+ */
+fun registerWinRTXamlProjectedTypeDefinition(definition: WinRTXamlTypeDefinition) {
+    WinUiAuthoredTypeMetadata.registerProjectedDefinition(definition)
+}
+
 /** Application enums use Kotlin declaration ordinals as their Int32 values.
  * Mirrors XamlUserType's enum table; component ABI export is a separate contract. */
 fun <T : Enum<T>> registerWinRTXamlEnumType(type: KClass<T>, name: String, entries: Array<T>) {
