@@ -12,7 +12,9 @@ internal actual object PlatformFinalization {
     }
 
     actual fun drain() {
-        GC.collect()
+        // collect() waits for the cleaners, without serving the COM calls of this apartment: the
+        // cleaners leave their releases to this thread.
+        WaitedFinalizerReleases.runAfter { GC.collect() }
         drainDeferredComReleasesForCurrentContext()
     }
 }

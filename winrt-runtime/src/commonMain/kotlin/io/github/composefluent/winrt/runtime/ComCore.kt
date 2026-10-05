@@ -437,6 +437,9 @@ internal fun closeComPtrSupportFromFinalizer(support: RawComObjectReferenceSuppo
     if (ReferenceTrackerManager.deferFinalizerRelease { closeComPtrSupportFromFinalizer(support) }) {
         return
     }
+    if (WaitedFinalizerReleases.defer { closeComPtrSupportFromFinalizer(support) }) {
+        return
+    }
     support.close(
         releaseFromTrackerSourceCallback = ::invokeReferenceTrackerReleaseOnPointer,
         releaseTrackerPointer = ::invokeIUnknownReleaseOnPointer,
