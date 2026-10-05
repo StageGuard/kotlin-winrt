@@ -233,18 +233,43 @@ object ComWrappersSupport {
         closedInterfaceRcwCache.clear()
     }
 
-    @Suppress("UNCHECKED_CAST")
+    /**
+     * The Kotlin object that already stands for the COM object behind [pointer], if it is a
+     * [expectedType]: a wrapper registered for it, or the managed object of a CCW.
+     *
+     * [pointer] can be any interface of the object. An object that Kotlin composes over a WinRT
+     * base class is registered under the pointers of its creation, but native code hands it back
+     * through whatever interface of the inner object a member returns; only its `IUnknown`, which
+     * is the CCW of the Kotlin object, is the same. CsWinRT queries `IUnknown` before
+     * `FindObject` for that reason (`MarshalInspectable<T>.FromAbi`), so a miss on the pointer
+     * itself is followed by the lookup of the COM identity.
+     */
     fun <T : Any> findObject(
         pointer: RawAddress,
         expectedType: KClass<T>,
     ): T? {
-        val managedValue = findCachedRcw(PlatformAbi.pointerKey(pointer))
-            ?: WinRTInspectableComObject.findManagedValue(pointer)
-            ?: return null
-        if (!expectedType.isInstance(managedValue)) {
+        val directPointerKey = PlatformAbi.pointerKey(pointer)
+        findObjectAt(directPointerKey, pointer, expectedType)?.let { return it }
+        val identityKey = rcwCacheKey(pointer)
+        if (identityKey == directPointerKey) {
             return null
         }
-        return managedValue as T
+        return findObjectAt(identityKey, RawAddress(identityKey), expectedType)
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun <T : Any> findObjectAt(
+        pointerKey: Long,
+        pointer: RawAddress,
+        expectedType: KClass<T>,
+    ): T? {
+        findCachedRcw(pointerKey)?.let { cached ->
+            if (expectedType.isInstance(cached)) {
+                return cached as T
+            }
+        }
+        val managedValue = WinRTInspectableComObject.findManagedValue(pointer) ?: return null
+        return if (expectedType.isInstance(managedValue)) managedValue as T else null
     }
 
     inline fun <reified T : Any> findObject(pointer: RawAddress): T? = findObject(pointer, T::class)
