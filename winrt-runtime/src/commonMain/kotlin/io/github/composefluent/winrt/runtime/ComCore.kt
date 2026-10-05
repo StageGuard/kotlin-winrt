@@ -66,6 +66,9 @@ internal class ComPtr private constructor(
     val isDisposed: Boolean
         get() = support.isDisposed
 
+    internal val isCallableInCurrentContext: Boolean
+        get() = support.isCallableInCurrentContext
+
     val hasReferenceTracker: Boolean
         get() = support.hasReferenceTracker
 

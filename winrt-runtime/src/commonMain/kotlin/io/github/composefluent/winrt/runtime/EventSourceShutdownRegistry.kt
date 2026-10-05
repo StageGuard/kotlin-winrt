@@ -10,6 +10,12 @@ import windows.foundation.EventRegistrationToken
  * A successful add transfers delegate ownership to the native publisher. This registry is only a weak,
  * best-effort process-shutdown safeguard: if WinUI keeps a registration alive while the JVM is exiting,
  * a late native callback can enter an FFM upcall stub after thread attachment is no longer possible.
+ *
+ * The cleanup runs on the thread of the shutdown hook and stays there. A publisher that belongs to
+ * a single-threaded apartment can only be called, and released, by its own thread; a call from
+ * here would wait until that thread serves it. The thread that started the shutdown never does:
+ * on the JVM it waits for the hooks to finish, so the process would not exit. Such a registration
+ * is left to the end of the process, as is the one of a publisher in any other apartment.
  */
 internal object EventSourceShutdownRegistry {
     private val lock = PlatformLock()
@@ -138,6 +144,10 @@ internal object EventSourceShutdownRegistry {
             try {
                 runCatching {
                     val resolvedState = state.tryGetTarget() as? EventSourceState<*> ?: return@runCatching
+                    // Closing the state releases the publisher, which is a call like the removal.
+                    if (!publisher.isCallableInCurrentContext()) {
+                        return@runCatching
+                    }
                     try {
                         publisher.withResolvedReference { objectReference ->
                             removal.remove(objectReference, token)
@@ -158,6 +168,10 @@ internal object EventSourceShutdownRegistry {
         private val managedReference = PlatformManagedWeakReference(objectReference)
         private val objectPointerKey = PlatformAbi.pointerKey(objectReference.pointer)
         private val interfaceId = objectReference.interfaceId
+
+        fun isCallableInCurrentContext(): Boolean =
+            EventSourceCache.isTargetCallableInCurrentContext(objectPointerKey) &&
+                managedReference.get()?.takeUnless { it.isDisposed }?.isCallableInCurrentContext != false
 
         fun withResolvedReference(action: (ComObjectReference) -> Unit) {
             EventSourceCache.resolveTarget(objectPointerKey, interfaceId)?.use(action)?.let { return }
