@@ -20,7 +20,7 @@ class XamlConnectorIdentityTest {
             defaultInterfaceId = nativeId,
         ).use { native ->
             val abandoned = abandonAggregatedPage(native, overrideId)
-            awaitPageCollection(abandoned)
+            awaitPageAndInnerCollection(abandoned, native)
             assertEquals(1u, WinRTInspectableComObject.tryProbeReferenceCount(native.borrowCachedInterfacePointer(nativeId)))
         }
         ComWrappersSupport.clearRegistriesForTests()
@@ -58,7 +58,7 @@ class XamlConnectorIdentityTest {
             val (abandoned, external) = abandonExternallyReferencedPage(native, overrideId)
             PlatformFinalization.drain()
             verifyExternalReferenceAndRelease(abandoned, external)
-            awaitPageCollection(abandoned)
+            awaitPageAndInnerCollection(abandoned, native)
             assertEquals(1u, WinRTInspectableComObject.tryProbeReferenceCount(native.borrowCachedInterfacePointer(nativeId)))
         }
         ComWrappersSupport.clearRegistriesForTests()
@@ -107,19 +107,22 @@ class XamlConnectorIdentityTest {
         external.close()
     }
 
-    private fun awaitPageCollection(page: PlatformManagedWeakReference<Page>) {
+    private fun awaitPageAndInnerCollection(page: PlatformManagedWeakReference<Page>, native: WinRTInspectableComObject) {
+        val nativePointer = native.borrowCachedInterfacePointer(native.primaryInterfaceId)
         repeat(30) {
             PlatformFinalization.drain()
-            if (page.get() == null) {
-                // The page and its resource wrapper can be collected in separate
-                // cycles. Drain native-only cleanup after proving the page is gone.
-                repeat(3) { PlatformFinalization.drain() }
+            // The page's weak reference can clear before its wrapper's Cleaner
+            // runs. Await both observable conditions, as the existing owned
+            // reference finalization tests do; a fixed GC count does not await
+            // asynchronous native cleanup.
+            if (page.get() == null && WinRTInspectableComObject.tryProbeReferenceCount(nativePointer) == 1u) {
                 return
             }
             val pressure = List(128) { ByteArray(1024) }
             assertEquals(128, pressure.size)
         }
         kotlin.test.assertNull(page.get())
+        assertEquals(1u, WinRTInspectableComObject.tryProbeReferenceCount(nativePointer))
     }
 
     @Test
