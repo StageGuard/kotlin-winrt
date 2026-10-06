@@ -243,6 +243,18 @@ windows {
 
 Reusable WinRT libraries may declare `packageReferences { nugetPackage(...) }` or `application { runtimeAsset(...) }`. Final application modules consume dependency WinRT identity metadata and stage the aggregated runtime assets, so downstream apps do not need to repeat every library declaration just to place payloads in the final layout.
 
+`Microsoft.WindowsAppSDK` is a metapackage: it references every component of the SDK (WinUI, Foundation, InteractiveExperiences, DWrite, AI, ML, Widgets, the runtime), and a self-contained application stages the runtime of each one. An application that needs part of the SDK references the component packages instead, as the Windows App SDK documents, and that choice replaces the metapackage that a library declared only to ask for the runtime. A component package that a library declared is kept. `Microsoft.WindowsAppSDK.Runtime` carries the version information of the runtime; a self-contained application that selects components declares it as well.
+
+```kotlin
+windows {
+    packageReferences {
+        nugetPackage("Microsoft.WindowsAppSDK.WinUI", "2.2.1")
+        nugetPackage("Microsoft.WindowsAppSDK.Runtime", "2.2.0")
+        nugetPackage("Microsoft.WindowsAppSDK.DWrite", "2.1.0")
+    }
+}
+```
+
 ## WinApp CLI and NuGet Restore
 
 The Gradle plugin translates project and dependency `packageReferences { nugetPackage(...) }` declarations into an internal `build/generated/kotlin-winrt/winapp/winapp.yaml`. Do not create or maintain that file manually. With the default `packageReferences { restoreNuGetPackages = true }`, `restoreWinAppDependencies` runs `winapp restore`, validates its schema-3 lockfile, and uses the resolved WinMD files for projection generation. The same lockfile and `.winapp/bin/<architecture>` output drive DLL, PRI, asset, and manifest staging after compilation; explicit local `packageReferences { winmd(...) }` inputs remain part of the projection input set.

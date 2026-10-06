@@ -42,7 +42,7 @@ abstract class GenerateWinAppConfigurationTask : DefaultTask() {
 
     @TaskAction
     fun generate() {
-        val packageSpecs = nugetPackages.get() + dependencyIdentityFiles.files.flatMap(::readNuGetPackages)
+        val packageSpecs = nuGetPackageSpecsWithDependencies(nugetPackages.get(), dependencyIdentityFiles.files)
         val packages = resolveWinAppPackagePins(
             packageSpecs = packageSpecs,
             toolingPackages = if (packageSpecs.isNotEmpty() || includeToolingPackages.get()) {

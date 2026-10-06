@@ -174,7 +174,7 @@ abstract class GenerateWinRTCompilerAuthoredTypeDetailsTask @Inject constructor(
         val explicitSources = metadataInputs.get()
             .map(WinRTMetadataSource::parse)
             .map { source -> source.withWindowsSdkRegistryRoots(registryRoots) }
-        val packageSpecs = (nugetPackages.get() + dependencyIdentityFiles.files.flatMap(::readNuGetPackages))
+        val packageSpecs = nuGetPackageSpecsWithDependencies(nugetPackages.get(), dependencyIdentityFiles.files)
             .distinct()
             .sorted()
         val sdkSource = if (windowsSdkDeclared.get()) {

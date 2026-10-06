@@ -132,7 +132,9 @@ abstract class RestoreWinAppDependenciesTask : DefaultTask() {
         require(output.parent == workspace) {
             "WinApp restore output must be the .winapp directory directly below its generated workspace: $output"
         }
-        val packageSpecs = (nugetPackages.get() + dependencyIdentityFiles.files.flatMap(::readNuGetPackages)).distinct().sorted()
+        val packageSpecs = nuGetPackageSpecsWithDependencies(nugetPackages.get(), dependencyIdentityFiles.files)
+            .distinct()
+            .sorted()
         val existingLock = output.resolve("winmds.lock.json")
         if (restoreEnabled.get() && existingLock.isRegularFile()) {
             runCatching {

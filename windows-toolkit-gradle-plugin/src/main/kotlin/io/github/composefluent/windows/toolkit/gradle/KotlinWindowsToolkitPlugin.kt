@@ -884,8 +884,10 @@ private fun configureWinAppTasks(
         RestoreWinAppDependenciesTask::class.java,
     )
     val resolvedWindowsAppSdkDeployment = project.provider {
-        val packageSpecs = allNuGetPackageSpecs(extension.packageReferences) +
-            dependencyIdentityFiles.files.flatMap(::readNuGetPackages)
+        val packageSpecs = nuGetPackageSpecsWithDependencies(
+            allNuGetPackageSpecs(extension.packageReferences),
+            dependencyIdentityFiles.files,
+        )
         resolveWindowsAppSdkDeployment(
             requested = options.windowsAppSdkDeployment.get(),
             packageSpecs = packageSpecs,
@@ -4052,7 +4054,7 @@ private fun kotlinWinRTLocalGenerationMetadataPlan(
         .map { source -> source.withWindowsSdkRegistryRoots(registryRootPaths) }
     val hasProjectionFilter = extension.includeNamespaces.get().isNotEmpty() || extension.includeTypes.get().isNotEmpty()
     val projectionPackageSpecs = projectionNuGetPackageSpecs(extension)
-    val packageSpecs = (projectionPackageSpecs + dependencyIdentityFiles.flatMap(::readNuGetPackages))
+    val packageSpecs = nuGetPackageSpecsWithDependencies(projectionPackageSpecs, dependencyIdentityFiles)
         .distinct()
         .sorted()
     val sdkSource = if (extension.windowsSdkDeclared.get()) {

@@ -34,7 +34,7 @@ abstract class ResolveWinRTRuntimeNuGetPackagesTask : DefaultTask() {
 
     @TaskAction
     fun resolve() {
-        val specs = nugetPackages.get() + dependencyIdentityFiles.files.flatMap(::readNuGetPackages)
+        val specs = nuGetPackageSpecsWithDependencies(nugetPackages.get(), dependencyIdentityFiles.files)
         val roots = readWinAppRestoredPackageRoots(
             projectionRestoreLockFiles(winAppRestoreLockFiles.files), specs,
         )

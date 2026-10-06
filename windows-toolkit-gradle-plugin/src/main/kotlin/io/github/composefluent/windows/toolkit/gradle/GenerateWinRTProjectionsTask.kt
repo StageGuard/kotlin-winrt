@@ -583,7 +583,10 @@ internal abstract class GenerateWinRTProjectionsWorkAction : WorkAction<Generate
         val explicitSources = parameters.metadataInputs.get()
             .map(WinRTMetadataSource::parse)
             .map { source -> source.withWindowsSdkRegistryRoots(registryRoots) }
-        val packageSpecs = (parameters.nugetPackages.get() + parameters.dependencyIdentityFiles.files.flatMap(::readNuGetPackages))
+        val packageSpecs = nuGetPackageSpecsWithDependencies(
+            parameters.nugetPackages.get(),
+            parameters.dependencyIdentityFiles.files,
+        )
             .distinct()
             .sorted()
         val sdkSource = declaredWindowsSdkSources()

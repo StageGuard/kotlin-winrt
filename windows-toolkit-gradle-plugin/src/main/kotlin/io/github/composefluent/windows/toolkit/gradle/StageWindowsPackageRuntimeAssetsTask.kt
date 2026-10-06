@@ -302,7 +302,7 @@ abstract class StageWindowsPackageRuntimeAssetsTask : DefaultTask() {
         winAppRuntimeRoots.forEach { root ->
             stageWinAppRuntimeAssets(root.resolve(winAppRuntimeArchitecture(rid)), outputRoot)
         }
-        val packageSpecs = nugetPackages.get() + dependencyIdentityFiles.files.flatMap(::readNuGetPackages)
+        val packageSpecs = nuGetPackageSpecsWithDependencies(nugetPackages.get(), dependencyIdentityFiles.files)
         val identities = packageSpecs
             .map(::parseNuGetPackageIdentity)
             .filterNot { identity ->
