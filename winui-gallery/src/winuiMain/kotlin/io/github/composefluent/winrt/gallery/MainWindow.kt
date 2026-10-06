@@ -36,8 +36,10 @@ internal class MainWindow : winui3package.WindowEx() {
         GalleryWindows.track(checkNotNull(window))
         title = checkNotNull(GalleryTitle)
         GalleryNavigationHost.navigate = ::navigate
-        root.requestedTheme = theme
-        GalleryTheme.attach(root, checkNotNull(window))
+        // WindowEx is Window.Content; its theme also drives the system backdrop
+        // and caption helpers, while RootGrid inherits the same theme.
+        requestedTheme = theme
+        GalleryTheme.attach(this, checkNotNull(window))
         navigation.paneDisplayMode = if (GalleryPreferences.flag("TopNavigation")) NavigationViewPaneDisplayMode.Top else NavigationViewPaneDisplayMode.Auto
         ElementSoundPlayer.state = if (GalleryPreferences.flag("Sound")) ElementSoundPlayerState.On else ElementSoundPlayerState.Off
         ElementSoundPlayer.spatialAudioMode = if (GalleryPreferences.flag("SpatialAudio")) ElementSpatialAudioMode.On else ElementSpatialAudioMode.Off
@@ -245,9 +247,9 @@ internal class MainWindow : winui3package.WindowEx() {
         }
     }
 
-    private fun settings(): UIElement = io.github.composefluent.winrt.gallery.pages.SettingsPage(root, theme,
+    private fun settings(): UIElement = io.github.composefluent.winrt.gallery.pages.SettingsPage(this, theme,
         setTheme = {
-            theme = it; GalleryPreferences.put("Theme", it.toString()); root.requestedTheme = it
+            theme = it; GalleryPreferences.put("Theme", it.toString()); requestedTheme = it
         },
         setTopNavigation = {
             navigation.paneDisplayMode = if (it) NavigationViewPaneDisplayMode.Top else NavigationViewPaneDisplayMode.Auto

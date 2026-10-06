@@ -60,7 +60,7 @@ internal class ControlExample : UserControl() {
         RefreshSampleDefinition()
         UpdateHeader()
         val state = GalleryTheme.sampleBeingConstructed
-        if (state != null) { state.sourceExampleIndex++; state.sampleBodies.add(ControlPresenter) }
+        if (state != null) state.sourceExampleIndex++
         if (ExampleHeight.gridUnitType == GridUnitType.Pixel) ControlPresenter.height = ExampleHeight.value
         sourcePresenter.expanding.add { _,_ -> RefreshSource(); sourceReady = true }
         SelectorBarControl.selectedItem = SelectorBarXamlItem
