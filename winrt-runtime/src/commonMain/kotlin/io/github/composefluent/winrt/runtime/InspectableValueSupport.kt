@@ -70,6 +70,9 @@ internal fun createSyntheticInterfaceCcwDefinition(value: Any): WinRTCcwDefiniti
         // CsWinRT Projections/Bindable.net5.cs exposes IEnumerable as IBindableIterable
         // even when the caller's declared ABI type is only IInspectable (ItemsSource).
         if (value is Iterable<*>) add(bindableIterableDefinition())
+        // IList and its notification interfaces must share the original CCW. WinUI's
+        // ItemsSourceView snapshots an iterable that has no indexed vector interface.
+        if (value is MutableList<*>) add(bindableVectorDefinition())
         if (value is AutoCloseable) add(createClosableInspectableInterfaceDefinition(value))
     }
     if (interfaces.isEmpty()) return null
