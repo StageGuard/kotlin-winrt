@@ -57,7 +57,7 @@ internal class XamlPageBodies(private val index: WinRTXamlDeclarationIndex, priv
             val functions = (listOf(xamlInitializeName, xamlConstructionName, xamlLoadName, xamlConnectName, xamlBindingName) +
                 page.properties.flatMap { it.eventFunctions() } +
                 if (page.hasCompiledBindings()) listOf(xamlUpdateBindingsName, xamlBindingsChangedName, xamlBindingsLoadingName,
-                    xamlBindingsUnloadedName, xamlRefreshBindingsName) + page.bindBackNames() +
+                    xamlBindingsUnloadedName, xamlRefreshBindingsName, xamlPageBindingConnectName) + page.bindBackNames() +
                     (if (page.hasTemplateScopes()) xamlScopeNames else emptySet()) else emptyList()).map(::function)
             if (semanticOnly) {
                 val error = pluginContext.referenceFunctions(CallableId(FqName("kotlin"), Name.identifier("error"))).single()
@@ -182,9 +182,15 @@ internal class XamlPageBodies(private val index: WinRTXamlDeclarationIndex, priv
             binding.body = DeclarationIrBuilder(pluginContext, binding.symbol).irBlockBody {
                 +irReturn(irWhen(binding.returnType, mutableListOf()).apply {
                     val connectionId = binding.parameters.first { it.kind == IrParameterKind.Regular }
-                    page.connections.filter { it.isScopeRoot && !it.isTemplateChild }.forEach { root ->
+                    page.connections.filter { root -> root.isScopeRoot && !root.isTemplateChild &&
+                        page.connections.any { it.scopeId == root.scopeId && !it.isTemplateChild && it.bindings.isNotEmpty() }
+                    }.forEach { root ->
+                        val connector = classes.values.single { it.fqNameWhenAvailable?.parent()?.asString() ==
+                            "io.github.composefluent.winrt.generated.xaml" && it.name.asString().startsWith("KotlinXamlPageBindingConnector") }
                         branches += irBranch(irEquals(irGet(connectionId), irInt(root.id)),
-                            irImplicitCast(irGet(requireNotNull(binding.dispatchReceiverParameter)), binding.returnType))
+                            irCallConstructor(connector.constructors.single().symbol, emptyList()).apply {
+                                arguments[0] = irGet(requireNotNull(binding.dispatchReceiverParameter))
+                            })
                     }
                     if (page.hasTemplateScopes()) {
                         val connector = classes.values.single { it.fqNameWhenAvailable?.parent()?.asString() ==
@@ -203,84 +209,91 @@ internal class XamlPageBodies(private val index: WinRTXamlDeclarationIndex, priv
                 })
             }
 
-            val connect = function(xamlConnectName)
-            val parameters = connect.parameters.filter { it.kind == IrParameterKind.Regular }
-            val cast = runtime("asWinRT")
-            connect.body = DeclarationIrBuilder(pluginContext, connect.symbol).irBlockBody {
-                +irWhen(pluginContext.irBuiltIns.unitType, mutableListOf()).apply {
-                    for (connection in page.connections.filter { it.storageName() != null || it.events.isNotEmpty() }) {
-                        branches += irBranch(irEquals(irGet(parameters[0]), irInt(connection.id)), irBlock {
-                            val targetType = classes[connection.typeName]?.defaultType
-                                ?: projection(connection.typeName).defaultType
-                            val target = irTemporary(irCall(cast).apply {
-                                type = targetType; typeArguments[0] = targetType; arguments[0] = irGet(parameters[1])
-                            })
-                            connection.storageName()?.let { fieldName ->
-                                +irSetField(irGet(requireNotNull(connect.dispatchReceiverParameter)),
-                                    requireNotNull(properties.getValue(fieldName).backingField), irGet(target))
-                            }
-                            for (event in connection.events) {
-                                val handler = xamlIrFunctions(klass, event.handlerName).single()
-                                val add = (classes[event.declaringTypeName] ?: projection(event.declaringTypeName)).functions.single {
-                                    it.name.asString() == "add${event.name}" && it.parameters.count { p -> p.kind == IrParameterKind.Regular } == 1
+            // CSharpPagePass2 emits separate Connect bodies on the page and its
+            // binding object; ordinary handlers must never run on both paths.
+            for ((connect, bindingOnly) in listOf(function(xamlConnectName) to false) +
+                if (page.hasCompiledBindings()) listOf(function(xamlPageBindingConnectName) to true) else emptyList()) {
+                val parameters = connect.parameters.filter { it.kind == IrParameterKind.Regular }
+                val cast = runtime("asWinRT")
+                connect.body = DeclarationIrBuilder(pluginContext, connect.symbol).irBlockBody {
+                    +irWhen(pluginContext.irBuiltIns.unitType, mutableListOf()).apply {
+                        for (connection in page.connections.filter {
+                            if (bindingOnly) !it.isTemplateChild && it.bindings.isNotEmpty()
+                            else it.storageName() != null || it.events.isNotEmpty()
+                        }) {
+                            branches += irBranch(irEquals(irGet(parameters[0]), irInt(connection.id)), irBlock {
+                                val targetType = classes[connection.typeName]?.defaultType
+                                    ?: projection(connection.typeName).defaultType
+                                val target = irTemporary(irCall(cast).apply {
+                                    type = targetType; typeArguments[0] = targetType; arguments[0] = irGet(parameters[1])
+                                })
+                                connection.storageName()?.let { fieldName ->
+                                    +irSetField(irGet(requireNotNull(connect.dispatchReceiverParameter)),
+                                        requireNotNull(properties.getValue(fieldName).backingField), irGet(target))
                                 }
-                                val delegateType = add.parameters.single { it.kind == IrParameterKind.Regular }.type
-                                val delegateClass = requireNotNull(delegateType.classOrNull) {
-                                    "XAML requires projected delegate ${event.delegateTypeName}"
-                                }.owner
-                                val invoke = delegateClass.functions.single { it.name.asString() == "invoke" }
-                                val handlerParameters = handler.parameters.filter { it.kind == IrParameterKind.Regular }
-                                val delegateParameters = invoke.parameters.filter { it.kind == IrParameterKind.Regular }
-                                val typeArguments = (delegateType as? IrSimpleType)?.arguments.orEmpty()
-                                fun delegateParameterType(type: IrType): IrType {
-                                    val parameterIndex = delegateClass.typeParameters.indexOfFirst { parameter ->
-                                        parameter.symbol == (type as? IrSimpleType)?.classifier
+                                for (event in if (bindingOnly) emptyList() else connection.events) {
+                                    val handler = xamlIrFunctions(klass, event.handlerName).single()
+                                    val add = (classes[event.declaringTypeName] ?: projection(event.declaringTypeName)).functions.single {
+                                        it.name.asString() == "add${event.name}" && it.parameters.count { p -> p.kind == IrParameterKind.Regular } == 1
                                     }
-                                    return typeArguments.getOrNull(parameterIndex)?.typeOrNull ?: type
+                                    val delegateType = add.parameters.single { it.kind == IrParameterKind.Regular }.type
+                                    val delegateClass = requireNotNull(delegateType.classOrNull) {
+                                        "XAML requires projected delegate ${event.delegateTypeName}"
+                                    }.owner
+                                    val invoke = delegateClass.functions.single { it.name.asString() == "invoke" }
+                                    val handlerParameters = handler.parameters.filter { it.kind == IrParameterKind.Regular }
+                                    val delegateParameters = invoke.parameters.filter { it.kind == IrParameterKind.Regular }
+                                    val typeArguments = (delegateType as? IrSimpleType)?.arguments.orEmpty()
+                                    fun delegateParameterType(type: IrType): IrType {
+                                        val parameterIndex = delegateClass.typeParameters.indexOfFirst { parameter ->
+                                            parameter.symbol == (type as? IrSimpleType)?.classifier
+                                        }
+                                        return typeArguments.getOrNull(parameterIndex)?.typeOrNull ?: type
+                                    }
+                                    require(!handler.isSuspend && handler.typeParameters.isEmpty() &&
+                                        handler.returnType.classFqName == invoke.returnType.classFqName &&
+                                        handlerParameters.size == delegateParameters.size &&
+                                        handlerParameters.zip(delegateParameters).all { (handlerParameter, delegateParameter) ->
+                                            val source = delegateParameterType(delegateParameter.type)
+                                            val destination = handlerParameter.type
+                                            // C# method groups allow a RoutedEventArgs handler for
+                                            // a derived event argument. Keep the same conversion in
+                                            // the final Kotlin bridge as in XamlCompiler's plan.
+                                            (!source.isNullable() || destination.isNullable()) &&
+                                                destination.classOrNull?.let { source.isSubtypeOfClass(it) } == true
+                                        }) {
+                                        "${page.resourcePath}:${event.location.line}:${event.location.column}: " +
+                                            "handler ${event.handlerName} no longer matches ${event.delegateTypeName}; rebuild XAML semantic symbols"
+                                    }
+                                    +irCall(add.symbol).apply {
+                                        dispatchReceiver = irGet(target)
+                                        arguments[1] = irSamConversion(boundReference(pluginContext, handler,
+                                            irGet(requireNotNull(connect.dispatchReceiverParameter))), delegateType)
+                                    }
                                 }
-                                require(!handler.isSuspend && handler.typeParameters.isEmpty() &&
-                                    handler.returnType.classFqName == invoke.returnType.classFqName &&
-                                    handlerParameters.size == delegateParameters.size &&
-                                    handlerParameters.zip(delegateParameters).all { (handlerParameter, delegateParameter) ->
-                                        val source = delegateParameterType(delegateParameter.type)
-                                        val destination = handlerParameter.type
-                                        // C# method groups allow a RoutedEventArgs handler for
-                                        // a derived event argument. Keep the same conversion in
-                                        // the final Kotlin bridge as in XamlCompiler's plan.
-                                        (!source.isNullable() || destination.isNullable()) &&
-                                            destination.classOrNull?.let { source.isSubtypeOfClass(it) } == true
-                                    }) {
-                                    "${page.resourcePath}:${event.location.line}:${event.location.column}: " +
-                                        "handler ${event.handlerName} no longer matches ${event.delegateTypeName}; rebuild XAML semantic symbols"
+                                for (event in connection.bindings.filter { bindingOnly && it.isEvent }) {
+                                    +XamlCompiledBindingBodies(pluginContext, classes, pages).eventSubscription(this, klass, event,
+                                        irGet(requireNotNull(connect.dispatchReceiverParameter)), irGet(target))
                                 }
-                                +irCall(add.symbol).apply {
-                                    dispatchReceiver = irGet(target)
-                                    arguments[1] = irSamConversion(boundReference(pluginContext, handler,
-                                        irGet(requireNotNull(connect.dispatchReceiverParameter))), delegateType)
+                                if (bindingOnly && connection.canBeInstantiatedLater) {
+                                    val receiver = requireNotNull(connect.dispatchReceiverParameter)
+                                    val bindingState = requireNotNull(properties.getValue(xamlBindingStateName.asString()).backingField)
+                                    val stateType = requireNotNull(pluginContext.referenceClass(xamlBindingStateId)).owner
+                                    +irIfThen(pluginContext.irBuiltIns.unitType,
+                                        irCall(stateType.functions.single { it.name.asString() == "connected" }).apply {
+                                            dispatchReceiver = irGetField(irGet(receiver), bindingState)
+                                            arguments[1] = irInt(connection.id)
+                                        }, irCall(function(xamlBindingsChangedName).symbol).apply {
+                                            dispatchReceiver = irGet(receiver); arguments[1] = irNull(); arguments[2] = irNull()
+                                        })
                                 }
-                            }
-                            for (event in connection.bindings.filter { it.isEvent && !connection.isTemplateChild }) {
-                                +XamlCompiledBindingBodies(pluginContext, classes, pages).eventSubscription(this, klass, event,
-                                    irGet(requireNotNull(connect.dispatchReceiverParameter)), irGet(target))
-                            }
-                            if (connection.canBeInstantiatedLater && !connection.isTemplateChild && page.hasCompiledBindings()) {
-                                val receiver = requireNotNull(connect.dispatchReceiverParameter)
-                                val bindingState = requireNotNull(properties.getValue(xamlBindingStateName.asString()).backingField)
-                                val stateType = requireNotNull(pluginContext.referenceClass(xamlBindingStateId)).owner
-                                +irIfThen(pluginContext.irBuiltIns.unitType,
-                                    irCall(stateType.functions.single { it.name.asString() == "connected" }).apply {
-                                        dispatchReceiver = irGetField(irGet(receiver), bindingState)
-                                        arguments[1] = irInt(connection.id)
-                                    }, irCall(function(xamlBindingsChangedName).symbol).apply {
-                                        dispatchReceiver = irGet(receiver); arguments[1] = irNull(); arguments[2] = irNull()
-                                    })
-                            }
-                            +irUnit()
-                        })
+                                +irUnit()
+                            })
+                        }
+                        // Connect ignores unknown IDs, including pages without any
+                        // generated fields or events. Native requires a nonempty when.
+                        branches += irBranch(irTrue(), irUnit())
                     }
-                    // Connect ignores unknown IDs, including pages without any
-                    // generated fields or events. Native requires a nonempty when.
-                    branches += irBranch(irTrue(), irUnit())
                 }
             }
             // FIR2IR can optimize same-class default-property reads to IrGetField

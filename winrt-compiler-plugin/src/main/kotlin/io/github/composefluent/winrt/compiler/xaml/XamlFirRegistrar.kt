@@ -23,6 +23,8 @@ internal val xamlLoadName = Name.identifier("_kotlinXamlLoad")
 internal val xamlInitializeName = Name.identifier("_kotlinXamlInitialize")
 internal val xamlConnectName = Name.identifier("connect")
 internal val xamlBindingName = Name.identifier("getBindingConnector")
+internal val xamlPageBindingOwnerId = ClassId.topLevel(FqName("io.github.composefluent.winrt.runtime.WinRTXamlPageBindingOwner"))
+internal val xamlPageBindingConnectName = Name.identifier("_kotlinXamlConnectBindings")
 internal val xamlBindingStateId = ClassId.topLevel(FqName("io.github.composefluent.winrt.runtime.WinRTXamlBindingState"))
 internal val xamlBindingStateName = Name.identifier("_kotlinXamlBindings")
 internal val xamlUpdateBindingsName = Name.identifier("_kotlinXamlUpdateBindings")
@@ -79,7 +81,7 @@ private class XamlDeclarations(session: FirSession, private val pages: Map<Class
             page.properties.flatMap { it.eventFunctions() } +
             setOf(xamlStateName, xamlConstructionStateName, xamlConstructionName, xamlLoadName, xamlInitializeName, xamlConnectName, xamlBindingName) +
             if (page.hasCompiledBindings()) setOf(xamlBindingStateName, xamlUpdateBindingsName, xamlBindingsChangedName,
-                xamlBindingsLoadingName, xamlBindingsUnloadedName, xamlRefreshBindingsName) + page.bindBackNames() +
+                xamlBindingsLoadingName, xamlBindingsUnloadedName, xamlRefreshBindingsName, xamlPageBindingConnectName) + page.bindBackNames() +
                 (if (page.hasTemplateScopes()) xamlScopeNames else emptySet()) else emptySet()
     }
 
@@ -135,19 +137,19 @@ private class XamlDeclarations(session: FirSession, private val pages: Map<Class
             }.symbol)
         }
         val bindingMethod = page.hasCompiledBindings() && name in setOf(xamlUpdateBindingsName, xamlBindingsChangedName,
-            xamlBindingsLoadingName, xamlBindingsUnloadedName, xamlRefreshBindingsName) + page.bindBackNames()
+            xamlBindingsLoadingName, xamlBindingsUnloadedName, xamlRefreshBindingsName, xamlPageBindingConnectName) + page.bindBackNames()
         if (!bindingMethod && name !in setOf(xamlLoadName, xamlInitializeName, xamlConstructionName, xamlConnectName, xamlBindingName)) return emptyList()
         val result = if (name == xamlBindingName) xamlConnectorId.createConeType(session, nullable = true)
             else session.builtinTypes.unitType.coneType
         return listOf(createMemberFunction(owner, XamlDeclarationKey, name, result) {
-            if (name == xamlLoadName || (bindingMethod && name != xamlRefreshBindingsName)) visibility = Visibilities.Private
+            if (name == xamlLoadName || (bindingMethod && name !in setOf(xamlRefreshBindingsName, xamlPageBindingConnectName))) visibility = Visibilities.Private
             if (name == xamlUpdateBindingsName) valueParameter(Name.identifier("initial"), session.builtinTypes.booleanType.coneType)
             if (name in setOf(xamlBindingsChangedName, xamlBindingsLoadingName, xamlBindingsUnloadedName) + page.bindBackNames()) {
                 valueParameter(Name.identifier("sender"), session.builtinTypes.nullableAnyType.coneType)
                 valueParameter(Name.identifier("args"), session.builtinTypes.nullableAnyType.coneType)
             }
             if (name == xamlInitializeName || name == xamlConstructionName) status { isOverride = true }
-            if (name == xamlConnectName || name == xamlBindingName) {
+            if (name == xamlConnectName || name == xamlBindingName || name == xamlPageBindingConnectName) {
                 status { isOverride = true }
                 valueParameter(Name.identifier("connectionId"), session.builtinTypes.intType.coneType)
                 valueParameter(Name.identifier("target"), session.builtinTypes.nullableAnyType.coneType)
@@ -161,7 +163,8 @@ private class XamlSupertypes(session: FirSession, private val pages: Map<ClassId
     override fun computeAdditionalSupertypes(classLikeDeclaration: FirClassLikeDeclaration,
         resolvedSupertypes: List<FirResolvedTypeRef>, typeResolver: TypeResolveService): List<ConeKotlinType> =
         (listOf(xamlConnectorId, xamlComponentId) +
-            if (pages[classLikeDeclaration.symbol.classId]?.hasTemplateScopes() == true) listOf(xamlBindingScopeOwnerId) else emptyList())
+            (if (pages[classLikeDeclaration.symbol.classId]?.hasCompiledBindings() == true) listOf(xamlPageBindingOwnerId) else emptyList()) +
+            (if (pages[classLikeDeclaration.symbol.classId]?.hasTemplateScopes() == true) listOf(xamlBindingScopeOwnerId) else emptyList()))
             .filterNot { id -> resolvedSupertypes.any { it.coneType.classId == id } }
             .map { it.createConeType(session) }
 }

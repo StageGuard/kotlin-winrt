@@ -65,6 +65,8 @@ class XamlTemplateConnectorTest {
             object TemplateProbeData {
                 val parent = microsoft.ui.xaml.controls.Button()
                 val grid = microsoft.ui.xaml.controls.Grid()
+                val fileButton = microsoft.ui.xaml.controls.Button()
+                val templateButton = microsoft.ui.xaml.controls.Button()
                 lateinit var connector: microsoft.ui.xaml.markup.IComponentConnector
                 var lookups = 0
                 var unloads = 0
@@ -72,9 +74,16 @@ class XamlTemplateConnectorTest {
             class Application { companion object Metadata {
                 fun loadComponent(page: Any, uri: windows.foundation.Uri) {
                     check(uri.value == "ms-appx:///MainPage.xaml")
-                    val binding = checkNotNull((page as microsoft.ui.xaml.markup.IComponentConnector).getBindingConnector(2, TemplateProbeData.parent))
+                    val component = page as microsoft.ui.xaml.markup.IComponentConnector
+                    val fileBinding = checkNotNull(component.getBindingConnector(1, page))
+                    check(fileBinding !== component)
+                    component.connect(6, TemplateProbeData.fileButton)
+                    fileBinding.connect(6, TemplateProbeData.fileButton)
+                    component.connect(5, TemplateProbeData.templateButton)
+                    val binding = checkNotNull(fileBinding.getBindingConnector(2, TemplateProbeData.parent))
                     TemplateProbeData.connector = binding
                     binding.connect(3, TemplateProbeData.grid)
+                    binding.connect(5, TemplateProbeData.templateButton)
                     check(TemplateProbeData.lookups == 0)
                     binding.connect(2, Any())
                 }
@@ -114,6 +123,9 @@ class XamlTemplateConnectorTest {
             class TextBlock : microsoft.ui.xaml.FrameworkElement()
             class ControlTemplate
             class Button : microsoft.ui.xaml.FrameworkElement() {
+                private val clicks = mutableListOf<microsoft.ui.xaml.RoutedEventHandler>()
+                fun addClick(handler: microsoft.ui.xaml.RoutedEventHandler) { clicks += handler }
+                fun raiseClick() { clicks.toList().forEach { it.invoke(this, microsoft.ui.xaml.RoutedEventArgs()) } }
                 var isEnabled = true
                     set(value) { field = value; changed(isEnabledProperty) }
                 companion object Metadata { val isEnabledProperty = microsoft.ui.xaml.DependencyProperty() }
@@ -170,10 +182,25 @@ class XamlTemplateConnectorTest {
                 check(dataOwner.updates == 3)
                 return "control:${'$'}{controlOwner.updates};template:${'$'}{dataOwner.updates}"
             }
-            class MainPage : microsoft.ui.xaml.controls.Page()
+            class MainPage : microsoft.ui.xaml.controls.Page() {
+                var ordinaryClicks = 0
+                var boundClicks = 0
+                var templateClicks = 0
+                val PageEnabled = false
+                private fun onClick(sender: Any?, args: microsoft.ui.xaml.RoutedEventArgs) { ordinaryClicks++ }
+                private fun onTemplateClick(sender: Any?, args: microsoft.ui.xaml.RoutedEventArgs) { templateClicks++ }
+                fun BoundClick(sender: Any?, args: microsoft.ui.xaml.RoutedEventArgs) { boundClicks++ }
+            }
             fun exerciseGenerated(): String {
                 val page = MainPage()
                 val data = microsoft.ui.xaml.TemplateProbeData
+                // The SDK connects named/event elements to both the page and
+                // its binding object. CSharpPagePass2 assigns each event once.
+                page.updateBindings()
+                check(!data.fileButton.isEnabled)
+                data.fileButton.raiseClick()
+                data.templateButton.raiseClick()
+                check(page.ordinaryClicks == 1 && page.boundClicks == 1 && page.templateClicks == 1)
                 check(data.lookups == 1 && data.unloads == 0)
                 data.parent.isEnabled = false
                 check(data.unloads == 1)
@@ -201,11 +228,12 @@ class XamlTemplateConnectorTest {
         // actual ControlTemplate harvester; the data root is TargetType (Button).
         val index = WinRTXamlDeclarationIndex(3, listOf(WinRTXamlPageDeclaration(
             "probe.MainPage", "MainPage.xaml", "Microsoft.UI.Xaml.Controls.Page", false,
-            listOf("templates", "compiled-bindings", "deferred-elements"), listOf(
-                WinRTXamlConnectionDeclaration(1, "Microsoft.UI.Xaml.Controls.Page", null, location, emptyList()),
+            listOf("templates", "compiled-bindings", "deferred-elements", "named-elements", "events"), listOf(
+                WinRTXamlConnectionDeclaration(1, "Microsoft.UI.Xaml.Controls.Page", null, location, emptyList(),
+                    scopeId = 1, isScopeRoot = true),
                 WinRTXamlConnectionDeclaration(2, "Microsoft.UI.Xaml.Controls.ControlTemplate", null, location, emptyList(),
                     scopeId = 2, isScopeRoot = true, isTemplateChild = true,
-                    dataTypeName = "Microsoft.UI.Xaml.Controls.Button", children = listOf(3, 4)),
+                    dataTypeName = "Microsoft.UI.Xaml.Controls.Button", children = listOf(3, 4, 5)),
                 WinRTXamlConnectionDeclaration(3, "Microsoft.UI.Xaml.Controls.Grid", null, location, emptyList(),
                     scopeId = 2, isTemplateChild = true),
                 WinRTXamlConnectionDeclaration(4, "Microsoft.UI.Xaml.Controls.TextBlock", null, location, emptyList(),
@@ -214,6 +242,17 @@ class XamlTemplateConnectorTest {
                         WinRTXamlBindingDeclaration("Load", "Microsoft.UI.Xaml.Controls.TextBlock", "System.Boolean", "OneWay",
                             WinRTXamlBindingExpression("member", "IsEnabled", receiver = WinRTXamlBindingExpression("root")),
                             location, isLoad = true))),
+                WinRTXamlConnectionDeclaration(5, "Microsoft.UI.Xaml.Controls.Button", null, location,
+                    listOf(WinRTXamlEventDeclaration("Click", "onTemplateClick", "Microsoft.UI.Xaml.Controls.Button",
+                        "Microsoft.UI.Xaml.RoutedEventHandler", location)), scopeId = 2, isTemplateChild = true),
+                WinRTXamlConnectionDeclaration(6, "Microsoft.UI.Xaml.Controls.Button", "fileButton", location,
+                    listOf(WinRTXamlEventDeclaration("Click", "onClick", "Microsoft.UI.Xaml.Controls.Button",
+                        "Microsoft.UI.Xaml.RoutedEventHandler", location)), scopeId = 1, bindings = listOf(
+                        WinRTXamlBindingDeclaration("IsEnabled", "Microsoft.UI.Xaml.Controls.Button", "System.Boolean", "OneTime",
+                            WinRTXamlBindingExpression("member", "PageEnabled", receiver = WinRTXamlBindingExpression("root")), location),
+                        WinRTXamlBindingDeclaration("Click", "Microsoft.UI.Xaml.Controls.Button", "Microsoft.UI.Xaml.RoutedEventHandler", "OneTime",
+                            WinRTXamlBindingExpression("member", "BoundClick", receiver = WinRTXamlBindingExpression("root")), location,
+                            isEvent = true))),
             ))), emptyList())
         val declarations = File(root, "declarations.json").apply { writeText(WinRTXamlDeclarations.canonicalText(index)) }
         val implementation = File(root, "implementation.json").apply { writeText(buildJsonObject {

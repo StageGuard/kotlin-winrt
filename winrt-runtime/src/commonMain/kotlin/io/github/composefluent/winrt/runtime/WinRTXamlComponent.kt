@@ -1,5 +1,10 @@
 package io.github.composefluent.winrt.runtime
 
+/** CSharpPagePass2 keeps the file binding connector separate from ordinary event connections. */
+interface WinRTXamlPageBindingOwner {
+    fun _kotlinXamlConnectBindings(connectionId: Int, target: Any?)
+}
+
 /** Managed lifecycle only; this interface is not a WinRT interface and has no CCW entry. */
 interface WinRTXamlComponent {
     /** Override and call super first before accessing connected XAML elements. */

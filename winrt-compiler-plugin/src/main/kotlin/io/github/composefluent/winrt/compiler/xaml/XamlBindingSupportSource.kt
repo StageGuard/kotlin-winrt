@@ -6,9 +6,29 @@ import kotlin.io.path.writeText
 
 /** The three projected interfaces match CSharpPagePass2's generated template binding class. */
 internal fun writeXamlBindingSupportSource(root: Path, assemblyName: String? = null) {
-    val className = "KotlinXamlBindingScopeConnector" + assemblyName?.replace(Regex("[^A-Za-z0-9_]"), "_")?.let { "_$it" }.orEmpty()
+    val suffix = assemblyName?.replace(Regex("[^A-Za-z0-9_]"), "_")?.let { "_$it" }.orEmpty()
+    val className = "KotlinXamlBindingScopeConnector$suffix"
     val file = root.resolve("io/github/composefluent/winrt/generated/xaml/$className.kt")
     Files.createDirectories(file.parent)
+    val pageClassName = "KotlinXamlPageBindingConnector$suffix"
+    file.resolveSibling("$pageClassName.kt").writeText("""
+        package io.github.composefluent.winrt.generated.xaml
+
+        import io.github.composefluent.winrt.runtime.*
+        import microsoft.ui.xaml.markup.IComponentConnector
+
+        // The SDK invokes ordinary Connect and binding Connect independently.
+        // Kotlin's native composition owner retains the live page. Forward
+        // weakly, as template scopes do, to avoid a COM/managed ownership cycle.
+        internal class $pageClassName(owner: WinRTXamlPageBindingOwner) : IComponentConnector {
+            private val owner = WeakReference(owner)
+            override fun connect(connectionId: Int, target: Any?) {
+                owner.tryGetTarget()?._kotlinXamlConnectBindings(connectionId, target)
+            }
+            override fun getBindingConnector(connectionId: Int, target: Any?): IComponentConnector? =
+                owner.tryGetTarget()?.asWinRT<IComponentConnector>()?.getBindingConnector(connectionId, target)
+        }
+    """.trimIndent() + "\n")
     file.writeText("""
         package io.github.composefluent.winrt.generated.xaml
 

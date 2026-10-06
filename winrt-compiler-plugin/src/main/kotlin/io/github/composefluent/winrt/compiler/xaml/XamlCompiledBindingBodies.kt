@@ -320,10 +320,6 @@ internal class XamlCompiledBindingBodies(
         val connect = method(klass, xamlScopeConnectName)
         connect.body = DeclarationIrBuilder(pluginContext, connect.symbol).irBlockBody {
             val parameters = connect.parameters.filter { it.kind == IrParameterKind.Regular }
-            +irCall(method(klass, xamlConnectName).symbol).apply {
-                dispatchReceiver = irGet(requireNotNull(connect.dispatchReceiverParameter))
-                arguments[1] = irGet(parameters[1]); arguments[2] = irGet(parameters[2])
-            }
             for ((id, connections) in groups) +irIfThen(pluginContext.irBuiltIns.unitType,
                 irEquals(irGet(parameters[1]), irInt(id)), irBlock {
                     for (connection in connections.filter { it.phase != 0 }) +irCall(registerPhase.symbol).apply {
