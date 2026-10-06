@@ -169,6 +169,25 @@ abstract class WindowsExtension @Inject constructor(
         .convention(WinAppConfigurationDefaults.WINDOWS_SDK_TOOLS_VERSION)
 
     val applicationEnabled: Property<Boolean> = objects.property(Boolean::class.java).convention(false)
+
+    /** The forked compiler package; local overrides use the same versioned protocol. */
+    @get:Nested
+    val xaml: WinRTXamlConfiguration = objects.newInstance(WinRTXamlConfiguration::class.java).apply {
+        val projectDirectory = project.layout.projectDirectory
+        compilerDirectory.convention(project.providers.gradleProperty("kotlinWinRT.xaml.compilerDirectory").map { projectDirectory.dir(it) })
+        genXbfDirectory.convention(project.providers.gradleProperty("kotlinWinRT.xaml.genXbfDirectory").map { projectDirectory.dir(it) })
+        compilerVersion.convention(project.providers.gradleProperty("kotlinWinRT.xaml.version").orElse("0.1.0-preview.6"))
+        archiveSha256.convention(project.providers.gradleProperty("kotlinWinRT.xaml.sha256").orElse(
+            "7718088e70e1d4e95446e0b1e6891fcce09ab70c82ba3ae6027d6aaa43fbc628",
+        ))
+        archiveUrl.convention(compilerVersion.map { version ->
+            "https://github.com/compose-fluent/microsoft-ui-xaml/releases/download/kotlin-xamlc-v$version/kotlin-xamlc-$version-win-x64.zip"
+        })
+        exportLibrarySchema.convention(project.providers.gradleProperty("kotlinWinRT.xaml.exportLibrarySchema")
+            .map(String::toBoolean).orElse(true))
+    }
+
+    fun xaml(action: Action<in WinRTXamlConfiguration>) = action.execute(xaml)
     /** Stable namespace owned by this module's generated AppX resource accessor. */
     val appxResourcePackageName: Property<String> = objects.property(String::class.java).convention(
         defaultAppxResourcePackageName(project.name),
@@ -212,6 +231,20 @@ abstract class WindowsExtension @Inject constructor(
     internal val nugetConfigDirectory get() = packageReferences.nugetConfigDirectory
     internal val nugetPackages get() = packageReferences.nugetPackages
     internal val runtimeAssets get() = application.runtimeAssets
+}
+
+abstract class WinRTXamlConfiguration @Inject constructor(objects: ObjectFactory) {
+    val compilerVersion: Property<String> = objects.property(String::class.java)
+    val archiveSha256: Property<String> = objects.property(String::class.java)
+    val archiveUrl: Property<String> = objects.property(String::class.java)
+    val compilerDirectory: DirectoryProperty = objects.directoryProperty()
+    val genXbfDirectory: DirectoryProperty = objects.directoryProperty()
+    val minimumWindowsVersion: Property<String> = objects.property(String::class.java).convention("10.0.19041.0")
+    /**
+     * Whether a library without XAML exports a XAML schema of its public classes, which takes a
+     * second compilation of its sources. A library whose classes no markup names can do without.
+     */
+    val exportLibrarySchema: Property<Boolean> = objects.property(Boolean::class.java)
 }
 
 abstract class WinAppConfiguration @Inject constructor(
@@ -265,6 +298,8 @@ abstract class WinAppOptions @Inject constructor(
     /** Defaults to the module's selected Windows SDK; may describe a separately tested OS version. */
     val maxVersionTested: Property<String> = objects.property(String::class.java)
     val mainClass: Property<String> = objects.property(String::class.java)
+    /** Win32 .ico file embedded in the JVM launcher or Kotlin/Native executable. */
+    val launcherIcon: RegularFileProperty = objects.fileProperty()
     val console: Property<Boolean> = objects.property(Boolean::class.java).convention(false)
     val generateProjectPri: Property<Boolean> = objects.property(Boolean::class.java).convention(true)
     val projectPriIndexName: Property<String> = objects.property(String::class.java).convention("")
@@ -336,6 +371,7 @@ abstract class WinAppOptions @Inject constructor(
         minWindowsVersion.convention(defaults.minWindowsVersion)
         maxVersionTested.convention(defaults.maxVersionTested)
         mainClass.convention(defaults.mainClass)
+        launcherIcon.convention(defaults.launcherIcon)
         console.convention(defaults.console)
         generateProjectPri.convention(defaults.generateProjectPri)
         projectPriIndexName.convention(defaults.projectPriIndexName)

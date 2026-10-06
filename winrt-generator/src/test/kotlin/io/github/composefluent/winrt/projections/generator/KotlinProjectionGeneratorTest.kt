@@ -59,6 +59,46 @@ import kotlin.io.path.isRegularFile
 
 class KotlinProjectionGeneratorTest {
     @Test
+    fun generator_emits_struct_field_equality_and_consistent_hashes() {
+        // CsWinRT code_writers.h: write_struct's field equality and XOR hash.
+        fun struct(name: String, vararg fields: WinRTFieldDefinition) = WinRTTypeDefinition(
+            namespace = "Sample.Values", name = name, kind = WinRTTypeKind.Struct,
+            fields = fields.toList(),
+        )
+        val model = WinRTMetadataModel(namespaces = listOf(WinRTNamespace("Sample.Values", listOf(
+            struct("Value", WinRTFieldDefinition("Other", "Int32")),
+            struct("Nested", WinRTFieldDefinition("Value", "Sample.Values.Value")),
+            struct("Floating", WinRTFieldDefinition("Single", "Single"), WinRTFieldDefinition("Double", "Double")),
+            struct("LongFields",
+                WinRTFieldDefinition("AFieldNameLongEnoughToWrapTheGeneratedComparisonAndHash", "Double"),
+                WinRTFieldDefinition("ZFieldNameLongEnoughToWrapTheGeneratedComparisonAndHash", "Int32")),
+            struct("Empty"),
+        ))))
+        val files = KotlinProjectionGenerator().generate(model).associateBy { it.relativePath.substringAfterLast('/') }
+        val value = files.getValue("Value.kt").contents.normalizedSource()
+        val nested = files.getValue("Nested.kt").contents.normalizedSource()
+        val floating = files.getValue("Floating.kt").contents.normalizedSource()
+        val longFields = files.getValue("LongFields.kt").contents.normalizedSource()
+        val empty = files.getValue("Empty.kt").contents.normalizedSource()
+        assertTrue(value, value.contains("override fun equals(other: Any?): Boolean = (other is Value && this.other == other.other)"))
+        assertTrue(value, value.contains("override fun hashCode(): Int = (this.other.hashCode())"))
+        assertTrue(nested, nested.contains("this.`value` == other.`value`"))
+        assertTrue(nested, nested.contains("this.`value`.hashCode()"))
+        assertTrue(floating, floating.contains("this.single == other.single"))
+        assertTrue(floating, floating.contains("this.double == other.double"))
+        assertTrue(floating, floating.contains("(if (this.single == 0f) 0 else this.single.hashCode())"))
+        assertTrue(floating, floating.contains("(if (this.double == 0.0) 0 else this.double.hashCode())"))
+        assertTrue(floating, floating.contains(" xor "))
+        assertFalse(floating, floating.contains("this === other"))
+        assertTrue(longFields, longFields.contains("override fun equals(other: Any?): Boolean = (other is LongFields"))
+        assertTrue(longFields, longFields.contains("== other.zFieldNameLongEnoughToWrapTheGeneratedComparisonAndHash)"))
+        assertTrue(longFields, longFields.contains("override fun hashCode(): Int = ((if"))
+        assertTrue(longFields, longFields.contains("xor this.zFieldNameLongEnoughToWrapTheGeneratedComparisonAndHash.hashCode())"))
+        assertTrue(empty, empty.contains("override fun equals(other: Any?): Boolean = (other is Empty)"))
+        assertTrue(empty, empty.contains("override fun hashCode(): Int = (0)"))
+    }
+
+    @Test
     fun generator_rolls_back_owned_struct_writes() {
         // CsWinRT code_writers.h: struct CreateMarshaler's partial-initialization rollback.
         fun struct(name: String, vararg fields: WinRTFieldDefinition) = WinRTTypeDefinition(
@@ -4592,7 +4632,9 @@ class KotlinProjectionGeneratorTest {
         assertFalse(jsonObject, jsonObject.contains("override val nativeObject"))
         assertTrue(jsonObject, jsonObject.contains("fun getNamedString(name: String): String"))
         assertTrue(jsonObject, jsonObject.contains("fun setNamedValue(name: String, `value`: JsonValue)"))
-        assertTrue(jsonObject, jsonObject.contains("nativeObject.pointer"))
+        // CsWinRT code_writers.h compares runtime classes through ThisPtr on the default interface.
+        assertTrue(jsonObject, jsonObject.contains("_defaultInterface.pointer == other._defaultInterface.pointer"))
+        assertTrue(jsonObject, jsonObject.contains("_defaultInterface.pointer.hashCode()"))
         assertTrue(jsonObject, jsonObject.contains("fun parse(json: String): JsonObject"))
         assertFalse(jsonObject, jsonObject.contains("fun parse(json: String): JsonObject = error(\"WinRT ABI binding is unavailable\")"))
         assertTrue(jsonObject, jsonObject.projectionCallSiteCount() > 0)
@@ -7661,8 +7703,21 @@ class KotlinProjectionGeneratorTest {
         assertTrue(interfaceContents, interfaceContents.contains("private class NativeProjection("))
         assertTrue(interfaceContents, interfaceContents.contains("override fun close()"))
         assertTrue(interfaceContents, interfaceContents.projectionCallSiteCount() > 0)
-        assertTrue(interfaceContents, interfaceContents.contains("val __winrtCallSiteArgument0: ComObjectReference = nativeObject"))
-        assertTrue(interfaceContents, interfaceContents.contains("val __winrtCallSiteArgument1: Int = 6"))
+        // IClosable is a required interface with its own vtable: Close is slot 6 of the IClosable
+        // reference, not of IWidget, whose slot 6 is get_Child.
+        // Qualified, because the interface's own Metadata.IID is in scope there.
+        assertTrue(
+            interfaceContents,
+            interfaceContents.replace(Regex("\\s+"), "").contains(
+                "acquireInterfaceReference(nativeObject,io.github.composefluent.winrt.runtime.IID.IDisposable)",
+            ),
+        )
+        val closeBody = interfaceContents
+            .substringAfter("override fun close()")
+            .substringBefore("\n    }")
+        assertTrue(closeBody, closeBody.contains("val __winrtCallSiteArgument0: ComObjectReference = __iClosable"))
+        assertFalse(closeBody, closeBody.contains("= nativeObject"))
+        assertTrue(closeBody, closeBody.contains("val __winrtCallSiteArgument1: Int = 6"))
         assertTrue(interfaceContents, interfaceContents.contains("winRTProjectionCallSiteArguments"))
         assertFalse(interfaceContents, interfaceContents.contains("WinRTProjectionIntrinsic.callUnit("))
         assertFalse(interfaceContents, interfaceContents.contains("ComVtableInvoker.invoke(instance = nativeObject.pointer"))
@@ -9781,10 +9836,10 @@ class KotlinProjectionGeneratorTest {
         assertTrue(widgetContents.contains("override fun equals(other: Any?): Boolean"))
         assertTrue(widgetContents.contains("if (other !is Widget)"))
         assertTrue(widgetContents.contains("return false"))
-        assertTrue(widgetContents.contains("nativeObject.pointer =="))
-        assertTrue(widgetContents.contains("other.nativeObject.pointer"))
+        assertTrue(widgetContents.contains("_defaultInterface.pointer =="))
+        assertTrue(widgetContents.contains("other._defaultInterface.pointer"))
         assertTrue(widgetContents.contains("override fun hashCode(): Int"))
-        assertTrue(widgetContents.contains("nativeObject.pointer.hashCode()"))
+        assertTrue(widgetContents.contains("_defaultInterface.pointer.hashCode()"))
         assertTrue(customIdentityContents.contains("override fun toString(): String"))
         assertTrue(customIdentityContents.contains("override fun equals(other: Any?): Boolean"))
         assertTrue(customIdentityContents, customIdentityContents.contains("return false"))
@@ -15834,9 +15889,12 @@ class KotlinProjectionGeneratorTest {
             ),
         )
 
-        val filesByName = KotlinProjectionGenerator().generate(model).associateBy { it.relativePath.substringAfterLast('/') }
+        val filesByName = KotlinProjectionGenerator(emitSupportFiles = true)
+            .generate(model)
+            .associateBy { it.relativePath.substringAfterLast('/') }
         val interfaceContents = filesByName.getValue("ITypeHost.kt").contents
         val classContents = filesByName.getValue("TypeHost.kt").contents
+        val supportContents = filesByName.getValue("WinRTModulePlatformAbiCall.kt").contents
 
         assertTrue(interfaceContents, interfaceContents.contains("import kotlin.reflect.KClass"))
         assertTrue(interfaceContents, interfaceContents.contains("fun currentType(): KClass<*>?"))
@@ -15852,6 +15910,23 @@ class KotlinProjectionGeneratorTest {
             assertTrue(classContents, classContents.contains("WinRTSystemProjectionMarshalers.disposeTypeNameAbi(__typeAbi)"))
         }
         assertFalse(classContents, classContents.contains("TypeName.Metadata"))
+        // CsWinRT Type.Pinnable input is separate from owned Type.CopyManaged / DisposeAbi.
+        assertTrue(supportContents, supportContents.contains("kind = WinRTProjectionAbiTypeKind.STRUCT"))
+        assertTrue(supportContents, supportContents.contains("size = 16"))
+        assertTrue(supportContents, supportContents.contains("alignment = 8"))
+        assertFalse(supportContents, supportContents.contains("consumesOwnedAbi = true"))
+        val typeNameInputCall = "WinRTSystemProjectionMarshalers.createTypeNameInputMarshaler("
+        assertTrue(supportContents, supportContents.contains(typeNameInputCall))
+        val typeNameInputCodec = supportContents.substringBefore(typeNameInputCall)
+            .substringAfterLast("@WinRTProjectionAbiCodec(")
+        assertTrue(typeNameInputCodec, typeNameInputCodec.contains("role = WinRTProjectionAbiCodecRole.CREATE_MARSHALER"))
+        assertTrue(typeNameInputCodec, typeNameInputCodec.lowercase().contains("type = \"windows.ui.xaml.interop.typename\""))
+        assertTrue(supportContents, supportContents.contains("role = WinRTProjectionAbiCodecRole.FROM_ABI"))
+        assertTrue(supportContents, supportContents.contains("WinRTSystemProjectionMarshalers.typeNameFromAbi("))
+        assertTrue(supportContents, supportContents.contains("role = WinRTProjectionAbiCodecRole.COPY_TO_ABI"))
+        assertTrue(supportContents, supportContents.contains("WinRTSystemProjectionMarshalers.copyTypeNameTo("))
+        assertTrue(supportContents, supportContents.contains("role = WinRTProjectionAbiCodecRole.DISPOSE_ABI"))
+        assertTrue(supportContents, supportContents.contains("WinRTSystemProjectionMarshalers.disposeTypeNameAbi("))
     }
 
     @Test
@@ -17324,6 +17399,17 @@ class KotlinProjectionGeneratorTest {
         assertTrue(supportContents, supportContents.contains("role = WinRTProjectionAbiCodecRole.FROM_ABI"))
         assertTrue(supportContents, supportContents.contains("WinRTObjectMarshaller.fromOwnedAbi(__abi)"))
         assertTrue(supportContents, supportContents.contains("consumesOwnedAbi = true"))
+        // The converter's TypeName input owns its input factory, not its output/array ABI policy.
+        val typeNameInputCall = "WinRTSystemProjectionMarshalers.createTypeNameInputMarshaler("
+        assertTrue(supportContents, supportContents.contains(typeNameInputCall))
+        val typeNameInputCodec = supportContents.substringBefore(typeNameInputCall)
+            .substringAfterLast("@WinRTProjectionAbiCodec(")
+        assertTrue(typeNameInputCodec, typeNameInputCodec.contains("role = WinRTProjectionAbiCodecRole.CREATE_MARSHALER"))
+        assertTrue(typeNameInputCodec, typeNameInputCodec.lowercase().contains("type = \"windows.ui.xaml.interop.typename\""))
+        assertTrue(supportContents, supportContents.contains("role = WinRTProjectionAbiCodecRole.COPY_TO_ABI"))
+        assertTrue(supportContents, supportContents.contains("WinRTSystemProjectionMarshalers.copyTypeNameTo("))
+        assertTrue(supportContents, supportContents.contains("role = WinRTProjectionAbiCodecRole.DISPOSE_ABI"))
+        assertTrue(supportContents, supportContents.contains("WinRTSystemProjectionMarshalers.disposeTypeNameAbi("))
         assertFalse(contents.contains("PlatformAbi.allocatePointerSlot(__scope)"))
         assertFalse(contents.contains("ComVtableInvoker.invokeGenericArgs"))
     }

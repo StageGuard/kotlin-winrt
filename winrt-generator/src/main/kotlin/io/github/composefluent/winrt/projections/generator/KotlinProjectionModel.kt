@@ -36,6 +36,7 @@ import io.github.composefluent.winrt.metadata.WinRTMetadataValidationOptions
 import io.github.composefluent.winrt.metadata.WinRTMetadataSemanticHelpers
 import io.github.composefluent.winrt.metadata.requireValidForProjection
 import io.github.composefluent.winrt.metadata.semanticHelpers
+import io.github.composefluent.winrt.metadata.winRTMappedTypeForAbiName
 import io.github.composefluent.winrt.metadata.isWinRTObjectTypeName
 import io.github.composefluent.winrt.runtime.ActivationFactory
 import io.github.composefluent.winrt.runtime.ActivationFactoryReference
@@ -338,6 +339,9 @@ internal val WINRT_EVENT_SOURCE_CLASS_NAME = EventSource::class.asClassName()
 internal val WINRT_EVENT_PROJECTION_HELPERS_CLASS_NAME =
     ClassName("io.github.composefluent.winrt.projections.support", "WinRTEventProjectionHelpers")
 internal val WINRT_CLOSABLE_OBJECT_CLASS_NAME = ClassName("windows.foundation", "WinRTClosableObject")
+
+// The IClosable reference of an interface native projection; owner caches use one underscore.
+internal const val NATIVE_PROJECTION_CLOSABLE_REFERENCE_NAME = "__iClosable"
 internal val WINRT_COMPOSABLE_OBJECT_CLASS_NAME = WinRTComposableObject::class.asClassName()
 internal val WINRT_COMPOSABLE_OBJECT_REFERENCE_CLASS_NAME = WinRTComposableObjectReference::class.asClassName()
 internal val WINRT_COMPOSABLE_FACTORY_RESULT_CLASS_NAME = WinRTComposableFactoryResult::class.asClassName()
@@ -348,8 +352,10 @@ internal val ABSTRACT_MAP_CLASS_NAME = AbstractMap::class.asClassName()
 internal val ABSTRACT_MUTABLE_LIST_CLASS_NAME = ClassName("kotlin.collections", "AbstractMutableList")
 internal val ABSTRACT_MUTABLE_MAP_CLASS_NAME = ClassName("kotlin.collections", "AbstractMutableMap")
 internal val ABSTRACT_MUTABLE_SET_CLASS_NAME = ClassName("kotlin.collections", "AbstractMutableSet")
-internal val KOTLIN_INSTANT_CLASS_NAME = ClassName("kotlin.time", "Instant")
-internal val KOTLIN_DURATION_CLASS_NAME = ClassName("kotlin.time", "Duration")
+internal val KOTLIN_INSTANT_CLASS_NAME = ClassName.bestGuess(
+    requireNotNull(winRTMappedTypeForAbiName("Windows.Foundation.DateTime")?.kotlinQualifiedName))
+internal val KOTLIN_DURATION_CLASS_NAME = ClassName.bestGuess(
+    requireNotNull(winRTMappedTypeForAbiName("Windows.Foundation.TimeSpan")?.kotlinQualifiedName))
 internal val KOTLIN_DURATION_ALIAS_CLASS_NAME = ClassName("", "TimeDuration")
 internal val KCLASS_STAR_TYPE_NAME = KClass::class.asClassName().parameterizedBy(STAR)
 internal val AUTO_CLOSEABLE_CLASS_NAME = ClassName("kotlin", "AutoCloseable")
@@ -848,6 +854,12 @@ internal val MAPPED_TYPES: List<KotlinProjectionMappedType> = listOf(
             "disposeTypeNameAbi",
             abiLayoutExpression = CodeBlock.of("%T.TYPE_NAME", NATIVE_ABI_LAYOUT_CLASS_NAME),
             alignmentBytes = 8,
+        ),
+        callSiteAdapter = KotlinProjectionMappedCallSiteAdapter(
+            runtimeProjectionClassName = WINRT_SYSTEM_PROJECTION_MARSHALERS_CLASS_NAME,
+            fromAbiFunctionName = "typeNameFromAbi",
+            createMarshalerFunctionName = "createTypeNameInputMarshaler",
+            inputFactoryReturnType = ClassName("io.github.composefluent.winrt.runtime", "WinRTProjectionMarshaler"),
         ),
         simpleAbiLookup = true,
         descriptionName = "TypeName",

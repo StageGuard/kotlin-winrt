@@ -1,7 +1,37 @@
+import java.security.MessageDigest
+
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
     id("io.github.compose-fluent.windows-toolkit")
     id("com.google.devtools.ksp") version "2.3.10"
+}
+
+// KSP owns the source viewer, while XamlCompiler owns compilation. Include markup
+// bytes in processor options so a XAML-only edit also invalidates KSP's own cache.
+abstract class GalleryXamlSourceArguments : org.gradle.process.CommandLineArgumentProvider {
+    @get:org.gradle.api.tasks.Internal
+    abstract val sourceRoot: org.gradle.api.file.DirectoryProperty
+
+    @get:org.gradle.api.tasks.InputFiles
+    @get:org.gradle.api.tasks.PathSensitive(org.gradle.api.tasks.PathSensitivity.RELATIVE)
+    abstract val sources: org.gradle.api.file.ConfigurableFileCollection
+
+    override fun asArguments(): Iterable<String> {
+        val root = sourceRoot.get().asFile
+        val digest = MessageDigest.getInstance("SHA-256")
+        sources.files.sortedBy { it.relativeTo(root).invariantSeparatorsPath }.forEach { file ->
+            digest.update(file.relativeTo(root).invariantSeparatorsPath.toByteArray(Charsets.UTF_8))
+            digest.update(0.toByte())
+            digest.update(file.readBytes())
+            digest.update(0.toByte())
+        }
+        return listOf("gallery.xamlSourceFingerprint=" + digest.digest().joinToString("") { "%02x".format(it) })
+    }
+}
+
+val galleryXamlSourceArguments = objects.newInstance(GalleryXamlSourceArguments::class.java).apply {
+    sourceRoot.set(layout.projectDirectory.dir("src/winuiMain/kotlin"))
+    sources.from(sourceRoot.map { it.asFileTree.matching { include("**/*.xaml", "**/SampleDefinitions/**/*.txt") } })
 }
 
 val gallerySigningCertificateThumbprint =
@@ -18,6 +48,7 @@ tasks.named<io.github.composefluent.windows.toolkit.gradle.GenerateWinRTProjecti
 
 ksp {
     arg("gallery.repositoryRoot", rootProject.layout.projectDirectory.asFile.absolutePath)
+    arg(galleryXamlSourceArguments)
 }
 tasks.matching { it.name.startsWith("ksp") }.configureEach {
     dependsOn("generateWinRTProjections", "mergeWinRTCompilerSupport")
@@ -36,6 +67,8 @@ kotlin {
     sourceSets {
         getByName("winuiMain").dependencies {
             implementation(project(":winui-gallery:code-document"))
+            implementation(project(":winui-gallery:models"))
+            implementation(project(":winui-gallery:resources"))
         }
         commonTest.dependencies { implementation(kotlin("test")) }
     }
@@ -80,6 +113,7 @@ tasks.named<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>("compileKotlinWinui
 windows {
     application {
         mainClass = "io.github.composefluent.winrt.gallery.MainKt"
+        launcherIcon = layout.projectDirectory.file("src/winuiMain/appxResources/Assets/Tiles/GalleryIcon.ico")
         minWindowsVersion = "10.0.19041.0"
         if (!gallerySigningCertificateThumbprint.isNullOrBlank()) {
             signPackage.set(true)
@@ -95,7 +129,7 @@ windows {
         // Match the installed WinUI 3 Gallery's Windows App SDK 2.5 runtime.
         nugetPackage("Microsoft.WindowsAppSDK", "2.5.1")
         nugetPackage("Microsoft.Graphics.Win2D", "1.4.0")
-        nugetPackage("WinUIEssential.WinUI3", "1.8.0")
+        nugetPackage("WinUIEssential.WinUI3", "1.8.2")
         // Gallery covers the control families, including programmatic templates,
         // layout overrides and composition animations. Generate these namespaces
         // directly rather than maintaining a second, incomplete control catalog.
@@ -108,7 +142,7 @@ windows {
             "Microsoft.UI.Xaml.Media.Animation", "Microsoft.UI.Xaml.Hosting",
             "Microsoft.UI.Xaml.Automation", "Microsoft.UI.Xaml.Automation.Peers",
             "Microsoft.UI.Composition", "Microsoft.UI.Composition.SystemBackdrops",
-            "Microsoft.UI.Windowing", "Microsoft.UI.Text", "Microsoft.UI.System", "Microsoft.UI.Content",
+            "Microsoft.UI.Windowing", "Microsoft.UI.Text", "Microsoft.UI.System", "Microsoft.UI.Content", "Microsoft.UI.Input",
             "Microsoft.Graphics.Canvas.Geometry",
             "Microsoft.Windows.Storage", "Microsoft.Windows.Storage.Pickers",
             "Microsoft.Windows.AppNotifications", "Microsoft.Windows.AppNotifications.Builder",
@@ -118,7 +152,7 @@ windows {
             "Windows.Media.Capture", "Windows.Media.Capture.Frames",
             "Windows.Media.Core", "Windows.Media.Playback", "Windows.Media.MediaProperties",
             "Windows.Storage", "Windows.Storage.Streams", "Windows.Storage.FileProperties",
-            "Windows.Devices.Geolocation", "Windows.Globalization",
+            "Windows.Devices.Geolocation", "Windows.Globalization", "Windows.Data.Xml.Dom",
             "Windows.Globalization.NumberFormatting",
             "Windows.Globalization.DateTimeFormatting", "Windows.UI.ViewManagement",
         ).forEach(::namespace)
@@ -151,7 +185,8 @@ windows {
             "Windows.Storage.ApplicationData", "Windows.System.Launcher",
             "WinUI3Package.SettingsCard", "WinUI3Package.SettingsExpander",
             "WinUI3Package.WindowEx", "WinUI3Package.TenMicaBackdrop",
-            "WinUI3Package.ModernStandardWindowContextMenu",
+            "WinUI3Package.MicaBackdropWithFallback", "WinUI3Package.ModernStandardWindowContextMenu",
+            "WinUI3Package.WindowCaptionButtonThemeWorkaround", "WinUI3Package.ModernWindowCaptionButtonToolTip",
         ).forEach(::type)
     }
 }

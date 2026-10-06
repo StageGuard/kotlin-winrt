@@ -4,8 +4,54 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import kotlin.test.assertSame
+import microsoft.ui.xaml.interop.NotifyCollectionChangedAction
+import microsoft.ui.xaml.interop.NotifyCollectionChangedEventArgs
 
 class WinRTBindableProjectionTest {
+    @Test
+    fun object_marshaling_keeps_observable_vector_and_notifications_on_the_same_ccw() {
+        // CsWinRT ComWrappersSupport.GetInterfaceTableEntries exposes IList and
+        // INotifyCollectionChanged together; ItemsSourceView must not snapshot IEnumerable.
+        val values = WinRTObservableList<Any?>(listOf("old"))
+        val changes = mutableListOf<NotifyCollectionChangedAction>()
+        WinRTObjectMarshaller.createMarshaler(values).use { marshaler ->
+            IUnknownReference(marshaler.abi.asRawComPtr(), preventReleaseOnDispose = true).use { objectReference ->
+                objectReference.queryInterface(IID.MUX_INotifyCollectionChanged).getOrThrow().use { notifier ->
+                    assertTrue(notifier.sameIdentity(objectReference))
+                    WinRTDelegateBridge.createUnitDelegate(
+                        IID.MUX_NotifyCollectionChangedEventHandler,
+                        listOf(WinRTDelegateValueKind.OBJECT, WinRTDelegateValueKind.OBJECT),
+                    ) { args ->
+                        assertSame(values, args[0])
+                        changes += (args[1] as NotifyCollectionChangedEventArgs).action
+                    }.use { handle ->
+                        handle.createReference().use { handler ->
+                            val token = StandardDelegates.addEventHandler(notifier, 6, handler)
+                            try {
+                                WinRTBindableVectorProjection.fromAbi(objectReference).use { vector ->
+                                    assertTrue(vector.nativeObject.sameIdentity(notifier))
+                                    values.add("new")
+                                    assertEquals(listOf("old", "new"), vector.toList())
+                                    values.removeAt(0)
+                                    assertEquals(listOf("new"), vector.toList())
+                                    vector[0] = "replacement"
+                                    assertEquals(listOf<Any?>("replacement"), values)
+                                }
+                            } finally {
+                                StandardDelegates.removeEventHandler(notifier, 7, token)
+                            }
+                            values.clear()
+                            assertEquals(
+                                listOf(NotifyCollectionChangedAction.Add, NotifyCollectionChangedAction.Remove, NotifyCollectionChangedAction.Replace),
+                                changes,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     @Test
     fun object_marshaling_exposes_bindable_enumeration_and_preserves_managed_identity() {
         // CsWinRT Bindable.net5.cs IEnumerable.Do_Abi_First_0 operates on the original CCW.

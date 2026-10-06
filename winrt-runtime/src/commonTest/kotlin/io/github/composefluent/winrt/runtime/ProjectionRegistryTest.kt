@@ -6,6 +6,7 @@ import kotlin.jvm.JvmInline
 import kotlin.reflect.KClass
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
@@ -383,6 +384,110 @@ class ProjectionRegistryTest {
             "Windows.Foundation.IReferenceArray`1<Int32>",
             TypeNameSupport.getNameForType(IntArray::class),
         )
+    }
+
+    @Test
+    fun erased_reference_array_guard_preserves_foreign_kclass_contract() {
+        // CsWinRT TypeNameSupport.cs:578–605 owns reference-array name and boxing eligibility.
+        val erasedArrayType = emptyArray<Any?>()::class
+        val nameFailure = IllegalStateException("Foreign KClass name failed")
+        var nameReads = 0
+        var failNameRead = false
+        val foreignType = object : KClass<Any> by Any::class {
+            override val qualifiedName: String?
+                get() {
+                    nameReads += 1
+                    if (failNameRead) throw nameFailure
+                    return "kotlin.Array"
+                }
+
+            override fun equals(other: Any?): Boolean =
+                error("The array guard must not call foreign KClass.equals")
+        }
+
+        assertTrue(isErasedReferenceArrayType(foreignType, erasedArrayType))
+        assertEquals(1, nameReads)
+
+        failNameRead = true
+        val failure = assertFailsWith<IllegalStateException> {
+            isErasedReferenceArrayType(foreignType, erasedArrayType)
+        }
+        assertSame(nameFailure, failure)
+        assertEquals(2, nameReads)
+    }
+
+    @Test
+    fun scoped_type_name_inputs_preserve_nested_values_and_recover_after_call_failure() {
+        // CsWinRT Type.Pinnable / MarshalString.Pinnable keep each name live through its call scope.
+        ComWrappersSupport.clearRegistriesForTests()
+        registerTestTypeDescriptors()
+        try {
+            val callFailure = IllegalStateException("TypeName input call failed")
+            WinRTSystemProjectionMarshalers.createTypeNameInputMarshaler(String::class).use { outer ->
+                assertEquals(String::class, WinRTSystemProjectionMarshalers.typeNameFromAbi(outer.abi))
+                assertEquals(1, PlatformAbi.readInt32(PlatformAbi.slice(outer.abi, 8L, 4L)))
+                val failure = assertFailsWith<IllegalStateException> {
+                    WinRTSystemProjectionMarshalers.createTypeNameInputMarshaler(SampleStruct::class).use { inner ->
+                        assertEquals("Contoso.SampleStruct", NativeStringMarshaller.fromAbi(PlatformAbi.readPointer(inner.abi)))
+                        assertEquals(1, PlatformAbi.readInt32(PlatformAbi.slice(inner.abi, 8L, 4L)))
+                        WinRTSystemProjectionMarshalers.createTypeNameInputMarshaler(null).use { cleared ->
+                            assertTrue(PlatformAbi.isNull(PlatformAbi.readPointer(cleared.abi)))
+                            assertEquals(0, PlatformAbi.readInt32(PlatformAbi.slice(cleared.abi, 8L, 4L)))
+                            assertNull(WinRTSystemProjectionMarshalers.typeNameFromAbi(cleared.abi))
+                            assertEquals(String::class, WinRTSystemProjectionMarshalers.typeNameFromAbi(outer.abi))
+                            assertEquals(SampleStruct::class, WinRTSystemProjectionMarshalers.typeNameFromAbi(inner.abi))
+                            throw callFailure
+                        }
+                    }
+                }
+                assertSame(callFailure, failure)
+                WinRTSystemProjectionMarshalers.createTypeNameInputMarshaler(Int::class).use { reused ->
+                    assertEquals("Int32", NativeStringMarshaller.fromAbi(PlatformAbi.readPointer(reused.abi)))
+                    assertEquals(0, PlatformAbi.readInt32(PlatformAbi.slice(reused.abi, 8L, 4L)))
+                    assertEquals(Int::class, WinRTSystemProjectionMarshalers.typeNameFromAbi(reused.abi))
+                    assertEquals(String::class, WinRTSystemProjectionMarshalers.typeNameFromAbi(outer.abi))
+                }
+            }
+            WinRTSystemProjectionMarshalers.createTypeNameInputMarshaler(SampleStruct::class).use { reused ->
+                assertEquals(SampleStruct::class, WinRTSystemProjectionMarshalers.typeNameFromAbi(reused.abi))
+            }
+        } finally {
+            ComWrappersSupport.clearRegistriesForTests()
+        }
+    }
+
+    @Test
+    fun owned_type_name_copy_outlives_the_borrowed_name_scope() {
+        // CsWinRT Type.FromManaged / CopyManaged create an owned name independent of input Pinnable.
+        ComWrappersSupport.clearRegistriesForTests()
+        registerTestTypeDescriptors()
+        try {
+            PlatformAbi.confinedScope().use { scope ->
+                val owned = PlatformAbi.allocateBytes(scope, 16L, 8L)
+                var copied = false
+                try {
+                    WinRTSystemProjectionMarshalers.createTypeNameInputMarshaler(SampleStruct::class).use { borrowed ->
+                        WinRTSystemProjectionMarshalers.copyTypeNameTo(
+                            WinRTSystemProjectionMarshalers.typeNameFromAbi(borrowed.abi),
+                            owned,
+                        )
+                        copied = true
+                    }
+                    // Reusing borrowed storage must not overwrite the independently owned HSTRING.
+                    WinRTSystemProjectionMarshalers.createTypeNameInputMarshaler(Int::class).use { reused ->
+                        assertEquals(Int::class, WinRTSystemProjectionMarshalers.typeNameFromAbi(reused.abi))
+                        assertEquals("Contoso.SampleStruct", NativeStringMarshaller.fromAbi(PlatformAbi.readPointer(owned)))
+                        assertEquals(1, PlatformAbi.readInt32(PlatformAbi.slice(owned, 8L, 4L)))
+                        assertEquals(SampleStruct::class, WinRTSystemProjectionMarshalers.typeNameFromAbi(owned))
+                    }
+                    assertEquals(SampleStruct::class, WinRTSystemProjectionMarshalers.typeNameFromAbi(owned))
+                } finally {
+                    if (copied) WinRTSystemProjectionMarshalers.disposeTypeNameAbi(owned)
+                }
+            }
+        } finally {
+            ComWrappersSupport.clearRegistriesForTests()
+        }
     }
 
     @Test

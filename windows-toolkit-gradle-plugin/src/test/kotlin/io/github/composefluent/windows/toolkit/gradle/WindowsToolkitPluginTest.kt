@@ -2813,6 +2813,8 @@ class WindowsToolkitPluginTest {
         assertEquals(listOf("Microsoft.UI.Xaml.Application"), merged.map { it.qualifiedName })
         assertEquals("RuntimeClass", merged.single().kind)
         assertEquals(listOf("Microsoft.UI.Xaml.IApplicationOverrides"), merged.single().overridableInterfaces)
+        // SDK metadata remains available to the compiler without claiming an RCW in this library.
+        assertEquals(emptySet<String>(), dependencyProjectedTypeNames(WinRTMetadataModel(emptyList()), listOf(dependencyIdentity.toFile())))
     }
 
     @Test
@@ -11813,6 +11815,107 @@ class WindowsToolkitPluginTest {
             "consumer/build/generated/kotlin-winrt/identity/kotlin-winrt.json",
         ).toFile()
         assertEquals(emptyList<String>(), readProjectionSurfaceIdentity(consumerIdentity).sourceAdditions)
+    }
+
+    @Test
+    fun in_task_generation_selects_windows_sdk_source_additions_that_no_dependency_owns() {
+        // A project identity dependency keeps the consumer off the prepared path, so the
+        // generation task itself has to know that a Windows SDK is declared.
+        val windowsSdkVersion = "10.0.26100.0"
+        val projectDir = Files.createTempDirectory("kotlin-winrt-in-task-com-interop-")
+        writeMinimalGradleFixture(projectDir, "kotlin-winrt-in-task-com-interop")
+        writeGradleFile(
+            projectDir.resolve("settings.gradle.kts"),
+            """
+            pluginManagement {
+                repositories {
+                    gradlePluginPortal()
+                    mavenCentral()
+                }
+            }
+            dependencyResolutionManagement {
+                repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+                repositories {
+                    mavenCentral()
+                }
+            }
+            rootProject.name = "kotlin-winrt-in-task-com-interop"
+            include("producer", "consumer")
+            """.trimIndent(),
+        )
+        writeGradleFile(
+            projectDir.resolve("producer/build.gradle"),
+            """
+            plugins {
+                id "io.github.compose-fluent.windows-toolkit"
+            }
+
+            windows {
+                packageReferences {
+                    windowsSdk("$windowsSdkVersion", false, false)
+                    type "Windows.Graphics.Display.DisplayInformation"
+                }
+            }
+
+            tasks.named("generateWinRTProjections") {
+                generatorWorkerJvmArgs.set(["-Xmx512m", "-XX:+UseSerialGC", "-Dfile.encoding=UTF-8"])
+            }
+            """.trimIndent(),
+        )
+        writeGradleFile(
+            projectDir.resolve("consumer/build.gradle"),
+            """
+            plugins {
+                id "io.github.compose-fluent.windows-toolkit"
+            }
+
+            windows {
+                packageReferences {
+                    windowsSdk("$windowsSdkVersion", false, false)
+                    type "Windows.UI.ViewManagement.InputPane"
+                }
+            }
+
+            dependencies {
+                add(
+                    "kotlinWinRTLibraryDependencyIdentity",
+                    project(path: ":producer"),
+                )
+            }
+
+            tasks.named("generateWinRTProjections") {
+                generatorWorkerJvmArgs.set(["-Xmx512m", "-XX:+UseSerialGC", "-Dfile.encoding=UTF-8"])
+            }
+            """.trimIndent(),
+        )
+
+        val result = GradleRunner.create()
+            .withProjectDir(projectDir.toFile())
+            .withPluginClasspath()
+            .withArguments(":consumer:generateWinRTIdentity", "--stacktrace", "--max-workers=1")
+            .forwardOutput()
+            .build()
+
+        assertEquals(TaskOutcome.SUCCESS, result.task(":consumer:generateWinRTProjections")?.outcome)
+
+        val consumerRoot = projectDir.resolve("consumer/build/generated/kotlin-winrt/src/jvmMain/kotlin")
+        assertFalse(
+            "The consumer must not be on the prepared path for this test to cover the task",
+            Files.exists(consumerRoot.resolve(".kotlin-winrt-prepared-static-files.tsv")),
+        )
+        assertTrue(
+            "The generation task must generate the COM helper of a type it projects",
+            Files.exists(consumerRoot.resolve("windows/ui/viewmanagement/InputPaneInterop.kt")),
+        )
+        assertFalse(
+            "The consumer must not regenerate the WinRT.Interop helpers that the producer owns",
+            Files.exists(consumerRoot.resolve("winrt/interop/WindowNative.kt")),
+        )
+        val consumerManifest = consumerRoot.resolve("kotlin-winrt-support/source-additions.tsv")
+        assertEquals(
+            listOf("windows.ui.viewmanagement.InputPaneInterop"),
+            readGeneratedSourceAdditionTypeNames(listOf(consumerManifest.toFile())),
+        )
     }
 
     @Test

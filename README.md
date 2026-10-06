@@ -327,6 +327,7 @@ windows {
         mainClass = "sample.MainKt"
         minWindowsVersion = "10.0.19041.0"
         // console = true enables a console window for diagnostics.
+        launcherIcon = layout.projectDirectory.file("src/winuiMain/appxResources/Assets/App.ico")
     }
 
     packageReferences {
@@ -335,6 +336,8 @@ windows {
     }
 }
 ```
+
+`application.launcherIcon` accepts a Win32 `.ico` file, matching C# `ApplicationIcon` and C++ `ICON` resources. The plugin compiles it with the selected Windows SDK's `rc.exe` and embeds it in both the JVM launcher and the `mingwX64` executable. Multi-size ICOs, including PNG-compressed images inside the ICO, are preserved; standalone PNG and SVG files must first be converted to ICO. Named applications inherit this property and may override it. To also use the icon with `AppWindow.setIcon`, include the ICO in `appxResources` and set the window icon separately; AppX logo settings remain independent.
 
 The dual-target project exposes separate JVM and Native task graphs automatically. Run the JVM host with:
 

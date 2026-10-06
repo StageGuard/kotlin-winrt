@@ -42,12 +42,14 @@ internal object GalleryTheme {
         var sourceExampleIndex: Int = 0
         val sampleBodies = mutableListOf<FrameworkElement>()
         val brushes = mutableMapOf<String, Brush>()
+        fun actualTheme(element: FrameworkElement): ElementTheme = sampleBodies.firstOrNull()?.actualTheme ?: element.actualTheme
     }
     internal class SamplePage(val element: FrameworkElement, private val state: SampleState) {
         fun toggleTheme() {
             val bodies = state.sampleBodies.ifEmpty { listOf(element) }
             val next = if (bodies.first().actualTheme == ElementTheme.Dark) ElementTheme.Light else ElementTheme.Dark
             bodies.forEach { it.requestedTheme = next }
+            refreshBrushes(state.brushes, next)
         }
     }
     private val samples = mutableMapOf<FrameworkElement, SampleState>()
@@ -65,11 +67,14 @@ internal object GalleryTheme {
         } finally {
             sampleBeingConstructed = previous
         }
+        state.sampleBodies.forEach { body ->
+            body.actualThemeChanged.add { _, _ -> refreshBrushes(state.brushes, body.actualTheme) }
+        }
         element.loaded.add { _, _ ->
             samples[element] = state
-            refreshBrushes(state.brushes, element.actualTheme)
+            refreshBrushes(state.brushes, state.actualTheme(element))
         }
-        element.actualThemeChanged.add { _, _ -> refreshBrushes(state.brushes, element.actualTheme) }
+        element.actualThemeChanged.add { _, _ -> refreshBrushes(state.brushes, state.actualTheme(element)) }
         element.unloaded.add { _, _ -> samples.remove(element) }
         // The header can change theme before the first Loaded event.
         samples[element] = state
@@ -165,7 +170,7 @@ internal object GalleryTheme {
 
     private fun refresh() {
         refreshBrushes(brushes, root?.actualTheme ?: ElementTheme.Light)
-        samples.forEach { (element, state) -> refreshBrushes(state.brushes, element.actualTheme) }
+        samples.forEach { (element, state) -> refreshBrushes(state.brushes, state.actualTheme(element)) }
         changeListeners.toList().forEach { it() }
     }
 

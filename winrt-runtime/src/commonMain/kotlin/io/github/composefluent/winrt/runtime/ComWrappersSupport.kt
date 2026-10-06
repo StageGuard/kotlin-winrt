@@ -81,6 +81,15 @@ object ComWrappersSupport {
             cachedHosts.releaseCacheRoots()
         }
     private val rcwCache = RcwIdentityCache()
+    // Explicit registrations can associate a plain managed object with a COM
+    // identity. Match CsWinRT's reference-owning registration lifetime without
+    // putting implicitly unboxed (possibly interned) scalar values in this table.
+    private val registeredRcwReferences = WeakKeyStateMap<Any, ComObjectReference> { it.close() }
+    // CLR's native wrapper owns a registered composition. A weak owner proves
+    // its aliases are live without rooting the owner or its managed outer.
+    @OptIn(ExperimentalAtomicApi::class)
+    private val registeredComposableReferences =
+        WeakKeyStateMap<Any, AtomicReference<PlatformManagedWeakReference<WinRTComposableObjectReference>>>()
     private val closedInterfaceRcwCache = ClosedInterfaceRcwIdentityCache()
 
     init {
@@ -229,18 +238,43 @@ object ComWrappersSupport {
         closedInterfaceRcwCache.clear()
     }
 
-    @Suppress("UNCHECKED_CAST")
+    /**
+     * The Kotlin object that already stands for the COM object behind [pointer], if it is a
+     * [expectedType]: a wrapper registered for it, or the managed object of a CCW.
+     *
+     * [pointer] can be any interface of the object. An object that Kotlin composes over a WinRT
+     * base class is registered under the pointers of its creation, but native code hands it back
+     * through whatever interface of the inner object a member returns; only its `IUnknown`, which
+     * is the CCW of the Kotlin object, is the same. CsWinRT queries `IUnknown` before
+     * `FindObject` for that reason (`MarshalInspectable<T>.FromAbi`), so a miss on the pointer
+     * itself is followed by the lookup of the COM identity.
+     */
     fun <T : Any> findObject(
         pointer: RawAddress,
         expectedType: KClass<T>,
     ): T? {
-        val managedValue = findCachedRcw(PlatformAbi.pointerKey(pointer))
-            ?: WinRTInspectableComObject.findManagedValue(pointer)
-            ?: return null
-        if (!expectedType.isInstance(managedValue)) {
+        val directPointerKey = PlatformAbi.pointerKey(pointer)
+        findObjectAt(directPointerKey, pointer, expectedType)?.let { return it }
+        val identityKey = rcwCacheKey(pointer)
+        if (identityKey == directPointerKey) {
             return null
         }
-        return managedValue as T
+        return findObjectAt(identityKey, RawAddress(identityKey), expectedType)
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun <T : Any> findObjectAt(
+        pointerKey: Long,
+        pointer: RawAddress,
+        expectedType: KClass<T>,
+    ): T? {
+        findCachedRcw(pointerKey)?.let { cached ->
+            if (expectedType.isInstance(cached)) {
+                return cached as T
+            }
+        }
+        val managedValue = WinRTInspectableComObject.findManagedValue(pointer) ?: return null
+        return if (expectedType.isInstance(managedValue)) managedValue as T else null
     }
 
     inline fun <reified T : Any> findObject(pointer: RawAddress): T? = findObject(pointer, T::class)
@@ -353,49 +387,93 @@ object ComWrappersSupport {
                 }
             }
 
-            val inspectable = IInspectableReference(pointer.asRawComPtr(), IID.IInspectable)
-            var ownershipTransferred = false
+            // A boxed value is decoded synchronously in this apartment. Keep the owned ABI
+            // pointer until decoding completes; only a lasting RCW needs ComPtr context,
+            // reference-tracker state, and a finalizer. The existing class factory keeps
+            // precedence over the closed-value plans used by CsWinRT's nullable factory.
+            var rawPointerNeedsRelease = true
             try {
-                val runtimeClassName = inspectable.tryGetRuntimeClassName()
-                RcwProjectionFactoryRegistry.resolveRuntimeClassFactory(null, runtimeClassName)?.let { factory ->
-                    val rcw = factory(inspectable)
-                    ownershipTransferred = true
-                    if (tryUseCache) {
-                        rcwCache[pointerKey] = rcw
-                        if (directPointerKey != pointerKey) {
-                            rcwCache[directPointerKey] = rcw
+                val runtimeClassName = InspectableReferenceSupport.getRuntimeClassName(
+                    noThrow = true,
+                    invokeGetRuntimeClassName = { hStringOut ->
+                        ComVtableInvoker.invokeArgs(
+                            instance = pointer.asRawComPtr(),
+                            slot = IInspectableVftblSlots.GetRuntimeClassName,
+                            arg0 = hStringOut,
+                        )
+                    },
+                )
+                val factory = RcwProjectionFactoryRegistry.resolveRuntimeClassFactory(null, runtimeClassName)
+                if (factory == null) {
+                    tryProjectInspectableValueForRuntimeClassName(pointer, runtimeClassName)
+                        ?.let { projectedValue ->
+                            try {
+                                WinRTPlatformApi.releaseRaw(pointer)
+                            } finally {
+                                rawPointerNeedsRelease = false
+                            }
+                            if (tryUseCache) {
+                                rcwCache[pointerKey] = projectedValue
+                                if (directPointerKey != pointerKey) {
+                                    rcwCache[directPointerKey] = projectedValue
+                                }
+                            }
+                            return@withLock projectedValue
                         }
-                    }
-                    return@withLock rcw
-                }
-                platformTryProjectInspectable(inspectable, runtimeClassName)?.let { projectedValue ->
-                    try {
-                        inspectable.close()
-                    } finally {
-                        ownershipTransferred = true
-                    }
-                    if (tryUseCache) {
-                        rcwCache[pointerKey] = projectedValue
-                        if (directPointerKey != pointerKey) {
-                            rcwCache[directPointerKey] = projectedValue
-                        }
-                    }
-                    return@withLock projectedValue
                 }
 
-                ownershipTransferred = true
-                if (tryUseCache) {
-                    rcwCache[pointerKey] = inspectable
-                    if (directPointerKey != pointerKey) {
-                        rcwCache[directPointerKey] = inspectable
+                val inspectable = IInspectableReference(pointer.asRawComPtr(), IID.IInspectable)
+                rawPointerNeedsRelease = false
+                var ownershipTransferred = false
+                try {
+                    factory?.let {
+                        val rcw = it(inspectable)
+                        ownershipTransferred = true
+                        if (tryUseCache) {
+                            rcwCache[pointerKey] = rcw
+                            if (directPointerKey != pointerKey) {
+                                rcwCache[directPointerKey] = rcw
+                            }
+                        }
+                        return@withLock rcw
                     }
+                    tryProjectInspectableValue(
+                        inspectable,
+                        runtimeClassName,
+                        runtimeClassProjectionAttempted = true,
+                    )?.let { projectedValue ->
+                        try {
+                            inspectable.close()
+                        } finally {
+                            ownershipTransferred = true
+                        }
+                        if (tryUseCache) {
+                            rcwCache[pointerKey] = projectedValue
+                            if (directPointerKey != pointerKey) {
+                                rcwCache[directPointerKey] = projectedValue
+                            }
+                        }
+                        return@withLock projectedValue
+                    }
+
+                    ownershipTransferred = true
+                    if (tryUseCache) {
+                        rcwCache[pointerKey] = inspectable
+                        if (directPointerKey != pointerKey) {
+                            rcwCache[directPointerKey] = inspectable
+                        }
+                    }
+                    inspectable
+                } catch (error: Throwable) {
+                    if (!ownershipTransferred && !inspectable.isDisposed) {
+                        inspectable.close()
+                    }
+                    throw error
                 }
-                inspectable
-            } catch (error: Throwable) {
-                if (!ownershipTransferred && !inspectable.isDisposed) {
-                    inspectable.close()
+            } finally {
+                if (rawPointerNeedsRelease) {
+                    WinRTPlatformApi.releaseRaw(pointer)
                 }
-                throw error
             }
         }
     }
@@ -414,48 +492,109 @@ object ComWrappersSupport {
             return null
         }
 
-        val directPointerKey = PlatformAbi.pointerKey(pointer)
-        findHotCachedRcw(directPointerKey, staticallyDeterminedType)?.let { cached ->
-            WinRTPlatformApi.releaseRaw(pointer)
-            return cached as T
-        }
-
-        val pointerKey = rcwCacheKey(pointer)
-        if (directPointerKey != pointerKey) {
-            findHotCachedRcw(pointerKey, staticallyDeterminedType)?.let { cached ->
-                rcwCache[directPointerKey] = cached
-                WinRTPlatformApi.releaseRaw(pointer)
+        // CsWinRT's ABI caller keeps its out reference until Attach/FromAbi has an
+        // owner. Keep this guard over cache validation and canonical identity QI too.
+        // Do not capture it in the cold lock lambda: a hot cache hit needs no Ref box.
+        var rawPointerNeedsRelease = true
+        try {
+            val directPointerKey = PlatformAbi.pointerKey(pointer)
+            findHotCachedRcw(directPointerKey, staticallyDeterminedType)?.let { cached ->
                 return cached as T
             }
-        }
 
-        return rcwSlowStateCreationLock.withLock {
-            val cached = findCachedRcw(pointerKey, staticallyDeterminedType)
-                ?: if (directPointerKey != pointerKey) {
-                    findCachedRcw(directPointerKey, staticallyDeterminedType)
-                } else {
-                    null
-                }
-            cached?.let {
-                if (directPointerKey != pointerKey) {
-                    rcwCache[pointerKey] = cached
+            val pointerKey = rcwCacheKey(pointer)
+            if (directPointerKey != pointerKey) {
+                findHotCachedRcw(pointerKey, staticallyDeterminedType)?.let { cached ->
                     rcwCache[directPointerKey] = cached
+                    return cached as T
                 }
-                WinRTPlatformApi.releaseRaw(pointer)
-                return@withLock cached as T
             }
 
-            val reference = IUnknownReference(pointer.asRawComPtr(), staticallyDeterminedType.interfaceId)
-            try {
-                factory(reference, staticallyDeterminedType).also { rcw ->
-                    rcwCache[pointerKey] = rcw
-                    if (directPointerKey != pointerKey) {
-                        rcwCache[directPointerKey] = rcw
-                    }
+            // The cold helper consumes the input even if acquiring the lock fails.
+            rawPointerNeedsRelease = false
+            return createTypedRcwForOwnedComObjectSlow(
+                pointer,
+                staticallyDeterminedType,
+                directPointerKey,
+                pointerKey,
+                factory,
+            )
+        } catch (error: Throwable) {
+            if (rawPointerNeedsRelease) {
+                rawPointerNeedsRelease = false
+                try {
+                    WinRTPlatformApi.releaseRaw(pointer)
+                } catch (cleanupError: Throwable) {
+                    error.addSuppressed(cleanupError)
                 }
-            } catch (error: Throwable) {
-                reference.close()
-                throw error
+            }
+            throw error
+        } finally {
+            if (rawPointerNeedsRelease) {
+                WinRTPlatformApi.releaseRaw(pointer)
+            }
+        }
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun <T : Any> createTypedRcwForOwnedComObjectSlow(
+        pointer: RawAddress,
+        staticallyDeterminedType: WinRTTypeHandle,
+        directPointerKey: Long,
+        pointerKey: Long,
+        factory: (IUnknownReference, WinRTTypeHandle) -> T,
+    ): T {
+        var rawPointerNeedsRelease = true
+        try {
+            return rcwSlowStateCreationLock.withLock {
+                val cached = findCachedRcw(pointerKey, staticallyDeterminedType)
+                    ?: if (directPointerKey != pointerKey) {
+                        findCachedRcw(directPointerKey, staticallyDeterminedType)
+                    } else {
+                        null
+                    }
+                cached?.let {
+                    if (directPointerKey != pointerKey) {
+                        rcwCache[pointerKey] = cached
+                        rcwCache[directPointerKey] = cached
+                    }
+                    return@withLock cached as T
+                }
+
+                // This constructor explicitly consumes the ABI reference even if it
+                // throws. Transfer first so its rollback and this guard cannot both release.
+                rawPointerNeedsRelease = false
+                val comPtr = ComPtr.createForOwnedAbi(pointer.asRawComPtr(), staticallyDeterminedType.interfaceId)
+                try {
+                    val reference = IUnknownReference(comPtr)
+                    factory(reference, staticallyDeterminedType).also { rcw ->
+                        rcwCache[pointerKey] = rcw
+                        if (directPointerKey != pointerKey) {
+                            rcwCache[directPointerKey] = rcw
+                        }
+                    }
+                } catch (error: Throwable) {
+                    try {
+                        comPtr.close()
+                    } catch (cleanupError: Throwable) {
+                        error.addSuppressed(cleanupError)
+                    }
+                    throw error
+                }
+            }
+        } catch (error: Throwable) {
+            if (rawPointerNeedsRelease) {
+                rawPointerNeedsRelease = false
+                try {
+                    WinRTPlatformApi.releaseRaw(pointer)
+                } catch (cleanupError: Throwable) {
+                    error.addSuppressed(cleanupError)
+                }
+            }
+            throw error
+        } finally {
+            if (rawPointerNeedsRelease) {
+                WinRTPlatformApi.releaseRaw(pointer)
             }
         }
     }
@@ -463,6 +602,7 @@ object ComWrappersSupport {
     /**
      * Consumes an ABI-owned pointer only when its statically typed RCW is already cached.
      * A caller that observes a miss still owns [pointer] and must use the full creation path.
+     * A cache-validation exception consumes the input before propagating that exception.
      */
     @Suppress("UNCHECKED_CAST")
     internal fun <T : Any> tryConsumeCachedRcwForOwnedComObject(
@@ -472,12 +612,30 @@ object ComWrappersSupport {
         if (PlatformAbi.isNull(pointer)) {
             return null
         }
-        val cached = findHotCachedRcw(
-            PlatformAbi.pointerKey(pointer),
-            staticallyDeterminedType,
-        ) ?: return null
-        WinRTPlatformApi.releaseRaw(pointer)
-        return cached as T
+        var rawPointerNeedsRelease = true
+        try {
+            val cached = findHotCachedRcw(
+                PlatformAbi.pointerKey(pointer),
+                staticallyDeterminedType,
+            )
+            if (cached == null) {
+                rawPointerNeedsRelease = false
+                return null
+            }
+            return cached as T
+        } catch (error: Throwable) {
+            rawPointerNeedsRelease = false
+            try {
+                WinRTPlatformApi.releaseRaw(pointer)
+            } catch (cleanupError: Throwable) {
+                error.addSuppressed(cleanupError)
+            }
+            throw error
+        } finally {
+            if (rawPointerNeedsRelease) {
+                WinRTPlatformApi.releaseRaw(pointer)
+            }
+        }
     }
 
     /**
@@ -651,6 +809,26 @@ object ComWrappersSupport {
         staticallyDeterminedType: WinRTTypeHandle? = null,
     ): Any? = validateCachedRcw(pointerKey, rcwCache[pointerKey], staticallyDeterminedType)
 
+    // CsWinRT BoxedValueReferenceCache retains IInspectable while a boxed value
+    // is cached. Kotlin scalar boxes may be interned (Boolean/small integers),
+    // so they cannot own independent native identities. Decode these values on
+    // each call instead of caching a pointer after its reference was released.
+    internal fun canCacheRcwIdentity(value: Any): Boolean = value is IWinRTObject || value is ComObjectReference ||
+        (value is WinRTComposableObject && value.winRTComposableObjectReference != null) ||
+        registeredRcwReferences[value] != null || liveRegisteredComposition(value) != null
+
+    internal fun hasLiveRcwIdentity(value: Any): Boolean = when (value) {
+        is WinRTObjectBase<*> -> value.tryGetInitializedNativeObject()?.isDisposed == false
+        is IWinRTObject -> !value.nativeObject.isDisposed
+        is ComObjectReference -> !value.isDisposed
+        is WinRTComposableObject -> value.winRTComposableObjectReference?.instance?.isDisposed == false
+        else -> registeredRcwReferences[value]?.isDisposed == false || liveRegisteredComposition(value) != null
+    }
+
+    @OptIn(ExperimentalAtomicApi::class)
+    private fun liveRegisteredComposition(value: Any): WinRTComposableObjectReference? =
+        registeredComposableReferences[value]?.load()?.get()?.takeUnless { it.instance.isDisposed }
+
     private inline fun validateCachedRcw(
         pointerKey: Long,
         cached: Any?,
@@ -680,6 +858,10 @@ object ComWrappersSupport {
         }
         val winRTObject = cached as? IWinRTObject
         if (winRTObject == null) {
+            if (!hasLiveRcwIdentity(cached)) {
+                rcwCache.remove(pointerKey)
+                return null
+            }
             return if (staticallyDeterminedType == null) cached else null
         }
         val winRTObjectBase = winRTObject as? WinRTObjectBase<*>
@@ -707,9 +889,15 @@ object ComWrappersSupport {
     internal fun registerObjectForComInterface(
         value: Any,
         pointer: RawAddress,
+        retainUnownedReference: Boolean = true,
     ) {
         if (PlatformAbi.isNull(pointer)) {
             return
+        }
+        if (retainUnownedReference && !canCacheRcwIdentity(value)) {
+            val reference = requireNotNull(wrapInspectable(pointer))
+            val retained = registeredRcwReferences.getOrPut(value) { reference }
+            if (retained !== reference) reference.close()
         }
         val directPointerKey = PlatformAbi.pointerKey(pointer)
         rcwCache[directPointerKey] = value
@@ -824,6 +1012,12 @@ object ComWrappersSupport {
         (value as? WinRTComposableObject)
             ?.winRTComposableObjectReference
             ?.let { composable ->
+                // CsWinRT MarshalInspectable.CreateMarshaler2 must expose the
+                // managed controlling identity for a derived class. NativeObject
+                // is its nondelegating inner, reserved for inherited ABI calls.
+                if (interfaceId == IID.IInspectable || interfaceId == IID.IUnknown) {
+                    return WinRTProjectionMarshaler.owned(composable.outer.queryInterface(interfaceId).getOrThrow())
+                }
                 // Public inherited interfaces are implemented by the composed
                 // native identity.  Keep the managed outer lease as a fallback
                 // for authored override interfaces only.
@@ -1055,10 +1249,11 @@ object ComWrappersSupport {
         return if (interfaceId == null || interfaceId == outerReference.interfaceId) {
             traceCcw { "create composable CCW using outer" }
             cloneComReference(outerReference)
+        } else if (interfaceId == IID.IInspectable || interfaceId == IID.IUnknown) {
+            outerReference.queryInterface(interfaceId).getOrThrow()
         } else {
             // A derived WinRT class is aggregated over the native composed
-            // identity.  Public base interfaces (including IUnknown and
-            // IInspectable) must therefore be queried from that identity;
+            // identity. Public SDK base interfaces must be queried from that identity;
             // the managed outer host only carries authored override interfaces.
             composableReference.tryCreateNativeCallReference(interfaceId)
                 ?: throw WinRTUnsupportedOperationException(
@@ -1168,6 +1363,7 @@ object ComWrappersSupport {
             }
         }
 
+    @OptIn(ExperimentalAtomicApi::class)
     fun createComposableCCWForObject(
         value: Any,
         outerInterfaceId: Guid?,
@@ -1177,6 +1373,9 @@ object ComWrappersSupport {
         platformEnsureInspectableProjectionInteropRegistered()
         val definition = createCcwDefinition(value)
         var innerReference: IInspectableReference? = null
+        var composedReference: IInspectableReference? = null
+        var nativeLifetime: WinRTNativeObjectLifetime? = null
+        var factoryInstanceToRelease = RawAddress.Null
         lateinit var host: WinRTInspectableComObject
         host = WinRTInspectableComObject(
             interfaceDefinitions = definition.interfaceDefinitions,
@@ -1184,9 +1383,14 @@ object ComWrappersSupport {
             defaultInterfaceId = definition.defaultInterfaceId,
             runtimeClassName = definition.runtimeClassName,
             managedValue = value,
+            weakManagedValue = true,
+            // This outer is published to native code without a borrowed-call
+            // boundary. Its first external AddRef must pin the managed page.
+            borrowReady = false,
             queryInterfaceFallback = definition.queryInterfaceFallback?.let { fallback ->
                 { requestedInterfaceId ->
-                    fallback(value, requestedInterfaceId)?.takeUnless(PlatformAbi::isNull)
+                    host.managedValue?.let { managed -> fallback(managed, requestedInterfaceId) }
+                        ?.takeUnless(PlatformAbi::isNull)
                 }
             },
             shapeCacheKey = definition,
@@ -1203,7 +1407,6 @@ object ComWrappersSupport {
             val innerPointer = PlatformAbi.fromRawComPtr(factoryResult.inner)
             if (!PlatformAbi.isNull(innerPointer)) {
                 host.registerExternalPointerAlias(innerPointer)
-                registerObjectForComInterface(value, innerPointer)
             }
             val instancePointer = PlatformAbi.fromRawComPtr(factoryResult.instance)
             if (PlatformAbi.isNull(instancePointer)) {
@@ -1213,7 +1416,14 @@ object ComWrappersSupport {
                 )
             }
             host.registerExternalPointerAlias(instancePointer)
-            registerObjectForComInterface(value, instancePointer)
+            val aggregatesManagedOuter = isAggregation && factoryInstanceUsesManagedOuter(
+                instancePointer, host.borrowCachedInterfacePointer(host.primaryInterfaceId),
+            )
+            if (aggregatesManagedOuter) {
+                factoryInstanceToRelease = instancePointer
+                require(!PlatformAbi.isNull(innerPointer)) { "Composable aggregation requires a non-null inner pointer." }
+                nativeLifetime = WinRTNativeObjectLifetime.create(innerPointer.asRawComPtr(), host::close)
+            }
             val requestedInstanceInterfaceId = instanceInterfaceId ?: definition.defaultInterfaceId
             val projectedInstancePointer =
                 if (isAggregation) {
@@ -1223,7 +1433,6 @@ object ComWrappersSupport {
                 }
             if (projectedInstancePointer != instancePointer) {
                 host.registerExternalPointerAlias(projectedInstancePointer)
-                registerObjectForComInterface(value, projectedInstancePointer)
             }
             val referenceTrackerProbePointer =
                 if (!PlatformAbi.isNull(innerPointer)) innerPointer else projectedInstancePointer
@@ -1232,6 +1441,12 @@ object ComWrappersSupport {
                 !PlatformAbi.isNull(innerPointer) && isReferenceTrackerObject
             innerReference = if (PlatformAbi.isNull(innerPointer)) {
                 null
+            } else if (nativeLifetime != null) {
+                IInspectableReference(ComPtr.create(
+                    raw = innerPointer.asRawComPtr(), interfaceId = IID.IInspectable,
+                    ownershipMode = ComOwnershipMode.Borrowed, isAggregated = true,
+                    nativeObjectLifetime = nativeLifetime,
+                ))
             } else {
                 IInspectableReference(
                     PlatformAbi.toRawComPtr(innerPointer),
@@ -1240,10 +1455,25 @@ object ComWrappersSupport {
                     isAggregated = isAggregation,
                 )
             }
-            host.setQueryInterfaceForwardTarget(innerReference)
-            outerReference = host.createReference(definition.defaultInterfaceId)
-            val composedReference = try {
-                val reference = IInspectableReference(
+            if (nativeLifetime != null && isReferenceTrackerObject) {
+                nativeLifetime.initializeReferenceTracker(requireNotNull(innerReference).comPtr)
+            }
+            host.setQueryInterfaceForwardTarget(innerReference, weak = true)
+            // The page borrows its own CCW; only references crossing the ABI own
+            // an AddRef on the outer. A self-owned outer would keep the page alive.
+            outerReference = ComObjectReference(ComPtr.create(
+                raw = host.borrowCachedInterfacePointer(host.primaryInterfaceId).asRawComPtr(),
+                interfaceId = host.primaryInterfaceId, ownershipMode = ComOwnershipMode.Borrowed,
+                trackContext = false, nativeObjectLifetime = nativeLifetime,
+            ))
+            composedReference = try {
+                val reference = if (nativeLifetime != null) {
+                    IInspectableReference(ComPtr.create(
+                        raw = projectedInstancePointer.asRawComPtr(), interfaceId = requestedInstanceInterfaceId,
+                        ownershipMode = ComOwnershipMode.Borrowed, isAggregated = true,
+                        nativeObjectLifetime = nativeLifetime,
+                    ))
+                } else IInspectableReference(
                     PlatformAbi.toRawComPtr(projectedInstancePointer),
                     requestedInstanceInterfaceId,
                     preventReleaseOnDispose = isAggregation || isAggregatedReferenceTrackerObject,
@@ -1262,34 +1492,80 @@ object ComWrappersSupport {
                     WinRTPlatformApi.releaseRaw(instancePointer)
                 }
             }
+            val completedComposedReference = requireNotNull(composedReference)
             val projectedReference = if (isAggregation) {
                 requireNotNull(innerReference) {
                     "Composable aggregation requires the factory to return a non-null inner pointer."
                 }
             } else {
-                composedReference
+                completedComposedReference
             }
             WinRTComposableObjectReference(
                 instance = projectedReference,
                 inner = innerReference,
-                composed = composedReference.takeUnless { it === projectedReference },
+                composed = completedComposedReference.takeUnless { it === projectedReference },
                 outer = requireNotNull(outerReference),
                 isAggregatedReferenceTrackerObject = isAggregatedReferenceTrackerObject,
                 outerHost = host,
-                cleanup = host::releaseManagedReference,
-            )
+                // The native owner's release callback closes the CCW after the
+                // inner and tracker are released in their original apartment.
+                cleanup = if (nativeLifetime == null) host::close else ({}),
+                managedValue = value,
+            ).also { reference ->
+                val weakOwner = PlatformManagedWeakReference(reference)
+                registeredComposableReferences.getOrPut(value) { AtomicReference(weakOwner) }.store(weakOwner)
+                listOf(innerPointer, instancePointer, projectedInstancePointer)
+                    .filterNot(PlatformAbi::isNull).distinct().forEach { pointer ->
+                        registerObjectForComInterface(value, pointer, retainUnownedReference = false)
+                    }
+            }
         } catch (failure: Throwable) {
-            outerReference?.close()
-            host.releaseManagedReference()
+            try {
+                closeAllAutoCloseables(listOfNotNull(composedReference, innerReference, outerReference))
+            } catch (cleanupFailure: Throwable) {
+                failure.addSuppressed(cleanupFailure)
+            }
+            if (nativeLifetime == null) {
+                try { host.close() } catch (cleanupFailure: Throwable) { failure.addSuppressed(cleanupFailure) }
+            }
             throw failure
+        } finally {
+            try {
+                if (!PlatformAbi.isNull(factoryInstanceToRelease)) WinRTPlatformApi.releaseRaw(factoryInstanceToRelease)
+            } finally {
+                nativeLifetime?.close()
+                winRTKeepAlive(value)
+            }
+        }
+    }
+
+    // Synthetic factories may return a separate IUnknown even with an outer
+    // argument. Only balance a delegating factory reference after identity proves
+    // it belongs to this managed CCW, matching CsWinRT Init's aggregation contract.
+    private fun factoryInstanceUsesManagedOuter(instance: RawAddress, outer: RawAddress): Boolean {
+        val instanceIdentity = WinRTPlatformApi.queryInterfaceRaw(instance, IID.IUnknown)
+        if (instanceIdentity.hResultValue != KnownHResults.S_OK.value || PlatformAbi.isNull(instanceIdentity.pointer)) return false
+        return try {
+            val outerIdentity = WinRTPlatformApi.queryInterfaceRaw(outer, IID.IUnknown)
+            if (outerIdentity.hResultValue != KnownHResults.S_OK.value || PlatformAbi.isNull(outerIdentity.pointer)) return false
+            try {
+                instanceIdentity.pointer == outerIdentity.pointer
+            } finally {
+                WinRTPlatformApi.releaseRaw(outerIdentity.pointer)
+            }
+        } finally {
+            WinRTPlatformApi.releaseRaw(instanceIdentity.pointer)
         }
     }
 
     /** Test-only global reset. Callers must ensure no projected call is using a cached ABI. */
+    @OptIn(ExperimentalAtomicApi::class)
     fun clearRegistriesForTests() {
         ReferenceTrackerManager.clearForTests()
         ccwHostCache.clear()
         advanceCcwHostCacheGeneration()
+        registeredRcwReferences.clear()
+        registeredComposableReferences.clear()
         rcwCache.clear()
         closedInterfaceRcwCache.clear()
         RuntimeRegistryResetSupport.clearForTests()
@@ -1462,10 +1738,14 @@ object ComWrappersSupport {
         value: Any,
         declaredReferenceArrayElementType: KClass<*>? = null,
     ): WinRTCcwDefinition {
+        fun withSyntheticInterfaces(definition: WinRTCcwDefinition): WinRTCcwDefinition =
+            createSyntheticInterfaceCcwDefinition(value)?.let { synthetic ->
+                augmentCcwDefinition(mergeCcwDefinitions(listOf(definition, synthetic)))
+            } ?: definition
         val registration = CcwFactoryRegistry.findRegistration(value)
         registration.augmentedStaticDefinition?.let { definition ->
             traceCcw { "create CCW definition value=${value::class.qualifiedName} source=static-definition" }
-            return definition
+            return withSyntheticInterfaces(definition)
         }
         registration.sources.takeIf(List<*>::isNotEmpty)?.let { sources ->
             val sourceName = if (registration.staticDefinitions.isNotEmpty()) {
@@ -1484,7 +1764,7 @@ object ComWrappersSupport {
                     },
                 )
             }
-            return augmentCcwDefinition(definition)
+            return withSyntheticInterfaces(augmentCcwDefinition(definition))
         }
         val syntheticDefinition = if (declaredReferenceArrayElementType == null) {
             platformCreateSyntheticCcwDefinition(value)
@@ -1702,6 +1982,7 @@ private class RcwIdentityCache {
         pointerKey: Long,
         value: Any,
     ) {
+        if (!ComWrappersSupport.canCacheRcwIdentity(value)) return
         val reference = entries.put(pointerKey, value)
         hotEntry.store(RcwIdentityCacheEntry(pointerKey, reference, value))
     }

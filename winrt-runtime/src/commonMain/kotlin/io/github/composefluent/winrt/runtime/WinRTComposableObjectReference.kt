@@ -11,13 +11,16 @@ class WinRTComposableObjectReference internal constructor(
     val outer: ComObjectReference,
     val isAggregatedReferenceTrackerObject: Boolean,
     private val outerHost: WinRTInspectableComObject,
-    private val cleanup: () -> Unit,
+    cleanup: () -> Unit,
+    private val managedValue: Any? = null,
 ) : AutoCloseable {
-    private val closed = AtomicInt(0)
-
-    init {
-        ActiveComposableObjectReferences.register(this)
-    }
+    private val cleanupState = ComposableObjectCleanup(
+        listOfNotNull(instance.comPtr.support, inner?.comPtr?.support, composed?.comPtr?.support, outer.comPtr.support).distinct(),
+        cleanup,
+    )
+    private val finalizationRegistration = registerComposableObjectFinalizer(
+        this, cleanupState, ActiveComposableObjectReferences.register(this),
+    )
 
     internal fun tryCreateStaticCallLease(
         interfaceId: Guid,
@@ -70,31 +73,10 @@ class WinRTComposableObjectReference internal constructor(
         }
 
     override fun close() {
-        if (!closed.compareAndSet(0, 1)) {
-            return
-        }
         try {
-            instance.close()
+            cleanupState.close(fromFinalizer = false)
         } finally {
-            try {
-                if (!isAggregatedReferenceTrackerObject && inner !== instance) {
-                    inner?.close()
-                }
-            } finally {
-                try {
-                    composed?.close()
-                } finally {
-                    try {
-                        outer.close()
-                    } finally {
-                        try {
-                            cleanup()
-                        } finally {
-                            ActiveComposableObjectReferences.unregister(this)
-                        }
-                    }
-                }
-            }
+            try { finalizationRegistration.close() } finally { winRTKeepAlive(managedValue) }
         }
     }
 
@@ -111,15 +93,15 @@ interface WinRTComposableObject {
 
 private object ActiveComposableObjectReferences {
     private val lock = PlatformLock()
-    private val references = mutableSetOf<WinRTComposableObjectReference>()
+    private val references = mutableSetOf<PlatformManagedWeakReference<WinRTComposableObjectReference>>()
 
-    fun register(reference: WinRTComposableObjectReference) {
+    fun register(reference: WinRTComposableObjectReference): PlatformManagedWeakReference<WinRTComposableObjectReference> =
         lock.withLock {
-            references += reference
+            references.removeAll { it.get() == null }
+            PlatformManagedWeakReference(reference).also { references += it }
         }
-    }
 
-    fun unregister(reference: WinRTComposableObjectReference) {
+    fun unregister(reference: PlatformManagedWeakReference<WinRTComposableObjectReference>) {
         lock.withLock {
             references -= reference
         }
@@ -127,9 +109,51 @@ private object ActiveComposableObjectReferences {
 
     fun closeAll() {
         val snapshot = lock.withLock {
-            references.toList()
+            references.mapNotNull { it.get() }
         }
         closeAllAutoCloseables(snapshot.asReversed())
+    }
+}
+
+@OptIn(ExperimentalAtomicApi::class)
+private class ComposableObjectCleanup(
+    private val supports: List<RawComObjectReferenceSupport>,
+    private val cleanup: () -> Unit,
+) {
+    private val closed = AtomicInt(0)
+
+    fun close(fromFinalizer: Boolean) {
+        if (!closed.compareAndSet(0, 1)) return
+        var failure: Throwable? = null
+        supports.forEach { support ->
+            try {
+                if (fromFinalizer) closeComPtrSupportFromFinalizer(support) else closeComPtrSupport(support)
+            } catch (error: Throwable) {
+                failure?.addSuppressed(error) ?: run { failure = error }
+            }
+        }
+        try {
+            cleanup()
+        } catch (error: Throwable) {
+            failure?.addSuppressed(error) ?: run { failure = error }
+        }
+        failure?.let { throw it }
+    }
+}
+
+private val composableObjectFinalizationHook = FinalizationHook()
+
+// This function's cleaner closure captures only native support states and a weak
+// registry token. Capturing a property through `this` would root its own target.
+private fun registerComposableObjectFinalizer(
+    target: Any,
+    cleanup: ComposableObjectCleanup,
+    registration: PlatformManagedWeakReference<WinRTComposableObjectReference>,
+): AutoCloseable = composableObjectFinalizationHook.register(target) {
+    try {
+        cleanup.close(fromFinalizer = true)
+    } finally {
+        ActiveComposableObjectReferences.unregister(registration)
     }
 }
 

@@ -64,6 +64,29 @@ class AppxResourcePublicationTest {
 
     @Test
     fun kmp_project_resources_match_different_local_target_names() {
+        val root = writeKmpResourceProducerAndConsumer()
+
+        val result = GradleRunner.create().withProjectDir(root.toFile()).withPluginClasspath()
+            .withArguments(":producer:inspectPublication", ":consumer:inspectResources", "--offline", "--stacktrace").build()
+
+        assertTrue(result.output, result.output.contains("selected=producer-libraryDesktopMain-appx-resources.zip"))
+        assertEquals(TaskOutcome.SUCCESS, result.task(":producer:packageAppxResourcesLibraryDesktopMain")?.outcome)
+    }
+
+    // Configuration on demand configures the producer while the task graph resolves the consumer,
+    // and raises projectsEvaluated only after that resolution.
+    @Test
+    fun kmp_project_resources_are_collected_with_configuration_on_demand() {
+        val root = writeKmpResourceProducerAndConsumer()
+
+        val result = GradleRunner.create().withProjectDir(root.toFile()).withPluginClasspath()
+            .withArguments(":consumer:inspectResources", "--configure-on-demand", "--offline", "--stacktrace").build()
+
+        assertTrue(result.output, result.output.contains("selected=producer-libraryDesktopMain-appx-resources.zip"))
+        assertEquals(TaskOutcome.SUCCESS, result.task(":producer:packageAppxResourcesLibraryDesktopMain")?.outcome)
+    }
+
+    private fun writeKmpResourceProducerAndConsumer(): Path {
         val root = Files.createTempDirectory("kotlin-winrt-kmp-resource-names-")
         writeMultiProjectSettings(root)
         writeGradleFile(root.resolve("producer/build.gradle"), """
@@ -73,12 +96,18 @@ class AppxResourcePublicationTest {
                 id 'maven-publish'
             }
             repositories { mavenCentral() }
-            kotlin { jvm('libraryDesktop') }
+            kotlin { jvm('libraryDesktop') {
+                compilations.create('winRTXamlSemantic')
+                compilations.create('winRTXamlLibrarySemantic')
+            } }
             tasks.register('inspectPublication') {
                 doLast {
                     def usages = publishing.publications.kotlinMultiplatform.component.get().usages.collect { it.name }
                     assert !usages.contains('kotlinAppxResourcesElements')
                     assert usages.contains('kotlinAppxResourcesElementsLibraryDesktopMain')
+                    assert !usages.any { it.contains('WinRTXaml') }
+                    assert !tasks.names.any { it.startsWith('packageAppxResources') && it.contains('WinRTXaml') }
+                    assert !tasks.names.any { it.startsWith('generateAppxResources') && it.contains('WinRTXaml') }
                 }
             }
         """.trimIndent())
@@ -106,12 +135,7 @@ class AppxResourcePublicationTest {
                 }
             }
         """.trimIndent())
-
-        val result = GradleRunner.create().withProjectDir(root.toFile()).withPluginClasspath()
-            .withArguments(":producer:inspectPublication", ":consumer:inspectResources", "--offline", "--stacktrace").build()
-
-        assertTrue(result.output, result.output.contains("selected=producer-libraryDesktopMain-appx-resources.zip"))
-        assertEquals(TaskOutcome.SUCCESS, result.task(":producer:packageAppxResourcesLibraryDesktopMain")?.outcome)
+        return root
     }
 
     @Test
@@ -328,6 +352,37 @@ class AppxResourcePublicationTest {
             result.output,
             result.output.contains("Failed to resolve Kotlin/WinRT AppX resource variants"),
         )
+    }
+
+    @Test
+    fun kmp_targets_publish_distinct_resource_archives_in_the_root_publication() {
+        val root = Files.createTempDirectory("kotlin-winrt-kmp-resource-publication-")
+        writeGradleFile(root.resolve("settings.gradle"), "rootProject.name = 'producer'")
+        writeGradleFile(root.resolve("build.gradle"), """
+            plugins {
+                id 'org.jetbrains.kotlin.multiplatform'
+                id 'io.github.compose-fluent.windows-toolkit'
+                id 'maven-publish'
+            }
+            repositories { mavenCentral() }
+            kotlin { jvm('desktop'); mingwX64('nativeDesktop') }
+            tasks.register('inspectPublication') {
+                doLast {
+                    def classifiers = publishing.publications.kotlinMultiplatform.artifacts
+                        .findAll { it.extension == 'zip' }.collect { it.classifier }.sort()
+                    println 'resourceClassifiers=' + classifiers.join(',')
+                }
+            }
+        """.trimIndent())
+
+        val result = GradleRunner.create().withProjectDir(root.toFile()).withPluginClasspath()
+            .withArguments("inspectPublication", "--offline", "--stacktrace").build()
+
+        // Both archives belong to the root publication. Maven rejects a publication whose files
+        // share one classifier and extension.
+        assertTrue(result.output, result.output.contains(
+            "resourceClassifiers=desktopMain-appx-resources,nativeDesktopMain-appx-resources",
+        ))
     }
 
     private fun publish(projectDir: Path, repository: Path) {

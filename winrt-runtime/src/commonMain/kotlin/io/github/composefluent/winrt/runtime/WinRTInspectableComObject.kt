@@ -115,6 +115,7 @@ internal class WinRTInspectableComObject(
     private val trustLevel: Int = 0,
     managedValue: Any? = null,
     weakManagedValue: Boolean = false,
+    borrowReady: Boolean = weakManagedValue,
     private val queryInterfaceFallback: ((Guid) -> RawAddress?)? = null,
     initialQueryInterfaceForwardTarget: ComObjectReference? = null,
     private val cleanupAction: (() -> Unit)? = null,
@@ -149,7 +150,7 @@ internal class WinRTInspectableComObject(
     internal val state = ManagedComHostState(
         rootReference = inboundBinding,
         cleanup = ::cleanup,
-        borrowReady = weakManagedValue,
+        borrowReady = borrowReady,
         referenceCounterStorage = referenceCounterStorage,
         referenceCounterStorageView = hostOwnedMemory.memory,
         referenceCounterStorageOffsetBytes = referenceCounterStorageOffsetBytes,
@@ -161,6 +162,7 @@ internal class WinRTInspectableComObject(
     private var lastStaticCallLease: StaticCallLeaseEntry? = null
     @kotlin.concurrent.Volatile
     private var queryInterfaceForwardTarget = initialQueryInterfaceForwardTarget
+    private var weakQueryInterfaceForwardTarget: PlatformManagedWeakReference<ComObjectReference>? = null
     private var queryInterfaceTablePublisher: ManagedComQueryInterfaceTablePublisher? = null
 
     init {
@@ -174,25 +176,43 @@ internal class WinRTInspectableComObject(
             interfaceObjectStrideBytes = managedComInterfaceObjectSizeBytes,
             forwardTarget = directQueryInterfaceForwardTarget(),
         )
+        val bulkAttachment = useBulkManagedComInterfaceAttachment
         var index = 0
         while (index < ccwShape.interfaceCount) {
             val objectMemoryOffsetBytes = index * managedComInterfaceObjectSizeBytes
-            val objectMemory = interfaceObjectPointer(index)
             hostOwnedMemory.memory.writePointer(
                 objectMemoryOffsetBytes,
                 RawAddress(ccwShape.vtablePointerValues[index]),
             )
-            inboundBinding.attach(
-                objectMemory = objectMemory,
-                objectMemoryView = hostOwnedMemory.memory,
-                objectMemoryOffsetBytes = objectMemoryOffsetBytes,
-            )
-            state.attachReferenceCounter(
-                objectMemory = objectMemory,
-                objectMemoryView = hostOwnedMemory.memory,
-                objectMemoryOffsetBytes = objectMemoryOffsetBytes,
-            )
+            if (!bulkAttachment) {
+                val objectMemory = interfaceObjectPointer(index)
+                inboundBinding.attach(
+                    objectMemory = objectMemory,
+                    objectMemoryView = hostOwnedMemory.memory,
+                    objectMemoryOffsetBytes = objectMemoryOffsetBytes,
+                )
+                state.attachReferenceCounter(
+                    objectMemory = objectMemory,
+                    objectMemoryView = hostOwnedMemory.memory,
+                    objectMemoryOffsetBytes = objectMemoryOffsetBytes,
+                )
+            }
             index += 1
+        }
+        // ComWrappersSupport.net5.cs.ComputeVtables caches per-type entries while the CLR owns
+        // each CCW instance record. Fill our private records before any pointer can be published;
+        // the binding and counter keep their existing per-host ownership.
+        if (bulkAttachment) {
+            inboundBinding.attachInterfaces(
+                objectMemoryView = hostOwnedMemory.memory,
+                interfaceObjectCount = ccwShape.interfaceCount,
+                interfaceObjectStrideBytes = managedComInterfaceObjectSizeBytes,
+            )
+            state.attachReferenceCounterToInterfaces(
+                objectMemoryView = hostOwnedMemory.memory,
+                interfaceObjectCount = ccwShape.interfaceCount,
+                interfaceObjectStrideBytes = managedComInterfaceObjectSizeBytes,
+            )
         }
     }
 
@@ -215,10 +235,10 @@ internal class WinRTInspectableComObject(
         interfaceId: Guid,
         knownManagedValue: Any? = null,
     ): ComObjectReference? {
-        val localPointer = interfacePointerOrNull(interfaceId)
-        val pointer = if (localPointer != null) {
+        val localPointerValue = interfacePointerValueOrZero(interfaceId)
+        val pointer: RawAddress = if (localPointerValue != 0L) {
             if (addReferenceCount(knownManagedValue) == 0) return null
-            localPointer
+            RawAddress(localPointerValue)
         } else {
             tryAcquireExternalInterfacePointer(interfaceId)
         }
@@ -229,11 +249,11 @@ internal class WinRTInspectableComObject(
                     interfaceId = interfaceId,
                     trackContext = !referencesAreAgile,
                     managedCcwReleaseIdentity =
-                        canonicalObjectMemory.takeIf { localPointer != null } ?: RawAddress.Null,
+                        if (localPointerValue != 0L) canonicalObjectMemory else RawAddress.Null,
                 ),
             )
         } catch (failure: Throwable) {
-            if (localPointer != null) {
+            if (localPointerValue != 0L) {
                 releaseKnownLocalReference()
             } else {
                 WinRTPlatformApi.releaseRaw(pointer)
@@ -268,7 +288,7 @@ internal class WinRTInspectableComObject(
         interfacePointer(interfaceId)
 
     internal fun tryBorrowCachedInterfacePointer(interfaceId: Guid): RawAddress =
-        interfacePointerOrNull(interfaceId) ?: RawAddress.Null
+        RawAddress(interfacePointerValueOrZero(interfaceId))
 
     internal fun tryCreateStaticCallLease(
         interfaceId: Guid,
@@ -287,7 +307,9 @@ internal class WinRTInspectableComObject(
         interfaceId: Guid,
         identityVerifiedManagedValue: Any,
     ): WinRTProjectionMarshaler? {
-        val abi = interfacePointerOrNull(interfaceId) ?: return null
+        val abiValue = interfacePointerValueOrZero(interfaceId)
+        if (abiValue == 0L) return null
+        val abi = RawAddress(abiValue)
         beginStaticCallLease(identityVerifiedManagedValue)
         return try {
             lastStaticCallLease
@@ -348,8 +370,11 @@ internal class WinRTInspectableComObject(
         incrementExternalPointerAliasCount()
     }
 
-    internal fun setQueryInterfaceForwardTarget(reference: ComObjectReference?) {
-        queryInterfaceForwardTarget = reference
+    internal fun setQueryInterfaceForwardTarget(reference: ComObjectReference?, weak: Boolean = false) {
+        // The resource owner retains the inner. The CCW must not retain its RCW's
+        // managed tracker graph through a forwarding wrapper.
+        queryInterfaceForwardTarget = reference.takeUnless { weak }
+        weakQueryInterfaceForwardTarget = reference?.takeIf { weak }?.let(::PlatformManagedWeakReference)
         val publisher = queryInterfaceTablePublisher
             ?: ManagedComQueryInterfaceTablePublisher(
                 shape = ccwShape.queryInterfaceTableShape,
@@ -370,16 +395,29 @@ internal class WinRTInspectableComObject(
         releaseReference()
     }
 
-    private fun interfacePointer(interfaceId: Guid): RawAddress =
-        interfacePointerOrNull(interfaceId) ?: throw WinRTUnsupportedOperationException(
-            "Managed COM object does not implement interface '$interfaceId'.",
-            KnownHResults.E_NOINTERFACE,
-        )
+    private fun interfacePointer(interfaceId: Guid): RawAddress {
+        val pointerValue = interfacePointerValueOrZero(interfaceId)
+        if (pointerValue == 0L) {
+            throw WinRTUnsupportedOperationException(
+                "Managed COM object does not implement interface '$interfaceId'.",
+                KnownHResults.E_NOINTERFACE,
+            )
+        }
+        return RawAddress(pointerValue)
+    }
 
-    private fun interfacePointerOrNull(interfaceId: Guid): RawAddress? =
-        ccwShape.interfaceIndex(interfaceId)
-            .takeIf { index -> index >= 0 }
-            ?.let(::interfaceObjectPointer)
+    private fun interfacePointerOrNull(interfaceId: Guid): RawAddress? {
+        val pointerValue = interfacePointerValueOrZero(interfaceId)
+        return if (pointerValue == 0L) null else RawAddress(pointerValue)
+    }
+
+    // CsWinRT's cached interface entries own IID/vtable metadata; only the local tear-off address
+    // depends on this host. Keep it a word until a caller actually needs the nullable ABI carrier.
+    @Suppress("NOTHING_TO_INLINE")
+    private inline fun interfacePointerValueOrZero(interfaceId: Guid): Long {
+        val index = ccwShape.interfaceIndex(interfaceId)
+        return if (index >= 0) interfaceObjectPointer(index).value else 0L
+    }
 
     private fun tryAcquireInterfacePointer(
         interfaceId: Guid,
@@ -418,7 +456,7 @@ internal class WinRTInspectableComObject(
                 registerExternalPointerAlias(pointer)
                 return NativePointerResult(KnownHResults.S_OK.value, pointer)
             }
-        val forwardTarget = queryInterfaceForwardTarget
+        val forwardTarget = queryInterfaceForwardReference()
             ?: return NativePointerResult(KnownHResults.E_NOINTERFACE.value, PlatformAbi.nullPointer)
         return WinRTPlatformApi.queryInterfaceRaw(
             PlatformAbi.fromRawComPtr(forwardTarget.pointer),
@@ -426,11 +464,14 @@ internal class WinRTInspectableComObject(
         )
     }
 
+    private fun queryInterfaceForwardReference(): ComObjectReference? =
+        (queryInterfaceForwardTarget ?: weakQueryInterfaceForwardTarget?.get())?.takeUnless { it.isDisposed }
+
     private fun directQueryInterfaceForwardTarget(): RawAddress {
         if (queryInterfaceFallback != null) {
             return PlatformAbi.nullPointer
         }
-        return queryInterfaceForwardTarget
+        return queryInterfaceForwardReference()
             ?.let { reference -> PlatformAbi.fromRawComPtr(reference.pointer) }
             ?: PlatformAbi.nullPointer
     }
@@ -604,11 +645,20 @@ internal class WinRTInspectableComObject(
                 // event sources alive while a tracker reference is held.
                 0 -> return@runCatching addTrackerReference()
                 1 -> return@runCatching releaseTrackerReference()
+                2 -> {
+                    state.setTrackerPeg(true)
+                    return@runCatching KnownHResults.S_OK.value
+                }
+                3 -> {
+                    state.setTrackerPeg(false)
+                    return@runCatching KnownHResults.S_OK.value
+                }
             }
         }
         method.hostHandler?.invoke(this, managedValue, rawArguments)
             ?: method.handler(managedValue, rawArguments)
     }.getOrElse { error ->
+        trace { "Invoke failed interface=$interfaceId methodIndex=$methodIndex runtimeClassName=$runtimeClassName\n${error.stackTraceToString()}" }
         platformSetErrorInfo(error)
         platformHResultFromThrowable(error).value
     }
@@ -832,6 +882,9 @@ internal class WinRTInspectableComObject(
 
         internal fun tryProbeReferenceCount(pointer: RawAddress): UInt? =
             findRegisteredInboundBinding(pointer)?.host?.tryProbeReferenceCount()
+
+        internal fun trackerReferenceCount(pointer: RawAddress): Int =
+            findRegisteredInboundBinding(pointer)?.host?.state?.currentTrackerReferenceCount() ?: 0
 
         internal fun inspectableBox(
             value: Any?,

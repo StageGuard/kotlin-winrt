@@ -166,4 +166,190 @@ class NativeProjectionCompilationTest {
         runBinary("debug", "after")
         runBinary("release", "after")
     }
+
+    @Test
+    fun consumer_projection_compiles_against_types_owned_by_a_published_library() {
+        assumeTrue(System.getProperty("os.name").startsWith("Windows"))
+        val root = generateSequence(Path.of("").toAbsolutePath()) { it.parent }
+            .first { Files.exists(it.resolve("settings.gradle.kts")) && Files.isDirectory(it.resolve("winrt-runtime")) }
+        val fixture = Files.createTempDirectory(Files.createDirectories(root.resolve(".agent_tmp")), "external-library-")
+        fun write(relative: String, content: String) {
+            val path = fixture.resolve(relative)
+            Files.createDirectories(path.parent)
+            Files.writeString(path, content.trimIndent())
+        }
+        val fixturePath = fixture.toString().replace('\\', '/')
+        write("fixture.init.gradle", """
+            gradle.settingsEvaluated { settings ->
+                if (settings.rootProject.name == 'kotlin-winrt') {
+                    settings.include ':externalLibrary', ':externalConsumer'
+                    settings.project(':externalLibrary').projectDir = new File('$fixturePath/library')
+                    settings.project(':externalConsumer').projectDir = new File('$fixturePath/consumer')
+                }
+            }
+        """)
+        write("library/build.gradle", """
+            plugins {
+                id 'org.jetbrains.kotlin.multiplatform'
+                id 'io.github.compose-fluent.windows-toolkit'
+                id 'maven-publish'
+            }
+            group = 'test.winrt.external'
+            version = '1.0'
+            kotlin { jvm(); mingwX64() }
+            windows { packageReferences { windowsSdk(null, false, true); type 'Windows.Foundation.Uri' } }
+            publishing.repositories.maven { name = 'External'; url = uri('$fixturePath/repository') }
+        """)
+        write("consumer/build.gradle", """
+            plugins {
+                id 'org.jetbrains.kotlin.multiplatform'
+                id 'io.github.compose-fluent.windows-toolkit'
+            }
+            repositories { maven { url = uri('$fixturePath/repository') }; mavenCentral() }
+            configurations.configureEach {
+                resolutionStrategy.dependencySubstitution {
+                    substitute module('io.github.compose-fluent:winrt-runtime') using project(':winrt-runtime')
+                    substitute module('io.github.compose-fluent:winrt-authoring') using project(':winrt-authoring')
+                }
+            }
+            kotlin {
+                jvm()
+                mingwX64 { binaries { executable { entryPoint = 'sample.main' } } }
+                sourceSets.commonMain.dependencies { implementation 'test.winrt.external:externalLibrary:1.0' }
+            }
+            windows {
+                packageReferences {
+                    windowsSdk(null, false, true)
+                    // ContactWebsite.Uri is a Windows.Foundation.Uri, which the library owns.
+                    type 'Windows.ApplicationModel.Contacts.ContactWebsite'
+                }
+            }
+        """)
+        write("consumer/src/winuiMain/kotlin/sample/Website.kt", """
+            package sample
+            import windows.applicationmodel.contacts.ContactWebsite
+            import windows.foundation.Uri
+            fun websiteUri(): String {
+                val website = ContactWebsite()
+                website.uri = Uri("https://example.invalid/external")
+                val uri: Uri? = website.uri
+                return uri?.absoluteUri.orEmpty()
+            }
+        """)
+        write("consumer/src/mingwX64Main/kotlin/sample/Main.kt", """
+            package sample
+            import io.github.composefluent.winrt.runtime.RuntimeScope
+            fun main() {
+                RuntimeScope.initializeMultithreaded().use {
+                    check(websiteUri() == "https://example.invalid/external")
+                    println("EXTERNAL_LIBRARY_OK")
+                }
+            }
+        """)
+        // A cached metadata manifest keeps absolute paths into the fixture directory that produced
+        // it, and every run of this test uses a new directory.
+        fun build(label: String, vararg tasks: String) =
+            Files.newBufferedWriter(fixture.resolve("$label.log")).use { output ->
+                GradleRunner.create().withProjectDir(root.toFile()).withArguments(
+                    *tasks,
+                    "--init-script", fixture.resolve("fixture.init.gradle").toString(),
+                    "--console=plain", "--max-workers=1", "--configuration-cache", "--configure-on-demand",
+                    "--no-build-cache",
+                ).forwardStdOutput(output).forwardStdError(output).build()
+            }
+        build("publish", ":externalLibrary:publishAllPublicationsToExternalRepository")
+
+        val consumer = build(
+            "consumer",
+            ":externalConsumer:compileKotlinJvm",
+            ":externalConsumer:linkDebugExecutableMingwX64",
+        )
+
+        assertTrue(consumer.tasks.none { it.path.startsWith(":externalLibrary:") })
+        // The generator leaves Uri to the library that owns it, so both standalone projection
+        // compilations must see the published module, not only the business compilations.
+        val generated = fixture.resolve("consumer/build/generated/kotlin-winrt/src/winuiMain/kotlin/windows")
+        assertTrue(Files.isDirectory(generated.resolve("applicationmodel/contacts")))
+        assertTrue(Files.notExists(generated.resolve("foundation")))
+        assertEquals(
+            TaskOutcome.SUCCESS,
+            consumer.task(":externalConsumer:compileKotlinWinRTProjectionJvm")?.outcome,
+        )
+        assertEquals(
+            TaskOutcome.SUCCESS,
+            consumer.task(":externalConsumer:compileWinRTProjectionKotlinMingwX64")?.outcome,
+        )
+        val runtimeLog = fixture.resolve("runtime.log").toFile()
+        val process = ProcessBuilder(
+            fixture.resolve("consumer/build/bin/mingwX64/debugExecutable/externalConsumer.exe").toString(),
+        ).redirectErrorStream(true).redirectOutput(runtimeLog).start()
+        if (!process.waitFor(60, TimeUnit.SECONDS)) {
+            process.destroyForcibly()
+            error("Native fixture timed out")
+        }
+        assertEquals(runtimeLog.readText(), 0, process.exitValue())
+        assertTrue(runtimeLog.readText(), runtimeLog.readText().contains("EXTERNAL_LIBRARY_OK"))
+    }
+
+    @Test
+    fun native_projection_declares_klib_modules_outside_the_source_build() {
+        val root = Files.createTempDirectory("kotlin-winrt-native-projection-dependencies-")
+        Files.writeString(root.resolve("settings.gradle"), "rootProject.name = 'native-projection-dependencies'\n")
+        Files.writeString(root.resolve("build.gradle"), """
+            plugins {
+                id 'org.jetbrains.kotlin.multiplatform'
+                id 'io.github.compose-fluent.windows-toolkit'
+            }
+            repositories { mavenCentral() }
+            kotlin { mingwX64() }
+            tasks.register('inspectProjectionDependencies') {
+                def declared = configurations.mingwX64WinRTProjectionImplementation.dependencies.collect { dependency ->
+                    dependency instanceof ExternalModuleDependency
+                        ? "module:${'$'}{dependency.group}:${'$'}{dependency.name}" : 'files'
+                }.sort().join(',')
+                doLast { println 'projectionDependencies=' + declared }
+            }
+        """.trimIndent())
+
+        val result = GradleRunner.create().withProjectDir(root.toFile()).withPluginClasspath()
+            .withArguments("inspectProjectionDependencies", "--offline", "--stacktrace").build()
+
+        // The plugin's own classpath carries only the JVM JARs of the runtime modules. A Native
+        // compilation must resolve their multiplatform publications to receive KLIBs.
+        assertTrue(result.output, result.output.contains(
+            "projectionDependencies=module:io.github.compose-fluent:winrt-authoring," +
+                "module:io.github.compose-fluent:winrt-runtime",
+        ))
+    }
+
+    @Test
+    fun cinterop_is_ordered_after_the_native_projection_compilation() {
+        assumeTrue(System.getProperty("os.name").startsWith("Windows"))
+        val root = Files.createTempDirectory("kotlin-winrt-native-projection-cinterop-")
+        Files.writeString(root.resolve("settings.gradle"), "rootProject.name = 'native-projection-cinterop'\n")
+        Files.writeString(root.resolve("sample.def"), "package = sample.cinterop\n")
+        Files.writeString(root.resolve("build.gradle"), """
+            plugins {
+                id 'org.jetbrains.kotlin.multiplatform'
+                id 'io.github.compose-fluent.windows-toolkit'
+            }
+            repositories { mavenCentral() }
+            kotlin { mingwX64 { compilations.main.cinterops { sample { defFile project.file('sample.def') } } } }
+            windows { packageReferences { windowsSdk(null, false, true); type 'Windows.Foundation.IClosable' } }
+            tasks.register('inspectCinteropOrdering') {
+                def cinterop = tasks.named('cinteropSampleMingwX64').get()
+                def predecessors = cinterop.mustRunAfter.getDependencies(cinterop).collect { it.name }.sort().join(',')
+                doLast { println 'cinteropMustRunAfter=' + predecessors }
+            }
+        """.trimIndent())
+
+        val result = GradleRunner.create().withProjectDir(root.toFile()).withPluginClasspath()
+            .withArguments("inspectCinteropOrdering", "--offline", "--stacktrace").build()
+
+        // The business compilation's dependency files include the projection KLIB, and cinterop
+        // reads them as libraries. Gradle fails the build when that read has no declared order.
+        assertTrue(result.output, result.output.contains(
+            "cinteropMustRunAfter=compileWinRTProjectionKotlinMingwX64",
+        ))
+    }
 }

@@ -14,11 +14,16 @@ internal class RawComObjectReferenceSupport(
     val isAggregated: Boolean = false,
     trackContext: Boolean = true,
     internal val managedCcwReleaseIdentity: RawAddress = RawAddress.Null,
+    internal val nativeObjectLifetime: WinRTNativeObjectLifetime? = null,
+    private val afterRelease: (() -> Unit)? = null,
 ) {
     private val disposed = AtomicInt(0)
     private var referenceTrackerPointer: RawComPtr = PlatformAbi.nullComPtr
     private var referenceTrackerRegistrationKey: Long = 0L
     private var releaseTrackerSourceOnDispose: Boolean = false
+    private var ownsTrackerPointer = true
+    // Retain the existing agility/FTM probe result; a null context alone does not prove agility.
+    private val callsAreFreeThreaded = trackContext && ComThreadingSupport.isFreeThreaded(pointer)
     private var objectContext =
         if (trackContext) {
             ObjectReferenceContext.capture(
@@ -26,10 +31,15 @@ internal class RawComObjectReferenceSupport(
                 interfaceIdLowBits = interfaceIdLowBits,
                 interfaceIdHighBits = interfaceIdHighBits,
                 knownInterfaceId = knownInterfaceId,
+                callsAreFreeThreaded = callsAreFreeThreaded,
             )
         } else {
             null
         }
+    private val nativeLifetimeLease = nativeObjectLifetime?.retain()
+
+    internal val canUseScopedQueryInterfaceLease: Boolean
+        get() = callsAreFreeThreaded && objectContext == null && !hasReferenceTracker && !isAggregated
 
     val interfaceId: Guid
         get() = knownInterfaceId ?: Guid.fromAbiWords(interfaceIdLowBits, interfaceIdHighBits)
@@ -46,12 +56,18 @@ internal class RawComObjectReferenceSupport(
     fun pointerForCurrentContext(): RawComPtr =
         objectContext?.pointerForCurrentContext() ?: pointer
 
+    /** See [ObjectReferenceContext.isCallableInCurrentContext]. */
+    val isCallableInCurrentContext: Boolean
+        get() = objectContext?.isCallableInCurrentContext() ?: true
+
     fun attachReferenceTracker(
         trackerPointer: RawComPtr,
+        trackerSource: ReferenceTrackerSource,
         addRefForObjectReference: Boolean,
         releaseTrackerSourceOnDispose: Boolean,
         retainTrackerPointer: (RawComPtr) -> Unit,
         addRefFromTrackerSourceCallback: (RawComPtr) -> Unit,
+        ownsTrackerPointer: Boolean = true,
     ) {
         if (hasReferenceTracker) {
             return
@@ -64,8 +80,12 @@ internal class RawComObjectReferenceSupport(
                 knownInterfaceId = knownInterfaceId,
             )
         }
-        referenceTrackerRegistrationKey = ReferenceTrackerManager.attach(trackerPointer)
+        referenceTrackerRegistrationKey = ReferenceTrackerManager.attach(
+            trackerPointer,
+            trackerSource.weakReference,
+        )
         referenceTrackerPointer = trackerPointer
+        this.ownsTrackerPointer = ownsTrackerPointer
         retainTrackerPointer(trackerPointer)
         addRefFromTrackerSourceCallback(trackerPointer)
         if (addRefForObjectReference) {
@@ -133,9 +153,11 @@ internal class RawComObjectReferenceSupport(
         }
 
     fun tryInitializeReferenceTracker(
+        trackerSourceOwner: ComPtr,
         addRefFromTrackerSource: Boolean,
         retainTrackerPointer: (RawComPtr) -> Unit,
         addRefFromTrackerSourceCallback: (RawComPtr) -> Unit,
+        ownsTrackerPointer: Boolean = true,
     ): Boolean {
         if (hasReferenceTracker) {
             return true
@@ -150,10 +172,12 @@ internal class RawComObjectReferenceSupport(
         try {
             attachReferenceTracker(
                 trackerPointer = trackerPointer,
+                trackerSource = trackerSourceOwner.getOrCreateTrackerSource(),
                 addRefForObjectReference = addRefFromTrackerSource,
                 releaseTrackerSourceOnDispose = addRefFromTrackerSource,
                 retainTrackerPointer = retainTrackerPointer,
                 addRefFromTrackerSourceCallback = addRefFromTrackerSourceCallback,
+                ownsTrackerPointer = ownsTrackerPointer,
             )
         } finally {
             WinRTPlatformApi.releaseRaw(result.pointer)
@@ -201,7 +225,15 @@ internal class RawComObjectReferenceSupport(
                 try {
                     context?.callInOriginalContext(releaseReferences, releaseReferences) ?: releaseReferences()
                 } finally {
-                    context?.close()
+                    try {
+                        nativeLifetimeLease?.release(deferContextRelease)
+                    } finally {
+                        try {
+                            context?.close()
+                        } finally {
+                            afterRelease?.invoke()
+                        }
+                    }
                 }
             }
             val disconnectAndRelease = {
@@ -209,10 +241,15 @@ internal class RawComObjectReferenceSupport(
                     releaseReferencesAndContext()
                 }
             }
-            if (deferContextRelease && context != null) {
-                context.deferToOriginalContext(disconnectAndRelease)
-            } else {
-                context?.callInOriginalContext(disconnectAndRelease, disconnectAndRelease) ?: disconnectAndRelease()
+            val releaseInContext = {
+                if (deferContextRelease && context != null) {
+                    context.deferToOriginalContext(disconnectAndRelease)
+                } else {
+                    context?.callInOriginalContext(disconnectAndRelease, disconnectAndRelease) ?: disconnectAndRelease()
+                }
+            }
+            if (!ReferenceTrackerManager.deferFinalizerRelease(releaseInContext)) {
+                releaseInContext()
             }
         }
     }
@@ -254,7 +291,7 @@ internal class RawComObjectReferenceSupport(
         if (releaseTrackerSourceOnDispose) {
             releaseFromTrackerSource(releaseFromTrackerSourceCallback)
         }
-        releaseTrackerPointer(referenceTrackerPointer)
+        if (ownsTrackerPointer) releaseTrackerPointer(referenceTrackerPointer)
         referenceTrackerPointer = PlatformAbi.nullComPtr
         releaseTrackerSourceOnDispose = false
     }

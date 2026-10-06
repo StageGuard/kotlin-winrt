@@ -148,10 +148,31 @@ internal object XamlSystemProjectionRuntimeHooks {
 
     internal fun defaultCustomPropertyProviderInterfaceDefinition(
         existingInterfaceIds: Set<Guid>,
+    ): WinRTInspectableInterfaceDefinition? =
+        defaultCustomPropertyProviderInterfaceDefinition {
+            IID.ICustomPropertyProvider in existingInterfaceIds
+        }
+
+    internal fun defaultCustomPropertyProviderInterfaceDefinition(
+        existingInterfaceDefinitions: List<WinRTInspectableInterfaceDefinition>,
+    ): WinRTInspectableInterfaceDefinition? {
+        // WinRTCcwDefinition accepts a caller-owned List. Recheck the same membership used by the
+        // original hot cache, and visit the full list before reading feature switches as mapTo did.
+        var hasExistingCustomPropertyProvider = false
+        for (definition in existingInterfaceDefinitions) {
+            if (definition.interfaceId == IID.ICustomPropertyProvider) {
+                hasExistingCustomPropertyProvider = true
+            }
+        }
+        return defaultCustomPropertyProviderInterfaceDefinition { hasExistingCustomPropertyProvider }
+    }
+
+    private inline fun defaultCustomPropertyProviderInterfaceDefinition(
+        hasExistingCustomPropertyProvider: () -> Boolean,
     ): WinRTInspectableInterfaceDefinition? {
         if (!FeatureSwitches.enableDefaultCustomTypeMappings ||
             !FeatureSwitches.enableICustomPropertyProviderSupport ||
-            IID.ICustomPropertyProvider in existingInterfaceIds
+            hasExistingCustomPropertyProvider()
         ) {
             return null
         }
@@ -196,12 +217,18 @@ internal object XamlSystemProjectionRuntimeHooks {
         arg0: RawAddress,
         arg1: RawAddress,
     ): Int {
+        var typeName: String? = null
         if (slot != WinUiXamlMetadataProviderSlots.GetXmlnsDefinitions) {
+            PlatformAbi.writePointer(arg1, PlatformAbi.nullPointer)
             val nameHandle = if (slot == WinUiXamlMetadataProviderSlots.GetXamlType) {
                 PlatformAbi.readPointer(arg0)
             } else arg0
             val name = HString.fromHandle(nameHandle, owner = false).use { it.toKString() }
-            val authored = WinUiAuthoredTypeMetadata.tryCreate(name, ::resolveWinUiXamlType)
+            typeName = name
+            val authored = WinUiAuthoredTypeMetadata.tryCreateAuthored(name, ::resolveWinUiXamlType)
+            if (FeatureSwitches.traceCcw) {
+                println("winrt-xaml-metadata: lookup slot=$slot name=$name authored=${!PlatformAbi.isNull(authored)}")
+            }
             if (!PlatformAbi.isNull(authored)) {
                 PlatformAbi.writePointer(arg1, authored)
                 return KnownHResults.S_OK.value
@@ -211,7 +238,7 @@ internal object XamlSystemProjectionRuntimeHooks {
             println("winrt-xaml-metadata: forward slot=$slot")
         }
         val providers = WinUiXamlMetadataProviderCache.getOrCreateAll()
-        if (providers.isEmpty()) {
+        if (providers.isEmpty() && typeName == null) {
             return KnownHResults.E_NOINTERFACE.value.also {
                 if (FeatureSwitches.traceCcw) {
                     println("winrt-xaml-metadata: provider unavailable hr=$it")
@@ -236,6 +263,15 @@ internal object XamlSystemProjectionRuntimeHooks {
                     println("winrt-xaml-metadata: forward slot=$slot hr=$hr")
                 }
                 return hr
+            }
+        }
+        // Like CSharpTypeInfoPass2, referenced types can have application-generated
+        // metadata even when their library's IXamlMetadataProvider omits them.
+        typeName?.let { name ->
+            val fallback = WinUiAuthoredTypeMetadata.tryCreate(name, ::resolveWinUiXamlType)
+            if (!PlatformAbi.isNull(fallback)) {
+                PlatformAbi.writePointer(arg1, fallback)
+                return KnownHResults.S_OK.value
             }
         }
         if (FeatureSwitches.traceCcw) {
@@ -1401,7 +1437,9 @@ private object CustomPropertyProviderDefinitionHolder {
                         signature = ComMethodSignature.of(ComAbiValueKind.Pointer, ComAbiValueKind.Pointer),
                     ) { managedValue, rawArgs ->
                         val provider = explicitOrBindableCustomPropertyProvider(requireNotNull(managedValue))
-                        val property = provider?.getCustomProperty(decodeBorrowedString(rawArgs[0] as RawAddress))
+                        val name = decodeBorrowedString(rawArgs[0] as RawAddress)
+                        val property = provider?.getCustomProperty(name)
+                            ?: WinUiAuthoredTypeMetadata.customProperty(requireNotNull(managedValue), name)
                         (rawArgs[1] as RawAddress).writeReturnedPointer(propertyPointer(property))
                         KnownHResults.S_OK.value
                     },

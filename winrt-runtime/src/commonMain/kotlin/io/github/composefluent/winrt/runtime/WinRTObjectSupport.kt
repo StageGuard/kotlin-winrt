@@ -1,15 +1,15 @@
 package io.github.composefluent.winrt.runtime
 
 internal class WinRTObjectSupport<K : Any, TReference : AutoCloseable>(
+    private val queryInterfaceCacheFor: (K) -> ConcurrentCacheMap<WinRTTypeHandle, TReference>,
+    private val additionalTypeDataFor: (K) -> ConcurrentCacheMap<WinRTTypeHandle, Any>,
     private val closeReference: (TReference) -> Unit,
 ) {
-    private val stateStore = WinRTObjectStateStore<K, TReference>(closeReference)
-
     fun queryInterfaceCache(instance: K): ConcurrentCacheMap<WinRTTypeHandle, TReference> =
-        stateStore.stateFor(instance).queryInterfaceCache
+        queryInterfaceCacheFor(instance)
 
     fun additionalTypeData(instance: K): ConcurrentCacheMap<WinRTTypeHandle, Any> =
-        stateStore.stateFor(instance).additionalTypeData
+        additionalTypeDataFor(instance)
 
     fun isInterfaceImplemented(
         instance: K,
@@ -92,43 +92,15 @@ internal class WinRTObjectSupport<K : Any, TReference : AutoCloseable>(
     }
 }
 
-private class WinRTObjectStateStore<K : Any, TReference : AutoCloseable>(
-    private val closeReference: (TReference) -> Unit,
-) {
-    private val finalizationHook = FinalizationHook()
-    private val states = WeakKeyStateMap<K, WinRTObjectStateHolder<TReference>>()
-
-    fun stateFor(instance: K): WinRTObjectState<TReference> =
-        states.getOrPut(instance) {
-            createState(instance)
-        }.state
-
-    private fun createState(instance: K): WinRTObjectStateHolder<TReference> {
-        val state = WinRTObjectState(closeReference)
-        val cleanable = finalizationHook.register(instance) {
-            state.close()
-        }
-        return WinRTObjectStateHolder(state, cleanable)
-    }
-}
-
-private class WinRTObjectStateHolder<TReference : AutoCloseable>(
-    val state: WinRTObjectState<TReference>,
-    @Suppress("unused")
-    val cleanable: AutoCloseable,
-)
-
-private class WinRTObjectState<TReference : AutoCloseable>(
-    private val closeReference: (TReference) -> Unit,
-) {
+// CsWinRT IInspectable.net5.cs and SingleInterfaceOptimizedObject.net5.cs own these
+// caches on each RCW. A global weak-key table with strong values can retain its key
+// through cached callbacks or tracker edges. Each cached reference already owns its
+// native-only ComPtr cleaner; no cleaner may capture this managed cache graph.
+internal class WinRTObjectState<TReference : AutoCloseable> {
     val queryInterfaceCache = ConcurrentCacheMap<WinRTTypeHandle, TReference>()
     val additionalTypeData = ConcurrentCacheMap<WinRTTypeHandle, Any>()
+}
 
-    fun close() {
-        queryInterfaceCache.values.forEach { reference ->
-            runCatching { closeReference(reference) }
-        }
-        queryInterfaceCache.clear()
-        additionalTypeData.clear()
-    }
+internal object WinRTObjectStateInitialization {
+    val lock = PlatformLock()
 }

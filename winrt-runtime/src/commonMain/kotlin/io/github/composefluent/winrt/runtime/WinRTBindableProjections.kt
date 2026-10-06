@@ -459,99 +459,7 @@ object WinRTBindableVectorProjection {
             defaultInterfaceId = WinRTBindableInterfaceIds.IBindableVector,
             interfaceDefinitions = listOf(
                 bindableIterableDefinition(),
-                WinRTInspectableInterfaceDefinition(
-                    interfaceId = WinRTBindableInterfaceIds.IBindableVector,
-                    methods = listOf(
-                        WinRTInspectableMethodDefinition(
-                            signature = ComMethodSignature.of(ComAbiValueKind.Int32, ComAbiValueKind.Pointer),
-                        ) { rawArgs ->
-                            val index = (rawArgs[0] as Int).toUInt()
-                            val resultOut = rawArgs[1] as RawAddress
-                            if (index.toInt() !in managed.indices) {
-                                return@WinRTInspectableMethodDefinition KnownHResults.E_BOUNDS.value
-                            }
-                            val value = managed[index.toInt()]
-                            resultOut.writeReturnedPointer(WinRTBindableObjectMarshaller.fromManaged(value))
-                            KnownHResults.S_OK.value
-                        },
-                        WinRTInspectableMethodDefinition(
-                            signature = ComMethodSignature.of(ComAbiValueKind.Pointer),
-                        ) { rawArgs ->
-                            (rawArgs[0] as RawAddress).writeUInt32(managed.size.toUInt())
-                            KnownHResults.S_OK.value
-                        },
-                        WinRTInspectableMethodDefinition(
-                            signature = ComMethodSignature.of(ComAbiValueKind.Pointer),
-                        ) { rawArgs ->
-                            val resultOut = rawArgs[0] as RawAddress
-                            resultOut.writeReturnedPointer(WinRTBindableVectorViewProjection.ToAbiHelper(managed).detachReference())
-                            KnownHResults.S_OK.value
-                        },
-                        WinRTInspectableMethodDefinition(
-                            signature = ComMethodSignature.of(ComAbiValueKind.Pointer, ComAbiValueKind.Pointer, ComAbiValueKind.Pointer),
-                        ) { rawArgs ->
-                            val value = WinRTBindableObjectMarshaller.fromBorrowedAbi(rawArgs[0] as RawAddress)
-                            val indexOut = rawArgs[1] as RawAddress
-                            val foundOut = rawArgs[2] as RawAddress
-                            val index = managed.indexOf(value)
-                            foundOut.writeBoolean(index >= 0)
-                            indexOut.writeUInt32(if (index >= 0) index.toUInt() else 0u)
-                            KnownHResults.S_OK.value
-                        },
-                        WinRTInspectableMethodDefinition(
-                            signature = ComMethodSignature.of(ComAbiValueKind.Int32, ComAbiValueKind.Pointer),
-                        ) { rawArgs ->
-                            val index = (rawArgs[0] as Int).toUInt()
-                            if (index.toInt() !in managed.indices) {
-                                return@WinRTInspectableMethodDefinition KnownHResults.E_BOUNDS.value
-                            }
-                            managed[index.toInt()] = WinRTBindableObjectMarshaller.fromBorrowedAbi(rawArgs[1] as RawAddress)
-                            KnownHResults.S_OK.value
-                        },
-                        WinRTInspectableMethodDefinition(
-                            signature = ComMethodSignature.of(ComAbiValueKind.Int32, ComAbiValueKind.Pointer),
-                        ) { rawArgs ->
-                            val index = (rawArgs[0] as Int).toUInt()
-                            if (index.toInt() > managed.size) {
-                                return@WinRTInspectableMethodDefinition KnownHResults.E_BOUNDS.value
-                            }
-                            managed.add(index.toInt(), WinRTBindableObjectMarshaller.fromBorrowedAbi(rawArgs[1] as RawAddress))
-                            KnownHResults.S_OK.value
-                        },
-                        WinRTInspectableMethodDefinition(
-                            signature = ComMethodSignature.of(ComAbiValueKind.Int32),
-                        ) { rawArgs ->
-                            val index = (rawArgs[0] as Int).toUInt()
-                            if (index.toInt() !in managed.indices) {
-                                return@WinRTInspectableMethodDefinition KnownHResults.E_BOUNDS.value
-                            }
-                            managed.removeAt(index.toInt())
-                            KnownHResults.S_OK.value
-                        },
-                        WinRTInspectableMethodDefinition(
-                            signature = ComMethodSignature.of(ComAbiValueKind.Pointer),
-                        ) { rawArgs ->
-                            managed.add(WinRTBindableObjectMarshaller.fromBorrowedAbi(rawArgs[0] as RawAddress))
-                            KnownHResults.S_OK.value
-                        },
-                        WinRTInspectableMethodDefinition(
-                            signature = ComMethodSignature.of(),
-                        ) {
-                            if (managed.isEmpty()) {
-                                KnownHResults.E_BOUNDS.value
-                            } else {
-                                managed.removeAt(managed.lastIndex)
-                                KnownHResults.S_OK.value
-                            }
-                        },
-                        WinRTInspectableMethodDefinition(
-                            signature = ComMethodSignature.of(),
-                        ) {
-                            managed.clear()
-                            KnownHResults.S_OK.value
-                        },
-                    ),
-                ),
+                bindableVectorDefinition(),
             ),
         )
 
@@ -588,6 +496,114 @@ object WinRTBindableVectorProjection {
             FromAbiHelper(WinRTBindableVectorReference(it.getRefPointer().asRawAddress(), WinRTBindableInterfaceIds.IBindableVector))
         }
 }
+
+internal fun bindableVectorDefinition(): WinRTInspectableInterfaceDefinition = managedBindableVectorDefinition
+
+@Suppress("UNCHECKED_CAST")
+private val managedBindableVectorDefinition =
+    WinRTInspectableInterfaceDefinition(
+        interfaceId = WinRTBindableInterfaceIds.IBindableVector,
+        methods = listOf(
+            WinRTInspectableMethodDefinition(
+                signature = ComMethodSignature.of(ComAbiValueKind.Int32, ComAbiValueKind.Pointer),
+            ) { managedValue: Any?, rawArgs: List<Any?> ->
+                val managed = managedValue as MutableList<Any?>
+                val index = (rawArgs[0] as Int).toUInt()
+                val resultOut = rawArgs[1] as RawAddress
+                if (index.toInt() !in managed.indices) {
+                    return@WinRTInspectableMethodDefinition KnownHResults.E_BOUNDS.value
+                }
+                val value = managed[index.toInt()]
+                resultOut.writeReturnedPointer(WinRTBindableObjectMarshaller.fromManaged(value))
+                KnownHResults.S_OK.value
+            },
+            WinRTInspectableMethodDefinition(
+                signature = ComMethodSignature.of(ComAbiValueKind.Pointer),
+            ) { managedValue: Any?, rawArgs: List<Any?> ->
+                val managed = managedValue as MutableList<Any?>
+                (rawArgs[0] as RawAddress).writeUInt32(managed.size.toUInt())
+                KnownHResults.S_OK.value
+            },
+            WinRTInspectableMethodDefinition(
+                signature = ComMethodSignature.of(ComAbiValueKind.Pointer),
+            ) { managedValue: Any?, rawArgs: List<Any?> ->
+                val managed = managedValue as MutableList<Any?>
+                val resultOut = rawArgs[0] as RawAddress
+                resultOut.writeReturnedPointer(WinRTBindableVectorViewProjection.ToAbiHelper(managed).detachReference())
+                KnownHResults.S_OK.value
+            },
+            WinRTInspectableMethodDefinition(
+                signature = ComMethodSignature.of(ComAbiValueKind.Pointer, ComAbiValueKind.Pointer, ComAbiValueKind.Pointer),
+            ) { managedValue: Any?, rawArgs: List<Any?> ->
+                val managed = managedValue as MutableList<Any?>
+                val value = WinRTBindableObjectMarshaller.fromBorrowedAbi(rawArgs[0] as RawAddress)
+                val indexOut = rawArgs[1] as RawAddress
+                val foundOut = rawArgs[2] as RawAddress
+                val index = managed.indexOf(value)
+                foundOut.writeBoolean(index >= 0)
+                indexOut.writeUInt32(if (index >= 0) index.toUInt() else 0u)
+                KnownHResults.S_OK.value
+            },
+            WinRTInspectableMethodDefinition(
+                signature = ComMethodSignature.of(ComAbiValueKind.Int32, ComAbiValueKind.Pointer),
+            ) { managedValue: Any?, rawArgs: List<Any?> ->
+                val managed = managedValue as MutableList<Any?>
+                val index = (rawArgs[0] as Int).toUInt()
+                if (index.toInt() !in managed.indices) {
+                    return@WinRTInspectableMethodDefinition KnownHResults.E_BOUNDS.value
+                }
+                managed[index.toInt()] = WinRTBindableObjectMarshaller.fromBorrowedAbi(rawArgs[1] as RawAddress)
+                KnownHResults.S_OK.value
+            },
+            WinRTInspectableMethodDefinition(
+                signature = ComMethodSignature.of(ComAbiValueKind.Int32, ComAbiValueKind.Pointer),
+            ) { managedValue: Any?, rawArgs: List<Any?> ->
+                val managed = managedValue as MutableList<Any?>
+                val index = (rawArgs[0] as Int).toUInt()
+                if (index.toInt() > managed.size) {
+                    return@WinRTInspectableMethodDefinition KnownHResults.E_BOUNDS.value
+                }
+                managed.add(index.toInt(), WinRTBindableObjectMarshaller.fromBorrowedAbi(rawArgs[1] as RawAddress))
+                KnownHResults.S_OK.value
+            },
+            WinRTInspectableMethodDefinition(
+                signature = ComMethodSignature.of(ComAbiValueKind.Int32),
+            ) { managedValue: Any?, rawArgs: List<Any?> ->
+                val managed = managedValue as MutableList<Any?>
+                val index = (rawArgs[0] as Int).toUInt()
+                if (index.toInt() !in managed.indices) {
+                    return@WinRTInspectableMethodDefinition KnownHResults.E_BOUNDS.value
+                }
+                managed.removeAt(index.toInt())
+                KnownHResults.S_OK.value
+            },
+            WinRTInspectableMethodDefinition(
+                signature = ComMethodSignature.of(ComAbiValueKind.Pointer),
+            ) { managedValue: Any?, rawArgs: List<Any?> ->
+                val managed = managedValue as MutableList<Any?>
+                managed.add(WinRTBindableObjectMarshaller.fromBorrowedAbi(rawArgs[0] as RawAddress))
+                KnownHResults.S_OK.value
+            },
+            WinRTInspectableMethodDefinition(
+                signature = ComMethodSignature.of(),
+            ) { managedValue: Any?, _: List<Any?> ->
+                val managed = managedValue as MutableList<Any?>
+                if (managed.isEmpty()) {
+                    KnownHResults.E_BOUNDS.value
+                } else {
+                    managed.removeAt(managed.lastIndex)
+                    KnownHResults.S_OK.value
+                }
+            },
+            WinRTInspectableMethodDefinition(
+                signature = ComMethodSignature.of(),
+            ) { managedValue: Any?, _: List<Any?> ->
+                val managed = managedValue as MutableList<Any?>
+                managed.clear()
+                KnownHResults.S_OK.value
+            },
+        ),
+    )
 
 private val bindableInspectableTypeHandle =
     WinRTTypeHandle("kotlin.Any?", IID.IInspectable)

@@ -232,6 +232,19 @@ internal class ObjectReferenceContext private constructor(
         return resolved.pointer
     }
 
+    /**
+     * Whether a call through the reference runs on the calling thread. Any other call, the
+     * final release included, enters the original context and waits for it to answer.
+     */
+    fun isCallableInCurrentContext(): Boolean {
+        if (callsAreFreeThreaded) {
+            return true
+        }
+        val current = WinRTPlatformApi.coGetContextTokenRaw()
+        return current.hResultValue >= 0 &&
+            PlatformAbi.pointerKey(current.pointer) == PlatformAbi.pointerKey(token)
+    }
+
     fun callInOriginalContext(
         callbackAction: () -> Unit,
         fallbackAction: () -> Unit = callbackAction,
@@ -286,11 +299,12 @@ internal class ObjectReferenceContext private constructor(
             interfaceIdLowBits: Long,
             interfaceIdHighBits: Long,
             knownInterfaceId: Guid?,
+            callsAreFreeThreaded: Boolean,
         ): ObjectReferenceContext? {
-            if (ComThreadingSupport.isFreeThreaded(pointer)) {
+            if (callsAreFreeThreaded) {
                 return null
             }
-            return capture(
+            return captureCore(
                 pointer = pointer,
                 interfaceIdLowBits = interfaceIdLowBits,
                 interfaceIdHighBits = interfaceIdHighBits,
@@ -308,7 +322,7 @@ internal class ObjectReferenceContext private constructor(
             interfaceIdLowBits: Long,
             interfaceIdHighBits: Long,
             knownInterfaceId: Guid?,
-        ): ObjectReferenceContext? = capture(
+        ): ObjectReferenceContext? = captureCore(
             pointer = pointer,
             interfaceIdLowBits = interfaceIdLowBits,
             interfaceIdHighBits = interfaceIdHighBits,
@@ -316,7 +330,7 @@ internal class ObjectReferenceContext private constructor(
             callsAreFreeThreaded = true,
         )
 
-        private fun capture(
+        private fun captureCore(
             pointer: RawComPtr,
             interfaceIdLowBits: Long,
             interfaceIdHighBits: Long,
@@ -355,10 +369,16 @@ private object DeferredContextActions {
         if (result.hResultValue < 0 || PlatformAbi.isNull(result.pointer)) {
             return
         }
-        val actions = lock.withLock {
-            actionsByContext.remove(PlatformAbi.pointerKey(result.pointer))?.toList().orEmpty()
+        val contextKey = PlatformAbi.pointerKey(result.pointer)
+        while (true) {
+            val actions = lock.withLock {
+                actionsByContext.remove(contextKey)?.toList().orEmpty()
+            }
+            if (actions.isEmpty()) return
+            // Releasing a borrowed wrapper may enqueue its native lifetime owner.
+            // Drain that owner too, without waiting for another GC or application exit.
+            actions.forEach { action -> action() }
         }
-        actions.forEach { action -> action() }
     }
 }
 
@@ -366,7 +386,7 @@ internal fun drainDeferredComReleasesForCurrentContext() {
     DeferredContextActions.drainCurrentContext()
 }
 
-private object ComThreadingSupport {
+internal object ComThreadingSupport {
     private val inProcFreeThreadedMarshaler = guidOf("0000033A-0000-0000-C000-000000000046")
 
     fun isFreeThreaded(pointer: RawComPtr): Boolean {

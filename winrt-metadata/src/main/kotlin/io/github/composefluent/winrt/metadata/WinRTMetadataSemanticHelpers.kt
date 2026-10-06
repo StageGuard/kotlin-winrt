@@ -1408,8 +1408,14 @@ class WinRTMetadataSemanticHelpers(private val model: WinRTMetadataModel) {
                 mappedTypeHasCustomMembers = mapped?.hasCustomMembersOutput == true,
             )
             interfaceType.properties.forEach { property ->
-                val getter = property.getterMethodName?.let { getterName -> interfaceType.methods.firstOrNull { it.name == getterName } }
-                val setter = property.setterMethodName?.let { setterName -> interfaceType.methods.firstOrNull { it.name == setterName } }
+                // CsWinRT get_property_methods reads MethodSemantics. Our loader
+                // normalizes accessors into the property, excluding them from methods.
+                val getter = property.getterMethodName?.let { getterName ->
+                    interfaceType.methods.firstOrNull { it.name == getterName } ?: WinRTMethodDefinition(
+                        getterName, property.typeName, isStatic = property.isStatic,
+                        methodRowId = property.getterMethodRowId, returnTypeSignature = property.type,
+                    )
+                }
                 val privateProperty = getter?.let { isImplementedAsPrivateMethod(type, interfaceType, it).isImplementedAsPrivateMethod } == true
                 val propertyName = if (privateProperty) "${interfaceType.qualifiedName}.${property.name}" else property.name
                 val platform = interfaceType.availability.contractVersion?.platformVersion
@@ -1422,12 +1428,12 @@ class WinRTMetadataSemanticHelpers(private val model: WinRTMetadataModel) {
                         isPrivate = privateProperty,
                     )
                 }
-                if (getter != null && current.getterTarget == null) {
+                if ((getter != null || property.getterMethodRowId != null) && current.getterTarget == null) {
                     current.getterTarget = target
                     current.getterPlatform = platform
                     current.getterStaticCallTarget = if (callStaticMethod) interfaceType.qualifiedName else null
                 }
-                if (setter != null && current.setterTarget == null) {
+                if ((property.setterMethodName != null || property.setterMethodRowId != null) && current.setterTarget == null) {
                     current.setterTarget = target
                     current.setterPlatform = platform
                     current.setterStaticCallTarget = if (callStaticMethod) interfaceType.qualifiedName else null
@@ -1619,7 +1625,7 @@ class WinRTMetadataSemanticHelpers(private val model: WinRTMetadataModel) {
         return WinRTSignatureWriterDescriptor(
             methodName = method.name,
             escapedMethodName = escapeIdentifier(method.name),
-            projectionReturnTypeName = method.returnType.normalized().typeName,
+            projectionReturnTypeName = method.returnTypeName.trim(),
             abiReturnTypeName = renderAbiTypeName(method.returnType),
             parameters = parameters,
             hasProjectedGenericParameters = usage.containsProjectedGenericParameter || parameterHasGeneric,
@@ -2237,7 +2243,9 @@ class WinRTMetadataSemanticHelpers(private val model: WinRTMetadataModel) {
             originalName = parameter.name,
             escapedName = escapeIdentifier(parameter.name),
             category = category,
-            projectionTypeName = parameter.type.normalized().typeName,
+            // WinMD type references have no Kotlin nullability. Keep the projection
+            // contract here; only the ABI descriptor below uses the normalized type.
+            projectionTypeName = parameter.typeName.trim(),
             abiTypeName = renderAbiTypeName(parameter.type),
             modifier = when (category) {
                 WinRTMetadataParameterCategory.Ref -> "ref"
