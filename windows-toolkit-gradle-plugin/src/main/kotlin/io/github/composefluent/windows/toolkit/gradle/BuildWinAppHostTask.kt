@@ -852,7 +852,11 @@ internal fun applicationHostSource(
         if (kotlin_winrt_vm != NULL && (*kotlin_winrt_vm)->DetachCurrentThread(kotlin_winrt_vm) != JNI_OK) {
             exit_code = 1;
         }
-        return (unsigned)exit_code;
+        // WinUI and native components can keep thread-owned HWNDs until DLL
+        // static teardown. Run normal CRT/process shutdown on their UI thread;
+        // returning here would destroy its windows before the main thread unloads
+        // those DLLs. The application host and JNI attachment are already closed.
+        exit(exit_code);
     }
 
     int wmain(int argc, wchar_t **wargv) {
